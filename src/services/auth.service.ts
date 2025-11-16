@@ -12,7 +12,7 @@ export class AuthService {
       const { email, password, fullName, country } = registerData;
 
       // Check if user already exists
-      const { data: existingUser, error: checkError } = await supabase
+      const { data: existingUser } = await supabase
         .from('users')
         .select('id, email')
         .eq('email', email.toLowerCase())

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z, ZodError } from 'zod';
-import { RegisterRequest } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse } from '../types/api/auth.types';
 
 // Registration validation schema
 const registerSchema = z
