@@ -1,5 +1,5 @@
 import { supabase, supabaseAdmin } from '../config/supabase';
-import { RegisterRequest, RegisterResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse } from '../types/api/auth.types';
 
 export class AuthService {
   /**
@@ -35,11 +35,12 @@ export class AuthService {
         };
       }
 
-      // Create user in Supabase Auth
+      // Create user in Supabase Auth with email confirmation
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.toLowerCase(),
         password: password,
         options: {
+          emailRedirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/verify-email`,
           data: {
             full_name: fullName,
             country: country,
@@ -89,9 +90,14 @@ export class AuthService {
         };
       }
 
+      // Check if email verification is required
+      const emailVerified = authData.user?.email_confirmed_at !== null;
+
       return {
         success: true,
-        message: 'User registered successfully',
+        message: emailVerified
+          ? 'User registered successfully'
+          : 'User registered successfully. Please check your email to verify your account before logging in.',
         data: {
           user: {
             id: profileData.id,
@@ -99,6 +105,87 @@ export class AuthService {
             fullName: profileData.full_name,
             country: profileData.country,
           },
+          emailVerificationRequired: !emailVerified,
+        },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return {
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  /**
+   * Login a user
+   * @param loginData - User login credentials
+   * @returns Login response with user data and tokens or error
+   */
+  async login(loginData: LoginRequest): Promise<LoginResponse> {
+    try {
+      const { email, password } = loginData;
+
+      // Attempt to sign in
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase(),
+        password: password,
+      });
+
+      if (authError) {
+        return {
+          success: false,
+          message: authError.message || 'Invalid email or password',
+          error: 'Authentication failed',
+        };
+      }
+
+      if (!authData.user) {
+        return {
+          success: false,
+          message: 'Failed to authenticate user',
+          error: 'No user data returned',
+        };
+      }
+
+      // Check if email is verified
+      if (!authData.user.email_confirmed_at) {
+        return {
+          success: false,
+          message: 'Please verify your email before logging in. Check your inbox for the verification link.',
+          error: 'Email not verified',
+          emailVerificationRequired: true,
+        };
+      }
+
+      // Get user profile from database
+      const { data: profileData, error: profileError } = await supabase
+        .from('users')
+        .select('id, email, full_name, country')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError || !profileData) {
+        return {
+          success: false,
+          message: 'User profile not found',
+          error: 'Profile error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Login successful',
+        data: {
+          user: {
+            id: profileData.id,
+            email: profileData.email,
+            fullName: profileData.full_name,
+            country: profileData.country,
+          },
+          accessToken: authData.session?.access_token,
+          refreshToken: authData.session?.refresh_token,
         },
       };
     } catch (error) {

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z, ZodError } from 'zod';
-import { RegisterRequest, RegisterResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse } from '../types/api/auth.types';
 
 // Registration validation schema
 const registerSchema = z
@@ -42,6 +42,38 @@ export const validateRegister = (
 ): void => {
   try {
     registerSchema.parse(req.body);
+    next();
+  } catch (error) {
+    if (error instanceof ZodError) {
+      const firstError = error.errors[0];
+      res.status(400).json({
+        success: false,
+        message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid request data',
+        error: 'Validation failed',
+      });
+    }
+  }
+};
+
+// Login validation schema
+const loginSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(1, 'Password is required'),
+});
+
+export const validateLogin = (
+  req: Request<{}, LoginResponse, LoginRequest>,
+  res: Response<LoginResponse>,
+  next: NextFunction
+): void => {
+  try {
+    loginSchema.parse(req.body);
     next();
   } catch (error) {
     if (error instanceof ZodError) {
