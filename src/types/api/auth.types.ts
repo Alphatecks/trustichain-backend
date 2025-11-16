@@ -3,7 +3,8 @@ export interface RegisterRequest {
   fullName: string;
   password: string;
   confirmPassword: string;
-  country: string;
+  agreeToTerms: boolean;
+  country?: string; // Optional, not shown in UI but may be needed for compliance
 }
 
 export interface RegisterResponse {

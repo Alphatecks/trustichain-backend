@@ -19,10 +19,16 @@ const registerSchema = z
       .regex(/[0-9]/, 'Password must contain at least one number')
       .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
     confirmPassword: z.string(),
+    agreeToTerms: z
+      .boolean()
+      .refine((val) => val === true, {
+        message: 'You must agree to the terms and conditions',
+      }),
     country: z
       .string()
       .min(2, 'Country code must be at least 2 characters')
-      .max(100, 'Country name must be less than 100 characters'),
+      .max(100, 'Country name must be less than 100 characters')
+      .optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords don't match",

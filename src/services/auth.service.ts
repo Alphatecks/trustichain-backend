@@ -9,7 +9,16 @@ export class AuthService {
    */
   async register(registerData: RegisterRequest): Promise<RegisterResponse> {
     try {
-      const { email, password, fullName, country } = registerData;
+      const { email, password, fullName, country, agreeToTerms } = registerData;
+
+      // Terms and conditions are validated in middleware, but double-check here
+      if (!agreeToTerms) {
+        return {
+          success: false,
+          message: 'You must agree to the terms and conditions',
+          error: 'Terms not accepted',
+        };
+      }
 
       // Check if user already exists
       const { data: existingUser } = await supabase
@@ -61,7 +70,7 @@ export class AuthService {
           id: authData.user.id,
           email: email.toLowerCase(),
           full_name: fullName,
-          country: country,
+          country: country || null, // Handle optional country
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })

@@ -68,9 +68,11 @@ The API will be available at `http://localhost:3000`
   "fullName": "John Doe",
   "password": "SecurePass123!",
   "confirmPassword": "SecurePass123!",
+  "agreeToTerms": true,
   "country": "United States"
 }
 ```
+- **Note:** `country` is optional. `agreeToTerms` must be `true`.
 - **Response:**
 ```json
 {
@@ -129,7 +131,8 @@ NODE_ENV=development
   - At least one number
   - At least one special character
 - **confirmPassword**: Must match password
-- **country**: 2-100 characters
+- **agreeToTerms**: Must be `true` (required)
+- **country**: 2-100 characters (optional)
 
 ## Development
 
