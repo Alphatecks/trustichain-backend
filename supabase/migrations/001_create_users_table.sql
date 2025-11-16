@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL UNIQUE,
   full_name TEXT NOT NULL,
-  country TEXT NOT NULL,
+  country TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -28,6 +28,14 @@ CREATE POLICY "Users can update own profile"
   ON users
   FOR UPDATE
   USING (auth.uid() = id);
+
+-- Create policy: Allow inserts during registration
+-- This allows inserts when the id matches the authenticated user (after signUp)
+-- Service role key bypasses RLS entirely, so this is for anon key fallback
+CREATE POLICY "Allow user registration"
+  ON users
+  FOR INSERT
+  WITH CHECK (auth.uid() = id);
 
 -- Create function to automatically update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

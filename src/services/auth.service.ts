@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { RegisterRequest, RegisterResponse } from '../types/api/auth.types';
 
 export class AuthService {
@@ -64,7 +64,9 @@ export class AuthService {
       }
 
       // Create user profile in database
-      const { data: profileData, error: profileError } = await supabase
+      // Use admin client to bypass RLS for server-side registration
+      const adminClient = supabaseAdmin || supabase;
+      const { data: profileData, error: profileError } = await adminClient
         .from('users')
         .insert({
           id: authData.user.id,
