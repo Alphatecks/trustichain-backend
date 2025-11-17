@@ -1,31 +1,12 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Gmail SMTP configuration with timeout settings
-// Try port 465 (SSL) first, fallback to 587 (TLS)
-const createTransporter = (useSSL = true) => {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    host: 'smtp.gmail.com',
-    port: useSSL ? 465 : 587,
-    secure: useSSL, // true for 465, false for 587
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD, // Use App Password, not regular password
-    },
-    connectionTimeout: 15000, // 15 seconds
-    greetingTimeout: 15000, // 15 seconds
-    socketTimeout: 15000, // 15 seconds
-    tls: {
-      rejectUnauthorized: false, // Allow self-signed certificates if needed
-      ciphers: 'SSLv3',
-    },
-    debug: process.env.NODE_ENV === 'development', // Enable debug in dev
-    logger: process.env.NODE_ENV === 'development', // Enable logging in dev
-  });
-};
+// Initialize Resend client
+const resend = process.env.RESEND_API_KEY 
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
 
 export class EmailService {
   /**
@@ -40,8 +21,14 @@ export class EmailService {
     fullName: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-        const errorMsg = `Gmail credentials not configured. GMAIL_USER: ${!!process.env.GMAIL_USER}, GMAIL_APP_PASSWORD: ${!!process.env.GMAIL_APP_PASSWORD}`;
+      if (!resend) {
+        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
         console.error(errorMsg);
         throw new Error(errorMsg);
       }
@@ -51,46 +38,11 @@ export class EmailService {
       const verificationLink = `${backendUrl}/api/auth/verify-email?token=${verificationToken}`;
 
       console.log(`Attempting to send verification email to: ${email}`);
-      console.log(`Using Gmail user: ${process.env.GMAIL_USER}`);
+      console.log(`Using Resend from: ${process.env.RESEND_FROM_EMAIL}`);
       console.log(`Backend URL: ${backendUrl}`);
 
-      // Try SSL first (port 465), then fallback to TLS (port 587)
-      let transporter = createTransporter(true); // Try SSL first
-      let connectionWorked = false;
-
-      // Try SSL connection first
-      try {
-        console.log('Trying Gmail SMTP with SSL (port 465)...');
-        await Promise.race([
-          transporter.verify(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('SMTP verification timeout')), 15000)
-          )
-        ]);
-        console.log('Gmail SMTP connection verified successfully (SSL)');
-        connectionWorked = true;
-      } catch (sslError) {
-        console.warn('SSL connection failed, trying TLS (port 587)...', sslError);
-        // Try TLS instead
-        transporter = createTransporter(false);
-        try {
-          await Promise.race([
-            transporter.verify(),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('SMTP verification timeout')), 15000)
-            )
-          ]);
-          console.log('Gmail SMTP connection verified successfully (TLS)');
-          connectionWorked = true;
-        } catch (tlsError) {
-          console.error('Both SSL and TLS connections failed:', tlsError);
-          // Continue anyway - sometimes verify fails but sending works
-          console.warn('Continuing with email send despite verification failure...');
-        }
-      }
-
-      const mailOptions = {
-        from: `"TrustiChain" <${process.env.GMAIL_USER}>`,
+      const { data, error } = await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: 'Verify Your TrustiChain Account',
         html: `
@@ -145,21 +97,16 @@ export class EmailService {
           
           © ${new Date().getFullYear()} TrustiChain. All rights reserved.
         `,
-      };
+      });
 
-      // Send email with timeout protection
-      const info = await Promise.race([
-        transporter.sendMail(mailOptions),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000)
-        )
-      ]) as any;
-      
-      console.log('Verification email sent successfully:', {
-        messageId: info.messageId,
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+
+      console.log('Verification email sent successfully via Resend:', {
+        id: data?.id,
         to: email,
-        accepted: info.accepted,
-        rejected: info.rejected,
       });
 
       return { success: true };
