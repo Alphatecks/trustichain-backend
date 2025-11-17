@@ -76,6 +76,36 @@ export class AuthController {
       });
     }
   }
+
+  /**
+   * Verify user email via GET (for direct link clicks)
+   * GET /api/auth/verify-email?token=xxx
+   */
+  async verifyEmailGet(req: Request, res: Response): Promise<void> {
+    try {
+      const token = req.query.token as string;
+
+      if (!token) {
+        // Redirect to frontend with error
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        return res.redirect(`${frontendUrl}/auth/verify-email?error=missing_token`);
+      }
+
+      const result = await authService.verifyEmail({ token });
+
+      // Redirect to frontend with success/error status
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      if (result.success) {
+        res.redirect(`${frontendUrl}/auth/verify-email?success=true`);
+      } else {
+        res.redirect(`${frontendUrl}/auth/verify-email?error=${encodeURIComponent(result.message)}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      res.redirect(`${frontendUrl}/auth/verify-email?error=${encodeURIComponent(errorMessage)}`);
+    }
+  }
 }
 
 export const authController = new AuthController();

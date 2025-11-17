@@ -26,12 +26,22 @@ router.post('/login', validateLogin, (req, res) => {
 
 /**
  * @route   POST /api/auth/verify-email
- * @desc    Verify user email with token
+ * @desc    Verify user email with token (API call)
  * @access  Public
  * @body    { token }
  */
 router.post('/verify-email', (req, res) => {
   authController.verifyEmail(req, res);
+});
+
+/**
+ * @route   GET /api/auth/verify-email?token=xxx
+ * @desc    Verify user email via link click (redirects to frontend)
+ * @access  Public
+ * @query   token - Verification token from email
+ */
+router.get('/verify-email', (req, res) => {
+  authController.verifyEmailGet(req, res);
 });
 
 export default router;

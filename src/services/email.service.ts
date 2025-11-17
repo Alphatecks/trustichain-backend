@@ -31,8 +31,9 @@ export class EmailService {
         throw new Error('Gmail credentials not configured');
       }
 
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const verificationLink = `${frontendUrl}/auth/verify-email?token=${verificationToken}`;
+      const backendUrl = process.env.BACKEND_URL || process.env.RENDER_URL || 'http://localhost:3000';
+      // Link goes to backend GET endpoint, which verifies and redirects to frontend
+      const verificationLink = `${backendUrl}/api/auth/verify-email?token=${verificationToken}`;
 
       const transporter = createTransporter();
 
