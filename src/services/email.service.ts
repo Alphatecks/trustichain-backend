@@ -28,14 +28,29 @@ export class EmailService {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-        throw new Error('Gmail credentials not configured');
+        const errorMsg = `Gmail credentials not configured. GMAIL_USER: ${!!process.env.GMAIL_USER}, GMAIL_APP_PASSWORD: ${!!process.env.GMAIL_APP_PASSWORD}`;
+        console.error(errorMsg);
+        throw new Error(errorMsg);
       }
 
       const backendUrl = process.env.BACKEND_URL || process.env.RENDER_URL || 'http://localhost:3000';
       // Link goes to backend GET endpoint, which verifies and redirects to frontend
       const verificationLink = `${backendUrl}/api/auth/verify-email?token=${verificationToken}`;
 
+      console.log(`Attempting to send verification email to: ${email}`);
+      console.log(`Using Gmail user: ${process.env.GMAIL_USER}`);
+      console.log(`Backend URL: ${backendUrl}`);
+
       const transporter = createTransporter();
+
+      // Verify transporter connection
+      try {
+        await transporter.verify();
+        console.log('Gmail SMTP connection verified successfully');
+      } catch (verifyError) {
+        console.error('Gmail SMTP verification failed:', verifyError);
+        throw new Error(`Gmail SMTP connection failed: ${verifyError instanceof Error ? verifyError.message : 'Unknown error'}`);
+      }
 
       const mailOptions = {
         from: `"TrustiChain" <${process.env.GMAIL_USER}>`,
@@ -95,7 +110,14 @@ export class EmailService {
         `,
       };
 
-      await transporter.sendMail(mailOptions);
+      const info = await transporter.sendMail(mailOptions);
+      
+      console.log('Verification email sent successfully:', {
+        messageId: info.messageId,
+        to: email,
+        accepted: info.accepted,
+        rejected: info.rejected,
+      });
 
       return { success: true };
     } catch (error) {

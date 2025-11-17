@@ -142,7 +142,20 @@ export class AuthService {
 
       if (!emailResult.success) {
         console.error('Failed to send verification email:', emailResult.error);
-        // User is created, but email failed - they can request resend
+        // Return error so user knows email failed
+        return {
+          success: false,
+          message: `User account created, but failed to send verification email: ${emailResult.error}. Please contact support.`,
+          error: 'Email sending failed',
+          data: {
+            user: {
+              id: profileData.id,
+              email: profileData.email,
+              fullName: profileData.full_name,
+              country: profileData.country,
+            },
+          },
+        };
       }
 
       return {
