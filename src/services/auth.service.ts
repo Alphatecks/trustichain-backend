@@ -118,8 +118,7 @@ export class AuthService {
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 24); // Token expires in 24 hours
 
-      // Store verification token in database
-      const adminClient = supabaseAdmin || supabase;
+      // Store verification token in database (reuse adminClient from above)
       const { error: tokenError } = await adminClient
         .from('email_verification_tokens')
         .insert({
