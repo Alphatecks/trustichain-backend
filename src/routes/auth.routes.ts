@@ -44,6 +44,25 @@ router.get('/verify-email', (req, res) => {
   authController.verifyEmailGet(req, res);
 });
 
+/**
+ * @route   GET /api/auth/google
+ * @desc    Get Google OAuth URL for sign-in
+ * @access  Public
+ */
+router.get('/google', (req, res) => {
+  authController.getGoogleOAuthUrl(req, res);
+});
+
+/**
+ * @route   GET /api/auth/google/callback?code=xxx
+ * @desc    Handle Google OAuth callback
+ * @access  Public
+ * @query   code - OAuth authorization code from Google
+ */
+router.get('/google/callback', (req, res) => {
+  authController.handleGoogleOAuthCallback(req, res);
+});
+
 export default router;
 
 

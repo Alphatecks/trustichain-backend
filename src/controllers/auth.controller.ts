@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse } from '../types/api/auth.types';
 
 export class AuthController {
   /**
@@ -394,7 +394,59 @@ export class AuthController {
     </div>
 </body>
 </html>
-    `;
+      `;
+  }
+
+  /**
+   * Get Google OAuth URL
+   * GET /api/auth/google
+   */
+  async getGoogleOAuthUrl(_req: Request, res: Response<GoogleOAuthResponse>): Promise<void> {
+    try {
+      const result = await authService.getGoogleOAuthUrl();
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Handle Google OAuth callback
+   * GET /api/auth/google/callback?code=xxx
+   */
+  async handleGoogleOAuthCallback(req: Request, res: Response): Promise<void> {
+    try {
+      const code = req.query.code as string;
+
+      if (!code) {
+        return res.status(400).send(this.getErrorPage('Missing Authorization Code', 'The Google OAuth callback is missing the authorization code. Please try signing in again.'));
+      }
+
+      const result = await authService.handleGoogleOAuthCallback(code);
+
+      if (result.success && result.data) {
+        // Redirect to frontend with tokens (or show success page)
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        // Store tokens in URL hash or use a different method for security
+        // For now, redirect to frontend with success
+        res.redirect(`${frontendUrl}/auth/callback?success=true&provider=google`);
+      } else {
+        res.status(400).send(this.getErrorPage('Google Sign-In Failed', result.message || 'Unable to sign in with Google.'));
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).send(this.getErrorPage('Error', errorMessage));
+    }
   }
 }
 

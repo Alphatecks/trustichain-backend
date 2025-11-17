@@ -54,4 +54,29 @@ export interface VerifyEmailResponse {
   error?: string;
 }
 
+export interface GoogleOAuthResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    url: string; // OAuth URL to redirect to
+  };
+  error?: string;
+}
+
+export interface GoogleOAuthCallbackResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    user: {
+      id: string;
+      email: string;
+      fullName: string;
+      country: string | null;
+    };
+    accessToken?: string;
+    refreshToken?: string;
+  };
+  error?: string;
+}
+
 
