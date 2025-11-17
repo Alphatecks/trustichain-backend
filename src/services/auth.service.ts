@@ -1,5 +1,7 @@
 import { supabase, supabaseAdmin } from '../config/supabase';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse } from '../types/api/auth.types';
+import { emailService } from './email.service';
+import crypto from 'crypto';
 
 export class AuthService {
   /**
@@ -35,18 +37,39 @@ export class AuthService {
         };
       }
 
-      // Create user in Supabase Auth with email confirmation
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.toLowerCase(),
-        password: password,
-        options: {
-          emailRedirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/verify-email`,
-          data: {
+      // Create user in Supabase Auth using admin client to disable automatic email
+      // We'll send verification email via Gmail instead
+      let authData;
+      let authError;
+
+      if (supabaseAdmin) {
+        // Use admin client to create user without sending email
+        const result = await supabaseAdmin.auth.admin.createUser({
+          email: email.toLowerCase(),
+          password: password,
+          email_confirm: false, // Don't auto-confirm, require verification
+          user_metadata: {
             full_name: fullName,
             country: country,
           },
-        },
-      });
+        });
+        authData = { user: result.data.user, session: null };
+        authError = result.error;
+      } else {
+        // Fallback to regular signUp (Supabase will still send email, but we'll send ours too)
+        const result = await supabase.auth.signUp({
+          email: email.toLowerCase(),
+          password: password,
+          options: {
+            data: {
+              full_name: fullName,
+              country: country,
+            },
+          },
+        });
+        authData = result.data;
+        authError = result.error;
+      }
 
       if (authError) {
         return {
@@ -90,14 +113,42 @@ export class AuthService {
         };
       }
 
-      // Check if email verification is required
-      const emailVerified = authData.user?.email_confirmed_at !== null;
+      // Generate verification token
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24); // Token expires in 24 hours
+
+      // Store verification token in database
+      const adminClient = supabaseAdmin || supabase;
+      const { error: tokenError } = await adminClient
+        .from('email_verification_tokens')
+        .insert({
+          user_id: authData.user.id,
+          token: verificationToken,
+          expires_at: expiresAt.toISOString(),
+          used: false,
+        });
+
+      if (tokenError) {
+        console.error('Failed to create verification token:', tokenError);
+        // Continue anyway, user can request resend
+      }
+
+      // Send verification email via Gmail
+      const emailResult = await emailService.sendVerificationEmail(
+        email.toLowerCase(),
+        verificationToken,
+        fullName
+      );
+
+      if (!emailResult.success) {
+        console.error('Failed to send verification email:', emailResult.error);
+        // User is created, but email failed - they can request resend
+      }
 
       return {
         success: true,
-        message: emailVerified
-          ? 'User registered successfully'
-          : 'User registered successfully. Please check your email to verify your account before logging in.',
+        message: 'User registered successfully. Please check your email to verify your account before logging in.',
         data: {
           user: {
             id: profileData.id,
@@ -105,7 +156,7 @@ export class AuthService {
             fullName: profileData.full_name,
             country: profileData.country,
           },
-          emailVerificationRequired: !emailVerified,
+          emailVerificationRequired: true,
         },
       };
     } catch (error) {
@@ -187,6 +238,95 @@ export class AuthService {
           accessToken: authData.session?.access_token,
           refreshToken: authData.session?.refresh_token,
         },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return {
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  /**
+   * Verify user email using verification token
+   * @param verifyData - Verification token
+   * @returns Verification response
+   */
+  async verifyEmail(verifyData: VerifyEmailRequest): Promise<VerifyEmailResponse> {
+    try {
+      const { token } = verifyData;
+
+      if (!token) {
+        return {
+          success: false,
+          message: 'Verification token is required',
+          error: 'Invalid token',
+        };
+      }
+
+      // Find verification token in database
+      const adminClient = supabaseAdmin || supabase;
+      const { data: tokenData, error: tokenError } = await adminClient
+        .from('email_verification_tokens')
+        .select('*')
+        .eq('token', token)
+        .eq('used', false)
+        .single();
+
+      if (tokenError || !tokenData) {
+        return {
+          success: false,
+          message: 'Invalid or expired verification token',
+          error: 'Token not found',
+        };
+      }
+
+      // Check if token has expired
+      const now = new Date();
+      const expiresAt = new Date(tokenData.expires_at);
+      if (now > expiresAt) {
+        return {
+          success: false,
+          message: 'Verification token has expired. Please request a new one.',
+          error: 'Token expired',
+        };
+      }
+
+      // Mark token as used
+      await adminClient
+        .from('email_verification_tokens')
+        .update({ used: true })
+        .eq('id', tokenData.id);
+
+      // Verify email in Supabase Auth
+      if (supabaseAdmin) {
+        const { error: verifyError } = await supabaseAdmin.auth.admin.updateUserById(
+          tokenData.user_id,
+          { email_confirm: true }
+        );
+
+        if (verifyError) {
+          return {
+            success: false,
+            message: verifyError.message || 'Failed to verify email',
+            error: 'Verification failed',
+          };
+        }
+      } else {
+        // Fallback: user needs to verify via Supabase's own system
+        // This shouldn't happen if admin client is configured
+        return {
+          success: false,
+          message: 'Email verification service not properly configured',
+          error: 'Configuration error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Email verified successfully! You can now log in.',
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';

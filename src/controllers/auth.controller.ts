@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse } from '../types/api/auth.types';
 
 export class AuthController {
   /**
@@ -42,6 +42,30 @@ export class AuthController {
         // Return 403 if email not verified, 401 for other auth failures
         const statusCode = result.emailVerificationRequired ? 403 : 401;
         res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Verify user email
+   * POST /api/auth/verify-email
+   */
+  async verifyEmail(req: Request<{}, VerifyEmailResponse, VerifyEmailRequest>, res: Response<VerifyEmailResponse>): Promise<void> {
+    try {
+      const verifyData: VerifyEmailRequest = req.body;
+      const result = await authService.verifyEmail(verifyData);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';

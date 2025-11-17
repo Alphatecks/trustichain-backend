@@ -44,4 +44,14 @@ export interface LoginResponse {
   emailVerificationRequired?: boolean;
 }
 
+export interface VerifyEmailRequest {
+  token: string;
+}
+
+export interface VerifyEmailResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 
