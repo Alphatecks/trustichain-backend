@@ -3,14 +3,27 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Gmail SMTP configuration
-const createTransporter = () => {
+// Gmail SMTP configuration with timeout settings
+// Try port 465 (SSL) first, fallback to 587 (TLS)
+const createTransporter = (useSSL = true) => {
   return nodemailer.createTransport({
     service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: useSSL ? 465 : 587,
+    secure: useSSL, // true for 465, false for 587
     auth: {
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASSWORD, // Use App Password, not regular password
     },
+    connectionTimeout: 15000, // 15 seconds
+    greetingTimeout: 15000, // 15 seconds
+    socketTimeout: 15000, // 15 seconds
+    tls: {
+      rejectUnauthorized: false, // Allow self-signed certificates if needed
+      ciphers: 'SSLv3',
+    },
+    debug: process.env.NODE_ENV === 'development', // Enable debug in dev
+    logger: process.env.NODE_ENV === 'development', // Enable logging in dev
   });
 };
 
@@ -41,15 +54,39 @@ export class EmailService {
       console.log(`Using Gmail user: ${process.env.GMAIL_USER}`);
       console.log(`Backend URL: ${backendUrl}`);
 
-      const transporter = createTransporter();
+      // Try SSL first (port 465), then fallback to TLS (port 587)
+      let transporter = createTransporter(true); // Try SSL first
+      let connectionWorked = false;
 
-      // Verify transporter connection
+      // Try SSL connection first
       try {
-        await transporter.verify();
-        console.log('Gmail SMTP connection verified successfully');
-      } catch (verifyError) {
-        console.error('Gmail SMTP verification failed:', verifyError);
-        throw new Error(`Gmail SMTP connection failed: ${verifyError instanceof Error ? verifyError.message : 'Unknown error'}`);
+        console.log('Trying Gmail SMTP with SSL (port 465)...');
+        await Promise.race([
+          transporter.verify(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('SMTP verification timeout')), 15000)
+          )
+        ]);
+        console.log('Gmail SMTP connection verified successfully (SSL)');
+        connectionWorked = true;
+      } catch (sslError) {
+        console.warn('SSL connection failed, trying TLS (port 587)...', sslError);
+        // Try TLS instead
+        transporter = createTransporter(false);
+        try {
+          await Promise.race([
+            transporter.verify(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('SMTP verification timeout')), 15000)
+            )
+          ]);
+          console.log('Gmail SMTP connection verified successfully (TLS)');
+          connectionWorked = true;
+        } catch (tlsError) {
+          console.error('Both SSL and TLS connections failed:', tlsError);
+          // Continue anyway - sometimes verify fails but sending works
+          console.warn('Continuing with email send despite verification failure...');
+        }
       }
 
       const mailOptions = {
@@ -110,7 +147,13 @@ export class EmailService {
         `,
       };
 
-      const info = await transporter.sendMail(mailOptions);
+      // Send email with timeout protection
+      const info = await Promise.race([
+        transporter.sendMail(mailOptions),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000)
+        )
+      ]) as any;
       
       console.log('Verification email sent successfully:', {
         messageId: info.messageId,
