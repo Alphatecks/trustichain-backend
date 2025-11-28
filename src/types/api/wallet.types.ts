@@ -1,0 +1,67 @@
+/**
+ * Wallet API Types
+ */
+
+export interface FundWalletRequest {
+  amount: number;
+  currency: 'USD' | 'XRP';
+}
+
+export interface FundWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    amount: {
+      usd: number;
+      xrp: number;
+    };
+    xrplTxHash?: string;
+    status: string;
+  };
+  error?: string;
+}
+
+export interface WithdrawWalletRequest {
+  amount: number;
+  currency: 'USD' | 'XRP';
+  destinationAddress: string;
+}
+
+export interface WithdrawWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    amount: {
+      usd: number;
+      xrp: number;
+    };
+    xrplTxHash?: string;
+    status: string;
+  };
+  error?: string;
+}
+
+export interface WalletTransaction {
+  id: string;
+  type: 'deposit' | 'withdrawal' | 'escrow_create' | 'escrow_release' | 'escrow_cancel' | 'transfer';
+  amount: {
+    usd: number;
+    xrp: number;
+  };
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  xrplTxHash?: string;
+  description?: string;
+  createdAt: string;
+}
+
+export interface WalletTransactionsResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactions: WalletTransaction[];
+    total: number;
+  };
+  error?: string;
+}

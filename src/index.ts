@@ -2,6 +2,13 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes';
+import dashboardRoutes from './routes/dashboard.routes';
+import walletRoutes from './routes/wallet.routes';
+import escrowRoutes from './routes/escrow.routes';
+import trustiscoreRoutes from './routes/trustiscore.routes';
+import portfolioRoutes from './routes/portfolio.routes';
+import exchangeRoutes from './routes/exchange.routes';
+import userRoutes from './routes/user.routes';
 
 dotenv.config();
 
@@ -24,6 +31,13 @@ app.get('/health', (_req: Request, res: Response) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/escrow', escrowRoutes);
+app.use('/api/trustiscore', trustiscoreRoutes);
+app.use('/api/portfolio', portfolioRoutes);
+app.use('/api/exchange', exchangeRoutes);
+app.use('/api/user', userRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
