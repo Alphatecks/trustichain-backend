@@ -436,12 +436,18 @@ export class AuthController {
    */
   async handleGoogleOAuthCallback(req: Request, res: Response): Promise<void> {
     try {
+      // Log all query parameters for debugging
+      console.log('OAuth Callback - Query params:', JSON.stringify(req.query));
+      console.log('OAuth Callback - Full URL:', req.url);
+      
       const code = req.query.code as string;
       const error = req.query.error as string;
       const errorDescription = req.query.error_description as string;
+      const state = req.query.state as string;
 
       // Check if Google returned an error
       if (error) {
+        console.error('OAuth Error:', error, errorDescription);
         const errorMsg = errorDescription || error || 'Google OAuth authentication was cancelled or failed.';
         res.status(400).send(this.getErrorPage('Google Sign-In Cancelled', errorMsg));
         return;
@@ -449,10 +455,14 @@ export class AuthController {
 
       // Check if code is missing
       if (!code) {
-        // Redirect to frontend sign-in page with error, or show error page
+        console.error('Missing authorization code. Query params:', req.query);
+        // Show more detailed error with debugging info
+        const debugInfo = process.env.NODE_ENV === 'development' 
+          ? `<br><br><small>Debug: URL=${req.url}, Params=${JSON.stringify(req.query)}</small>`
+          : '';
         res.status(400).send(this.getErrorPage(
           'Missing Authorization Code',
-          'The Google OAuth callback is missing the authorization code. Please make sure you complete the Google sign-in process. <a href="/api/auth/google" style="color: #667eea;">Try again</a>.'
+          `The Google OAuth callback is missing the authorization code. Please make sure you complete the Google sign-in process.${debugInfo}<br><br><a href="/api/auth/google" style="color: #667eea;">Try again</a>.`
         ));
         return;
       }

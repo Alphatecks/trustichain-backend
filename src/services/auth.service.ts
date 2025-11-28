@@ -360,6 +360,9 @@ export class AuthService {
       const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'http://localhost:3000';
       const redirectUrl = `${baseUrl}/api/auth/google/callback`;
 
+      console.log('Generating Google OAuth URL with redirectTo:', redirectUrl);
+      console.log('Base URL from env:', { RENDER_URL: process.env.RENDER_URL, BACKEND_URL: process.env.BACKEND_URL });
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
