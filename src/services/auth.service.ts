@@ -356,7 +356,9 @@ export class AuthService {
    */
   async getGoogleOAuthUrl(): Promise<GoogleOAuthResponse> {
     try {
-      const redirectUrl = `${process.env.BACKEND_URL || process.env.RENDER_URL || 'http://localhost:3000'}/api/auth/google/callback`;
+      // Prioritize RENDER_URL for Render deployments, then BACKEND_URL, then localhost for development
+      const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'http://localhost:3000';
+      const redirectUrl = `${baseUrl}/api/auth/google/callback`;
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
