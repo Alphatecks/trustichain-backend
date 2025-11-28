@@ -467,14 +467,51 @@ export class AuthController {
         console.error('State parameter:', state);
         console.error('Error parameter:', error);
         console.error('Full request URL:', req.url);
+        console.error('Original URL:', req.originalUrl);
+        
+        // Check if code might be in URL hash (some OAuth flows use hash fragments)
+        const fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
+        console.error('Full absolute URL:', fullUrl);
+        
+        // Get the base URL for Site URL configuration
+        const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'https://trustichain-backend.onrender.com';
+        const callbackUrl = `${baseUrl}/api/auth/google/callback`;
+        
+        // Configuration error message
+        const configMessage = `
+          <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: #856404;">Configuration Required</h3>
+            <p style="color: #856404; margin-bottom: 10px;">
+              The authorization code is missing. This usually means the <strong>Site URL</strong> or <strong>Redirect URLs</strong> are not properly configured in Supabase Dashboard.
+            </p>
+            <p style="color: #856404; margin-bottom: 10px;"><strong>Please verify BOTH settings:</strong></p>
+            <ol style="color: #856404; margin-left: 20px;">
+              <li>Go to your <a href="https://app.supabase.com" target="_blank" style="color: #667eea;">Supabase Dashboard</a></li>
+              <li>Navigate to <strong>Authentication → URL Configuration</strong></li>
+              <li><strong>Set Site URL</strong> to (base URL, no path):
+                <br><code style="background: #f8f9fa; padding: 5px; border-radius: 3px; display: inline-block; margin-top: 5px; font-weight: bold;">${baseUrl}</code>
+                <br><small style="color: #666;">This is critical - it must match your application's base URL</small>
+              </li>
+              <li><strong>Add to Redirect URLs</strong> (specific callback endpoint):
+                <br><code style="background: #f8f9fa; padding: 5px; border-radius: 3px; display: inline-block; margin-top: 5px;">${callbackUrl}</code>
+              </li>
+              <li>Click <strong>Save</strong></li>
+              <li>Wait a few seconds for changes to propagate, then try again</li>
+            </ol>
+            <p style="color: #856404; margin-top: 15px; margin-bottom: 0;">
+              <strong>Important:</strong> The Site URL is the base URL of your application. The Redirect URL is the specific callback endpoint. Both must be configured correctly.
+            </p>
+          </div>
+        `;
         
         // Show more detailed error with debugging info
         const debugInfo = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'production'
-          ? `<br><br><small>Debug Info:<br>URL: ${req.url}<br>Params: ${JSON.stringify(req.query, null, 2)}<br>State: ${state || 'none'}</small>`
+          ? `<br><br><small style="color: #666;">Debug Info:<br>URL: ${req.originalUrl}<br>Params: ${JSON.stringify(req.query, null, 2)}<br>State: ${state || 'none'}</small>`
           : '';
+        
         res.status(400).send(this.getErrorPage(
           'Missing Authorization Code',
-          `The Google OAuth callback is missing the authorization code. Please make sure you complete the Google sign-in process.${debugInfo}<br><br><a href="/api/auth/google" style="color: #667eea;">Try again</a>.`
+          `The Google OAuth callback is missing the authorization code.${configMessage}${debugInfo}<br><br><a href="/api/auth/google" style="color: #667eea; text-decoration: none; font-weight: bold;">Try again</a>.`
         ));
         return;
       }

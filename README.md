@@ -153,10 +153,14 @@ RENDER_URL=https://your-app.onrender.com
 5. Enable Google provider
 6. Enter your **Client ID** and **Client Secret** from Google Cloud Console
 7. Go to **Authentication** → **URL Configuration**
-8. Add **Redirect URLs** (must match exactly):
+8. **CRITICAL: Set Site URL** to your base URL (no path):
+   - For production: `https://trustichain-backend.onrender.com`
+   - For local dev: `http://localhost:3000`
+   - This must match your application's base URL exactly
+9. **Add Redirect URLs** (must match exactly):
    - `http://localhost:3000/api/auth/google/callback` (for local dev)
-   - `https://your-app.onrender.com/api/auth/google/callback` (for Render)
-9. Set **Site URL** to your Render URL: `https://your-app.onrender.com`
+   - `https://trustichain-backend.onrender.com/api/auth/google/callback` (for Render)
+10. Click **Save** and wait a few seconds for changes to propagate
 
 ### Step 3: Configure Render Environment Variables
 
@@ -188,6 +192,46 @@ Ensure these three places have **exactly the same** redirect URL:
 3. **Your code** → Constructed from `RENDER_URL` or `BACKEND_URL` environment variable
 
 The redirect URL format: `https://your-app.onrender.com/api/auth/google/callback`
+
+### Step 5: Troubleshooting
+
+#### Issue: "Missing Authorization Code" Error
+
+If you see an error message saying "The Google OAuth callback is missing the authorization code", this means the redirect URL is not properly configured in Supabase Dashboard.
+
+**Solution:**
+
+1. **Check Supabase Dashboard Configuration:**
+   - Go to [Supabase Dashboard](https://app.supabase.com/) → Your Project
+   - Navigate to **Authentication** → **URL Configuration**
+   - **CRITICAL: Set Site URL** to your base URL:
+     - For production: `https://trustichain-backend.onrender.com` (no trailing slash, no path)
+     - For local dev: `http://localhost:3000`
+   - **Add Redirect URLs** (under the Redirect URLs section):
+     - For production: `https://trustichain-backend.onrender.com/api/auth/google/callback`
+     - For local dev: `http://localhost:3000/api/auth/google/callback`
+   - Both URLs must match **exactly** (including `https://` and the full path)
+   - Click **Save** and wait a few seconds
+
+2. **Verify the Redirect URL in Logs:**
+   - Check your Render logs when initiating OAuth
+   - Look for: `Redirect URL (must be whitelisted in Supabase Dashboard):`
+   - Ensure this exact URL is in your Supabase Dashboard redirect URLs list
+
+3. **Common Mistakes:**
+   - Missing `https://` prefix
+   - Wrong domain (e.g., using `localhost` in production)
+   - Missing `/api/auth/google/callback` path
+   - Trailing slashes or extra characters
+
+4. **After Adding Redirect URL:**
+   - Wait a few seconds for the configuration to propagate
+   - Clear your browser cache
+   - Try signing in again
+
+**Note:** The redirect URL in Supabase Dashboard is different from Google Cloud Console:
+- **Google Cloud Console** should have: `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback` (Supabase's callback)
+- **Supabase Dashboard** should have: `https://your-app.onrender.com/api/auth/google/callback` (Your app's callback)
 
 ## Validation Rules
 

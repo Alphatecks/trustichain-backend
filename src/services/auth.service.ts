@@ -360,8 +360,14 @@ export class AuthService {
       const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'http://localhost:3000';
       const redirectUrl = `${baseUrl}/api/auth/google/callback`;
 
-      console.log('Generating Google OAuth URL with redirectTo:', redirectUrl);
+      console.log('=== Generating Google OAuth URL ===');
+      console.log('Base URL (Site URL in Supabase Dashboard):', baseUrl);
+      console.log('Redirect URL (must be in Redirect URLs list):', redirectUrl);
       console.log('Base URL from env:', { RENDER_URL: process.env.RENDER_URL, BACKEND_URL: process.env.BACKEND_URL });
+      console.log('=== Supabase Dashboard Configuration Required ===');
+      console.log('1. Site URL must be set to:', baseUrl);
+      console.log('2. Redirect URLs must include:', redirectUrl);
+      console.log('   Location: Supabase Dashboard → Authentication → URL Configuration');
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
