@@ -49,8 +49,36 @@ router.get('/verify-email', (req, res) => {
  * @desc    Get Google OAuth URL for sign-in
  * @access  Public
  */
-router.get('/google', (req, res) => {
-  authController.getGoogleOAuthUrl(req, res);
+router.get('/google', async (req, res) => {
+  try {
+    console.log('GET /api/auth/google - Request received');
+    console.log('Headers:', JSON.stringify(req.headers));
+    await authController.getGoogleOAuthUrl(req, res);
+  } catch (error) {
+    console.error('Error in /api/auth/google route:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error details:', errorMessage, error);
+    
+    // If it's a browser request, show error page, otherwise return JSON
+    const acceptsHtml = req.headers.accept?.includes('text/html');
+    if (acceptsHtml) {
+      res.status(500).send(`
+        <html>
+          <body>
+            <h1>OAuth Error</h1>
+            <p>Failed to initiate Google OAuth: ${errorMessage}</p>
+            <a href="/api/auth/google">Try again</a>
+          </body>
+        </html>
+      `);
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to initiate Google OAuth',
+        error: errorMessage,
+      });
+    }
+  }
 });
 
 /**
@@ -59,8 +87,17 @@ router.get('/google', (req, res) => {
  * @access  Public
  * @query   code - OAuth authorization code from Google
  */
-router.get('/google/callback', (req, res) => {
-  authController.handleGoogleOAuthCallback(req, res);
+router.get('/google/callback', async (req, res) => {
+  try {
+    await authController.handleGoogleOAuthCallback(req, res);
+  } catch (error) {
+    console.error('Error in /api/auth/google/callback route:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to handle Google OAuth callback',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 });
 
 export default router;
