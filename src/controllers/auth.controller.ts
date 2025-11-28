@@ -436,13 +436,20 @@ export class AuthController {
    */
   async handleGoogleOAuthCallback(req: Request, res: Response): Promise<void> {
     try {
-      // Log all query parameters for debugging
-      console.log('OAuth Callback - Query params:', JSON.stringify(req.query));
-      console.log('OAuth Callback - Full URL:', req.url);
+      // Log all query parameters and request details for debugging
+      console.log('=== OAuth Callback Handler ===');
+      console.log('Full URL:', req.url);
+      console.log('Query params:', JSON.stringify(req.query));
+      console.log('Request method:', req.method);
+      console.log('Request headers:', JSON.stringify(req.headers));
+      console.log('Request host:', req.get('host'));
+      console.log('Request protocol:', req.protocol);
+      console.log('Request original URL:', req.originalUrl);
       
       const code = req.query.code as string;
       const error = req.query.error as string;
       const errorDescription = req.query.error_description as string;
+      const state = req.query.state as string | undefined;
 
       // Check if Google returned an error
       if (error) {
@@ -454,10 +461,16 @@ export class AuthController {
 
       // Check if code is missing
       if (!code) {
-        console.error('Missing authorization code. Query params:', req.query);
+        console.error('=== Missing Authorization Code ===');
+        console.error('Query params received:', JSON.stringify(req.query, null, 2));
+        console.error('All query keys:', Object.keys(req.query));
+        console.error('State parameter:', state);
+        console.error('Error parameter:', error);
+        console.error('Full request URL:', req.url);
+        
         // Show more detailed error with debugging info
-        const debugInfo = process.env.NODE_ENV === 'development' 
-          ? `<br><br><small>Debug: URL=${req.url}, Params=${JSON.stringify(req.query)}</small>`
+        const debugInfo = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'production'
+          ? `<br><br><small>Debug Info:<br>URL: ${req.url}<br>Params: ${JSON.stringify(req.query, null, 2)}<br>State: ${state || 'none'}</small>`
           : '';
         res.status(400).send(this.getErrorPage(
           'Missing Authorization Code',
@@ -465,6 +478,9 @@ export class AuthController {
         ));
         return;
       }
+      
+      console.log('Authorization code received:', code.substring(0, 20) + '...');
+      console.log('State parameter:', state || 'none');
 
       const result = await authService.handleGoogleOAuthCallback(code);
 
