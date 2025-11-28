@@ -386,8 +386,8 @@ export class AuthController {
         <h1>${title}</h1>
         <p>${message}</p>
         <div>
-            <a href="${frontendUrl}/auth/signup" class="button">Try Again</a>
-            <a href="${frontendUrl}" class="button button-secondary">Go Home</a>
+            <a href="/api/auth/google" class="button">Try Google Sign-In Again</a>
+            <a href="${frontendUrl}/auth/signup" class="button button-secondary">Go to Sign Up</a>
         </div>
         <div class="footer">
             <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
@@ -437,19 +437,30 @@ export class AuthController {
   async handleGoogleOAuthCallback(req: Request, res: Response): Promise<void> {
     try {
       const code = req.query.code as string;
+      const error = req.query.error as string;
+      const errorDescription = req.query.error_description as string;
 
+      // Check if Google returned an error
+      if (error) {
+        const errorMsg = errorDescription || error || 'Google OAuth authentication was cancelled or failed.';
+        return res.status(400).send(this.getErrorPage('Google Sign-In Cancelled', errorMsg));
+      }
+
+      // Check if code is missing
       if (!code) {
-        res.status(400).send(this.getErrorPage('Missing Authorization Code', 'The Google OAuth callback is missing the authorization code. Please try signing in again.'));
-        return;
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        // Redirect to frontend sign-in page with error, or show error page
+        return res.status(400).send(this.getErrorPage(
+          'Missing Authorization Code',
+          'The Google OAuth callback is missing the authorization code. Please make sure you complete the Google sign-in process. <a href="/api/auth/google" style="color: #667eea;">Try again</a>.'
+        ));
       }
 
       const result = await authService.handleGoogleOAuthCallback(code);
 
       if (result.success && result.data) {
-        // Redirect to frontend with tokens (or show success page)
+        // Redirect to frontend with success
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-        // Store tokens in URL hash or use a different method for security
-        // For now, redirect to frontend with success
         res.redirect(`${frontendUrl}/auth/callback?success=true&provider=google`);
         return;
       } else {
