@@ -443,7 +443,6 @@ export class AuthController {
       const code = req.query.code as string;
       const error = req.query.error as string;
       const errorDescription = req.query.error_description as string;
-      const state = req.query.state as string;
 
       // Check if Google returned an error
       if (error) {
