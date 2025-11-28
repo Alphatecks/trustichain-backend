@@ -366,6 +366,7 @@ export class AuthService {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
+          flowType: 'pkce',
           redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
