@@ -443,17 +443,18 @@ export class AuthController {
       // Check if Google returned an error
       if (error) {
         const errorMsg = errorDescription || error || 'Google OAuth authentication was cancelled or failed.';
-        return res.status(400).send(this.getErrorPage('Google Sign-In Cancelled', errorMsg));
+        res.status(400).send(this.getErrorPage('Google Sign-In Cancelled', errorMsg));
+        return;
       }
 
       // Check if code is missing
       if (!code) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         // Redirect to frontend sign-in page with error, or show error page
-        return res.status(400).send(this.getErrorPage(
+        res.status(400).send(this.getErrorPage(
           'Missing Authorization Code',
           'The Google OAuth callback is missing the authorization code. Please make sure you complete the Google sign-in process. <a href="/api/auth/google" style="color: #667eea;">Try again</a>.'
         ));
+        return;
       }
 
       const result = await authService.handleGoogleOAuthCallback(code);
