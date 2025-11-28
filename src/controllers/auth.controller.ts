@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse } from '../types/api/auth.types';
 
 export class AuthController {
   /**
@@ -87,7 +87,8 @@ export class AuthController {
       const token = req.query.token as string;
 
       if (!token) {
-        return res.status(400).send(this.getErrorPage('Missing Verification Token', 'The verification link is invalid. Please check your email and try again.'));
+        res.status(400).send(this.getErrorPage('Missing Verification Token', 'The verification link is invalid. Please check your email and try again.'));
+        return;
       }
 
       const result = await authService.verifyEmail({ token });
@@ -400,12 +401,21 @@ export class AuthController {
   /**
    * Get Google OAuth URL
    * GET /api/auth/google
+   * Redirects directly to Google OAuth (for browser access)
+   * Or returns JSON with URL (for API calls)
    */
-  async getGoogleOAuthUrl(_req: Request, res: Response<GoogleOAuthResponse>): Promise<void> {
+  async getGoogleOAuthUrl(req: Request, res: Response<GoogleOAuthResponse>): Promise<void> {
     try {
       const result = await authService.getGoogleOAuthUrl();
 
-      if (result.success) {
+      if (result.success && result.data?.url) {
+        // If accessed from browser (has Accept: text/html), redirect directly
+        const acceptsHtml = req.headers.accept?.includes('text/html');
+        if (acceptsHtml) {
+          res.redirect(result.data.url);
+          return;
+        }
+        // Otherwise return JSON for API calls
         res.status(200).json(result);
       } else {
         res.status(400).json(result);
@@ -429,7 +439,8 @@ export class AuthController {
       const code = req.query.code as string;
 
       if (!code) {
-        return res.status(400).send(this.getErrorPage('Missing Authorization Code', 'The Google OAuth callback is missing the authorization code. Please try signing in again.'));
+        res.status(400).send(this.getErrorPage('Missing Authorization Code', 'The Google OAuth callback is missing the authorization code. Please try signing in again.'));
+        return;
       }
 
       const result = await authService.handleGoogleOAuthCallback(code);
@@ -440,8 +451,10 @@ export class AuthController {
         // Store tokens in URL hash or use a different method for security
         // For now, redirect to frontend with success
         res.redirect(`${frontendUrl}/auth/callback?success=true&provider=google`);
+        return;
       } else {
         res.status(400).send(this.getErrorPage('Google Sign-In Failed', result.message || 'Unable to sign in with Google.'));
+        return;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
