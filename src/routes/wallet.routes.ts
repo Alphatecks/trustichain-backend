@@ -16,12 +16,22 @@ router.get('/balance', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   POST /api/wallet/fund
- * @desc    Fund wallet (deposit)
+ * @desc    Fund wallet (deposit) - Prepare transaction for user signing
  * @access  Private
- * @body    { amount: number, currency: 'USD' | 'XRP' }
+ * @body    { amount: number, currency: 'USD' | 'XRP' | 'USDT' | 'USDC' }
  */
 router.post('/fund', authenticate, asyncHandler(async (req, res) => {
   await walletController.fundWallet(req, res);
+}));
+
+/**
+ * @route   POST /api/wallet/fund/complete
+ * @desc    Complete wallet funding after user signs transaction
+ * @access  Private
+ * @body    { transactionId: string, signedTxBlob: string }
+ */
+router.post('/fund/complete', authenticate, asyncHandler(async (req, res) => {
+  await walletController.completeFundWallet(req, res);
 }));
 
 /**

@@ -3,6 +3,8 @@ import {
   WalletBalanceResponse,
   FundWalletRequest,
   FundWalletResponse,
+  CompleteFundWalletRequest,
+  CompleteFundWalletResponse,
   WithdrawWalletRequest,
   WithdrawWalletResponse,
   WalletTransactionsResponse,
@@ -35,13 +37,37 @@ export class WalletController {
   }
 
   /**
-   * Fund wallet (deposit)
+   * Fund wallet (deposit) - Prepare transaction for user signing
    * POST /api/wallet/fund
    */
   async fundWallet(req: Request<{}, FundWalletResponse, FundWalletRequest>, res: Response<FundWalletResponse>): Promise<void> {
     try {
       const userId = req.userId!;
       const result = await walletService.fundWallet(userId, req.body);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Complete wallet funding after user signs transaction
+   * POST /api/wallet/fund/complete
+   */
+  async completeFundWallet(req: Request<{}, CompleteFundWalletResponse, CompleteFundWalletRequest>, res: Response<CompleteFundWalletResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.completeFundWallet(userId, req.body.transactionId, req.body.signedTxBlob);
 
       if (result.success) {
         res.status(200).json(result);

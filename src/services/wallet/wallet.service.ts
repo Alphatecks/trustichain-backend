@@ -100,19 +100,28 @@ export class WalletService {
   }
 
   /**
-   * Fund wallet (deposit)
+   * Fund wallet (deposit) - Prepare transaction for user signing
+   * Returns unsigned transaction blob that frontend sends to user's wallet
    */
   async fundWallet(userId: string, request: FundWalletRequest): Promise<{
     success: boolean;
     message: string;
     data?: {
       transactionId: string;
+      transaction: any;
+      transactionBlob: string;
+      instructions: string;
       amount: {
-        usd: number;
         xrp: number;
+        usdt: number;
+        usdc: number;
       };
-      xrplTxHash?: string;
-      status: string;
+      requiresTrustLine?: boolean;
+      trustLineTransaction?: {
+        transaction: any;
+        transactionBlob: string;
+        instructions: string;
+      };
     };
     error?: string;
   }> {
@@ -134,18 +143,19 @@ export class WalletService {
         };
       }
 
-      // Convert amount to XRP if needed
-      let amountXrp = request.amount;
-      let amountUsd = request.amount;
+      // Determine currency type
+      let currency: 'XRP' | 'USDT' | 'USDC' = 'XRP';
+      let amount = request.amount;
 
       if (request.currency === 'USD') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
-        amountXrp = request.amount / usdRate;
-      } else {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
-        amountUsd = request.amount * usdRate;
+        // For USD, we'll default to USDT (or could prompt user to choose)
+        currency = 'USDT';
+      } else if (request.currency === 'XRP') {
+        currency = 'XRP';
+      } else if (request.currency === 'USDT') {
+        currency = 'USDT';
+      } else if (request.currency === 'USDC') {
+        currency = 'USDC';
       }
 
       // Create transaction record
@@ -154,10 +164,10 @@ export class WalletService {
         .insert({
           user_id: userId,
           type: 'deposit',
-          amount_xrp: amountXrp,
-          amount_usd: amountUsd,
+          amount_xrp: currency === 'XRP' ? amount : 0,
+          amount_usd: currency !== 'XRP' ? amount : 0,
           status: 'pending',
-          description: `Deposit ${request.amount} ${request.currency}`,
+          description: `Deposit ${request.amount} ${currency}`,
         })
         .select()
         .single();
@@ -170,41 +180,121 @@ export class WalletService {
         };
       }
 
-      // In a real implementation, this would initiate the XRPL transaction
-      // For now, we'll simulate it
-      const xrplTxHash = await xrplWalletService.createDepositTransaction(
+      // Prepare payment transaction for user signing
+      const paymentTx = await xrplWalletService.preparePaymentTransaction(
         wallet.xrpl_address,
-        amountXrp
+        amount,
+        currency
       );
 
-      // Update transaction with XRPL hash
-      await adminClient
-        .from('transactions')
-        .update({
-          xrpl_tx_hash: xrplTxHash,
-          status: 'processing',
-        })
-        .eq('id', transaction.id);
+      // For tokens, check if trust line is needed
+      let requiresTrustLine = false;
+      let trustLineTx = undefined;
+
+      if (currency !== 'XRP') {
+        // Check if user has trust line (simplified - in production, check actual trust lines)
+        // For now, we'll prepare trust line transaction as backup
+        trustLineTx = await xrplWalletService.prepareTrustLineTransaction(currency);
+        requiresTrustLine = true; // Frontend should check and prompt if needed
+      }
+
+      // Calculate amounts for response
+      const amounts = {
+        xrp: currency === 'XRP' ? amount : 0,
+        usdt: currency === 'USDT' ? amount : 0,
+        usdc: currency === 'USDC' ? amount : 0,
+      };
 
       return {
         success: true,
-        message: 'Wallet funded successfully',
+        message: 'Transaction prepared. Please sign in your wallet.',
         data: {
           transactionId: transaction.id,
-          amount: {
-            usd: parseFloat(amountUsd.toFixed(2)),
-            xrp: parseFloat(amountXrp.toFixed(6)),
-          },
-          xrplTxHash,
-          status: 'processing',
+          transaction: paymentTx.transaction,
+          transactionBlob: paymentTx.transactionBlob,
+          instructions: paymentTx.instructions,
+          amount: amounts,
+          requiresTrustLine,
+          trustLineTransaction: trustLineTx,
         },
       };
     } catch (error) {
-      console.error('Error funding wallet:', error);
+      console.error('Error preparing fund wallet transaction:', error);
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Failed to fund wallet',
-        error: error instanceof Error ? error.message : 'Failed to fund wallet',
+        message: error instanceof Error ? error.message : 'Failed to prepare fund transaction',
+        error: error instanceof Error ? error.message : 'Failed to prepare fund transaction',
+      };
+    }
+  }
+
+  /**
+   * Complete wallet funding after user signs transaction
+   * Called by frontend after user signs the transaction in their wallet
+   */
+  async completeFundWallet(
+    userId: string,
+    transactionId: string,
+    signedTxBlob: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      transactionId: string;
+      xrplTxHash: string;
+      status: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'Transaction not found',
+          error: 'Transaction not found',
+        };
+      }
+
+      // Submit signed transaction to XRPL
+      const submitResult = await xrplWalletService.submitSignedTransaction(signedTxBlob);
+
+      // Update transaction with XRPL hash and status
+      const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
+      
+      await adminClient
+        .from('transactions')
+        .update({
+          xrpl_tx_hash: submitResult.hash,
+          status: status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transactionId);
+
+      return {
+        success: true,
+        message: status === 'completed' ? 'Wallet funded successfully' : 'Transaction failed',
+        data: {
+          transactionId: transaction.id,
+          xrplTxHash: submitResult.hash,
+          status: status,
+        },
+      };
+    } catch (error) {
+      console.error('Error completing fund wallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to complete fund transaction',
+        error: error instanceof Error ? error.message : 'Failed to complete fund transaction',
       };
     }
   }

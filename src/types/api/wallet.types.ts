@@ -18,7 +18,7 @@ export interface WalletBalanceResponse {
 
 export interface FundWalletRequest {
   amount: number;
-  currency: 'USD' | 'XRP';
+  currency: 'USD' | 'XRP' | 'USDT' | 'USDC';
 }
 
 export interface FundWalletResponse {
@@ -26,11 +26,35 @@ export interface FundWalletResponse {
   message: string;
   data?: {
     transactionId: string;
+    transaction: any;
+    transactionBlob: string;
+    instructions: string;
     amount: {
-      usd: number;
       xrp: number;
+      usdt: number;
+      usdc: number;
     };
-    xrplTxHash?: string;
+    requiresTrustLine?: boolean;
+    trustLineTransaction?: {
+      transaction: any;
+      transactionBlob: string;
+      instructions: string;
+    };
+  };
+  error?: string;
+}
+
+export interface CompleteFundWalletRequest {
+  transactionId: string;
+  signedTxBlob: string;
+}
+
+export interface CompleteFundWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    xrplTxHash: string;
     status: string;
   };
   error?: string;

@@ -3,7 +3,7 @@
  * Handles XRPL blockchain operations for wallets
  */
 
-import { Client, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
+import { Client, Wallet, xrpToDrops, dropsToXrp, Payment } from 'xrpl';
 
 export class XRPLWalletService {
   private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet'; // 'testnet' or 'mainnet'
@@ -258,6 +258,190 @@ export class XRPLWalletService {
         usdt: 0,
         usdc: 0,
       };
+    }
+  }
+
+  /**
+   * Prepare a payment transaction for user signing (non-custodial)
+   * Returns unsigned transaction that frontend can send to user's wallet for signing
+   * Note: Account, Sequence, and Fee will be filled by the user's wallet (Xaman/Xumm SDK)
+   */
+  async preparePaymentTransaction(
+    destinationAddress: string,
+    amount: number,
+    currency: 'XRP' | 'USDT' | 'USDC'
+  ): Promise<{
+    transaction: any;
+    transactionBlob: string;
+    instructions: string;
+  }> {
+    try {
+      let paymentTx: Payment | any;
+
+      if (currency === 'XRP') {
+        // XRP Payment
+        paymentTx = {
+          TransactionType: 'Payment',
+          Destination: destinationAddress,
+          Amount: xrpToDrops(amount.toString()),
+        };
+      } else {
+        // Token Payment (USDT or USDC)
+        const issuer = currency === 'USDT' ? this.USDT_ISSUER : this.USDC_ISSUER;
+        paymentTx = {
+          TransactionType: 'Payment',
+          Destination: destinationAddress,
+          Amount: {
+            currency: 'USD', // XRPL uses 'USD' for both USDT and USDC
+            value: amount.toString(),
+            issuer: issuer,
+          },
+        };
+      }
+
+      // Serialize to transaction blob (unsigned)
+      // Note: User's wallet (Xaman/Xumm) will autofill Account, Sequence, Fee, etc.
+      const txBlob = JSON.stringify(paymentTx);
+
+      return {
+        transaction: paymentTx,
+        transactionBlob: txBlob,
+        instructions: `Please sign this transaction in your XRPL wallet to send ${amount} ${currency} to ${destinationAddress}`,
+      };
+    } catch (error) {
+      console.error('Error preparing payment transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify and submit a signed transaction blob
+   * Called after user signs the transaction in their wallet
+   * @param signedTxBlob - Can be a JSON string (from Xaman SDK) or hex-encoded blob
+   */
+  async submitSignedTransaction(signedTxBlob: string): Promise<{
+    hash: string;
+    status: string;
+    result: any;
+  }> {
+    try {
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      try {
+        // Parse if it's a JSON string, otherwise assume it's already a hex blob
+        let txToSubmit: any;
+        try {
+          txToSubmit = JSON.parse(signedTxBlob);
+        } catch {
+          // If parsing fails, assume it's a hex-encoded blob
+          txToSubmit = signedTxBlob;
+        }
+
+        // Submit the signed transaction
+        const result = await client.submitAndWait(txToSubmit);
+
+        await client.disconnect();
+
+        return {
+          hash: result.result.hash,
+          status: result.result.meta?.TransactionResult || 'unknown',
+          result: result.result,
+        };
+      } catch (error) {
+        await client.disconnect();
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error submitting signed transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify a transaction by hash
+   * Used to check if a transaction was completed
+   */
+  async verifyTransaction(txHash: string): Promise<{
+    found: boolean;
+    validated: boolean;
+    result?: any;
+  }> {
+    try {
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      try {
+        const txResult = await client.request({
+          command: 'tx',
+          transaction: txHash,
+        });
+
+        await client.disconnect();
+
+        const validated = txResult.result.validated || false;
+
+        return {
+          found: true,
+          validated,
+          result: txResult.result,
+        };
+      } catch (error) {
+        await client.disconnect();
+        // Transaction not found
+        if (error instanceof Error && error.message.includes('txnNotFound')) {
+          return {
+            found: false,
+            validated: false,
+          };
+        }
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error verifying transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare trust line transaction (required before receiving tokens)
+   * Users need to set up trust lines before receiving USDT/USDC
+   * Note: Account, Sequence, and Fee will be filled by the user's wallet (Xaman/Xumm SDK)
+   */
+  async prepareTrustLineTransaction(
+    currency: 'USDT' | 'USDC',
+    limit?: string
+  ): Promise<{
+    transaction: any;
+    transactionBlob: string;
+    instructions: string;
+  }> {
+    try {
+      const issuer = currency === 'USDT' ? this.USDT_ISSUER : this.USDC_ISSUER;
+      const trustLimit = limit || '1000000000'; // Default high limit
+
+      // Create transaction without Account (will be filled by user's wallet)
+      const trustSetTx: any = {
+        TransactionType: 'TrustSet',
+        LimitAmount: {
+          currency: 'USD',
+          issuer: issuer,
+          value: trustLimit,
+        },
+      };
+
+      // Serialize to transaction blob (unsigned)
+      // Note: User's wallet (Xaman/Xumm) will autofill Account, Sequence, Fee, etc.
+      const txBlob = JSON.stringify(trustSetTx);
+
+      return {
+        transaction: trustSetTx,
+        transactionBlob: txBlob,
+        instructions: `Please sign this transaction to set up a trust line for ${currency}. This is required before you can receive ${currency} tokens.`,
+      };
+    } catch (error) {
+      console.error('Error preparing trust line transaction:', error);
+      throw error;
     }
   }
 }

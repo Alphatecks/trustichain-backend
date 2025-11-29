@@ -101,11 +101,11 @@ curl -X GET https://your-api.com/api/wallet/balance \
 }
 ```
 
-### Fund Wallet (Deposit)
+### Fund Wallet (Deposit) - Step 1: Prepare Transaction
 
 **Endpoint:** `POST /api/wallet/fund`
 
-**Description:** Initiates a deposit transaction to fund the wallet.
+**Description:** Prepares a deposit transaction for user signing. Returns an unsigned transaction blob that the frontend should send to the user's XRPL wallet (Xaman/Xumm, Ledger, etc.) for signing.
 
 **Headers:**
 ```
@@ -117,9 +117,11 @@ Content-Type: application/json
 ```json
 {
   "amount": 1000,
-  "currency": "USD"
+  "currency": "XRP"
 }
 ```
+
+**Supported Currencies:** `XRP`, `USDT`, `USDC`, `USD` (defaults to USDT)
 
 **Request:**
 ```bash
@@ -128,7 +130,103 @@ curl -X POST https://your-api.com/api/wallet/fund \
   -H "Content-Type: application/json" \
   -d '{
     "amount": 1000,
-    "currency": "USD"
+    "currency": "XRP"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Transaction prepared. Please sign in your wallet.",
+  "data": {
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "transaction": {
+      "TransactionType": "Payment",
+      "Destination": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+      "Amount": "1000000000",
+      "Fee": "12",
+      "Sequence": 12345,
+      "Account": "rUserWalletAddress..."
+    },
+    "transactionBlob": "{\"TransactionType\":\"Payment\",...}",
+    "instructions": "Please sign this transaction in your XRPL wallet to send 1000 XRP to rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+    "amount": {
+      "xrp": 1000,
+      "usdt": 0,
+      "usdc": 0
+    },
+    "requiresTrustLine": false,
+    "trustLineTransaction": null
+  }
+}
+```
+
+**Response for Token (USDT/USDC) - May Require Trust Line:**
+```json
+{
+  "success": true,
+  "message": "Transaction prepared. Please sign in your wallet.",
+  "data": {
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "transaction": { ... },
+    "transactionBlob": "...",
+    "instructions": "Please sign this transaction in your XRPL wallet to send 1000 USDT to rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+    "amount": {
+      "xrp": 0,
+      "usdt": 1000,
+      "usdc": 0
+    },
+    "requiresTrustLine": true,
+    "trustLineTransaction": {
+      "transaction": {
+        "TransactionType": "TrustSet",
+        "LimitAmount": {
+          "currency": "USD",
+          "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
+          "value": "1000000000"
+        }
+      },
+      "transactionBlob": "...",
+      "instructions": "Please sign this transaction to set up a trust line for USDT. This is required before you can receive USDT tokens."
+    }
+  }
+}
+```
+
+**Note:** 
+- Frontend should prompt user's XRPL wallet (Xaman/Xumm SDK) to sign the transaction
+- If `requiresTrustLine` is true, user must sign the trust line transaction first before funding
+- After user signs, call `/api/wallet/fund/complete` with the signed transaction blob
+
+### Fund Wallet (Deposit) - Step 2: Complete Transaction
+
+**Endpoint:** `POST /api/wallet/fund/complete`
+
+**Description:** Completes the wallet funding after the user signs the transaction in their wallet. Submits the signed transaction to XRPL.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+  "signedTxBlob": "{\"TransactionType\":\"Payment\",\"signed\":true,...}"
+}
+```
+
+**Request:**
+```bash
+curl -X POST https://your-api.com/api/wallet/fund/complete \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "signedTxBlob": "{\"TransactionType\":\"Payment\",...}"
   }'
 ```
 
@@ -139,21 +237,18 @@ curl -X POST https://your-api.com/api/wallet/fund \
   "message": "Wallet funded successfully",
   "data": {
     "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-    "amount": {
-      "usd": 1000.00,
-      "xrp": 1841.62
-    },
     "xrplTxHash": "A1B2C3D4E5F6...",
-    "status": "processing"
+    "status": "completed"
   }
 }
 ```
 
-**Alternative Request (XRP):**
+**Error Response (400 Bad Request):**
 ```json
 {
-  "amount": 1000,
-  "currency": "XRP"
+  "success": false,
+  "message": "Transaction not found",
+  "error": "Transaction not found"
 }
 ```
 
