@@ -9,18 +9,18 @@ const router = Router();
  * @desc    Get trustiscore
  * @access  Private
  */
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, asyncHandler(async (req, res) => {
   await trustiscoreController.getTrustiscore(req, res);
-});
+}));
 
 /**
  * @route   GET /api/trustiscore/level
  * @desc    View trustiscore level details
  * @access  Private
  */
-router.get('/level', authenticate, async (req, res) => {
+router.get('/level', authenticate, asyncHandler(async (req, res) => {
   await trustiscoreController.viewLevel(req, res);
-});
+}));
 
 export default router;
 

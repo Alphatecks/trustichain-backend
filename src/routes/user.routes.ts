@@ -9,9 +9,9 @@ const router = Router();
  * @desc    Get user profile
  * @access  Private
  */
-router.get('/profile', authenticate, async (req, res) => {
+router.get('/profile', authenticate, asyncHandler(async (req, res) => {
   await userController.getUserProfile(req, res);
-});
+}));
 
 export default router;
 

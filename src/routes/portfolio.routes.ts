@@ -10,9 +10,9 @@ const router = Router();
  * @access  Private
  * @query   timeframe - 'daily' | 'weekly' | 'monthly' | 'yearly' (default: monthly)
  */
-router.get('/performance', authenticate, async (req, res) => {
+router.get('/performance', authenticate, asyncHandler(async (req, res) => {
   await portfolioController.getPortfolioPerformance(req, res);
-});
+}));
 
 export default router;
 

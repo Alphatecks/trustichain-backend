@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { validateRegister, validateLogin } from '../middleware/validation';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
 
@@ -10,9 +11,9 @@ const router = Router();
  * @access  Public
  * @body    { email, fullName, password, confirmPassword, agreeToTerms, country? }
  */
-router.post('/register', validateRegister, async (req, res) => {
+router.post('/register', validateRegister, asyncHandler(async (req, res) => {
   await authController.register(req, res);
-});
+}));
 
 /**
  * @route   POST /api/auth/login
@@ -20,9 +21,9 @@ router.post('/register', validateRegister, async (req, res) => {
  * @access  Public
  * @body    { email, password }
  */
-router.post('/login', validateLogin, async (req, res) => {
+router.post('/login', validateLogin, asyncHandler(async (req, res) => {
   await authController.login(req, res);
-});
+}));
 
 /**
  * @route   POST /api/auth/verify-email
@@ -30,9 +31,9 @@ router.post('/login', validateLogin, async (req, res) => {
  * @access  Public
  * @body    { token }
  */
-router.post('/verify-email', async (req, res) => {
+router.post('/verify-email', asyncHandler(async (req, res) => {
   await authController.verifyEmail(req, res);
-});
+}));
 
 /**
  * @route   GET /api/auth/verify-email?token=xxx
@@ -40,9 +41,9 @@ router.post('/verify-email', async (req, res) => {
  * @access  Public
  * @query   token - Verification token from email
  */
-router.get('/verify-email', async (req, res) => {
+router.get('/verify-email', asyncHandler(async (req, res) => {
   await authController.verifyEmailGet(req, res);
-});
+}));
 
 /**
  * @route   GET /api/auth/google

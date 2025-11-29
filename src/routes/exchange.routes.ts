@@ -8,9 +8,9 @@ const router = Router();
  * @desc    Get live exchange rates for XRP
  * @access  Public
  */
-router.get('/rates', async (req, res) => {
+router.get('/rates', asyncHandler(async (req, res) => {
   await exchangeController.getLiveExchangeRates(req, res);
-});
+}));
 
 export default router;
 
