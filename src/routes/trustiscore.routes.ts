@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { trustiscoreController } from '../controllers/trustiscore.controller';
 import { authenticate } from '../middleware/auth';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
 

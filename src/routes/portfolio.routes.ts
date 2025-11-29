@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { portfolioController } from '../controllers/portfolio.controller';
 import { authenticate } from '../middleware/auth';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
 
