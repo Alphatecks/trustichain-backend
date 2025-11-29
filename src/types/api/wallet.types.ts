@@ -18,7 +18,7 @@ export interface WalletBalanceResponse {
 
 export interface FundWalletRequest {
   amount: number;
-  currency: 'USD' | 'XRP';
+  currency: 'USD' | 'XRP' | 'USDT' | 'USDC';
 }
 
 export interface FundWalletResponse {
@@ -37,6 +37,10 @@ export interface FundWalletResponse {
     transactionBlob?: string;
     destinationAddress?: string;
     amountXrp?: number;
+    amountToken?: number;
+    currency?: string;
+    walletType?: 'xaman' | 'metamask' | 'browser';
+    note?: string;
     status: string;
   };
   error?: string;

@@ -124,6 +124,10 @@ export class WalletService {
       transactionBlob?: string;
       destinationAddress?: string;
       amountXrp?: number;
+      amountToken?: number;
+      currency?: string;
+      walletType?: 'xaman' | 'metamask' | 'browser';
+      note?: string;
       status: string;
     };
     error?: string;
@@ -146,18 +150,26 @@ export class WalletService {
         };
       }
 
-      // Convert amount to XRP if needed
+      // Convert amounts based on currency
       let amountXrp = request.amount;
       let amountUsd = request.amount;
+      let amountToken: number = request.amount; // For USDT/USDC
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
         amountXrp = request.amount / usdRate;
-      } else {
+      } else if (request.currency === 'XRP') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
         amountUsd = request.amount * usdRate;
+      } else if (request.currency === 'USDT' || request.currency === 'USDC') {
+        // For USDT/USDC, amount is already in USD value
+        amountUsd = request.amount;
+        amountToken = request.amount;
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        amountXrp = request.amount / usdRate; // For display purposes
       }
 
       // Create transaction record
@@ -182,25 +194,34 @@ export class WalletService {
         };
       }
 
-      // Prepare payment transaction for wallet signing (Xaman, Crossmark, MetaMask+XRPL Snap, etc.)
-      const currency = request.currency === 'USD' ? 'XRP' : 'XRP'; // For now, only XRP
+      // Determine wallet flow based on currency:
+      // - XRP → Use Xaman/XUMM (mobile app)
+      // - USDT/USDC → Use MetaMask+XRPL Snap (browser wallet)
+      const currency = request.currency === 'USD' ? 'XRP' : request.currency;
+      const amount = currency === 'XRP' ? amountXrp : amountToken;
+      
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
         wallet.xrpl_address,
-        amountXrp,
-        currency
+        amount,
+        currency as 'XRP' | 'USDT' | 'USDC'
       );
 
-      // Option 1: XUMM/Xaman (mobile app) - Create payload for QR code signing
-      // Option 2: Browser wallets (Crossmark, MetaMask+XRPL Snap) - Return transaction JSON for direct signing
-      // For now, we'll support both: XUMM for mobile, and direct transaction for browser wallets
-      
+      // XRP: Use Xaman/XUMM flow
+      // USDT/USDC: Use MetaMask flow (no XUMM)
       let xummPayload = null;
-      try {
-        // Try to create XUMM payload (works if XUMM API keys are configured)
-        xummPayload = await xummService.createPayload(preparedTx.transaction);
-      } catch (error) {
-        // If XUMM is not configured, we'll return the transaction for direct wallet signing
-        console.log('XUMM not configured, returning transaction for direct wallet signing');
+      let xummError = null;
+      
+      if (currency === 'XRP') {
+        // For XRP, try to create XUMM payload (Xaman mobile app)
+        try {
+          xummPayload = await xummService.createPayload(preparedTx.transaction);
+        } catch (error) {
+          xummError = error instanceof Error ? error.message : 'XUMM not configured';
+          console.log('XUMM not configured or error:', xummError);
+        }
+      } else {
+        // For USDT/USDC, use MetaMask (no XUMM)
+        console.log(`Using MetaMask flow for ${currency} deposit`);
       }
 
       // Store transaction info
@@ -216,28 +237,48 @@ export class WalletService {
         })
         .eq('id', transaction.id);
 
+      // Determine wallet type and message
+      const walletType = currency === 'XRP' ? 'Xaman' : 'MetaMask';
+      const message = xummPayload 
+        ? `Transaction prepared. Please sign in ${walletType} app.`
+        : currency === 'XRP'
+        ? 'Transaction prepared. Please sign with your XRPL wallet (Xaman, Crossmark, etc.).'
+        : `Transaction prepared. Please sign with MetaMask (XRPL Snap) for ${currency} deposit.`;
+
       return {
         success: true,
-        message: xummPayload 
-          ? 'Transaction prepared. Please sign in Xaman app or any XRPL wallet.'
-          : 'Transaction prepared. Please sign with your XRPL wallet (Crossmark, MetaMask+XRPL Snap, etc.).',
+        message: message,
         data: {
           transactionId: transaction.id,
           amount: {
             usd: parseFloat(amountUsd.toFixed(2)),
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
-          // XUMM-specific fields (if available)
+          currency: currency,
+          // XUMM-specific fields (only for XRP, if XUMM is available)
           ...(xummPayload && {
             xummUrl: xummPayload.next.always,
             xummUuid: xummPayload.uuid,
+            walletType: 'xaman',
           }),
-          // Transaction for direct wallet signing (Crossmark, MetaMask+XRPL Snap, etc.)
+          // Transaction for wallet signing (always present)
           transaction: preparedTx.transaction,
           transactionBlob: preparedTx.transactionBlob,
           destinationAddress: wallet.xrpl_address,
           amountXrp: parseFloat(amountXrp.toFixed(6)),
+          amountToken: currency !== 'XRP' ? parseFloat(amountToken.toFixed(6)) : undefined,
           status: 'pending',
+          // Wallet type indicator
+          ...(!xummPayload && {
+            walletType: currency === 'XRP' ? 'browser' : 'metamask',
+            note: currency === 'XRP' 
+              ? 'XUMM not available, use browser wallet instead'
+              : `Use MetaMask with XRPL Snap to sign ${currency} transaction`,
+          }),
+          // Include XUMM error info if XUMM failed (for debugging)
+          ...(xummError && {
+            xummError: xummError,
+          }),
         },
       };
     } catch (error) {
