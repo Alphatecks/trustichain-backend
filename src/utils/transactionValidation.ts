@@ -111,9 +111,27 @@ export function validateSignedTransactionFormat(value: any): {
         detectedFormat: 'object',
       };
     }
+    // If it's an object with any keys, it might be a transaction object without TransactionType yet
+    // (could be a partial transaction or different format) - be lenient
+    if (Object.keys(value).length > 0) {
+      return {
+        valid: true,
+        detectedFormat: 'object',
+      };
+    }
   }
 
-  // Unknown format
+  // For strings that are longer than 50 chars but not hex and not JSON, 
+  // they might still be valid in some format - be more lenient
+  if (typeof value === 'string' && value.length >= 50) {
+    // Don't reject immediately - let the XRPL client try to parse it
+    return {
+      valid: true,
+      detectedFormat: 'unknown',
+    };
+  }
+
+  // Unknown format - only reject if it's clearly wrong
   return {
     valid: false,
     error: `Invalid signed transaction format. Expected a signed transaction from MetaMask/XRPL Snap (hex string, transaction object, or wrapped format like { tx_blob: "..." }). Got: ${typeof value === 'string' ? value.substring(0, 100) + '...' : JSON.stringify(value).substring(0, 100) + '...'}`,

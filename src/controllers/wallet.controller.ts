@@ -78,7 +78,12 @@ export class WalletController {
         userId,
         transactionId: txId,
         hasSignedBlob: !!signedBlob,
+        signedBlobType: typeof signedBlob,
+        signedBlobPreview: typeof signedBlob === 'string' 
+          ? signedBlob.substring(0, 200) 
+          : JSON.stringify(signedBlob).substring(0, 200),
         bodyKeys: Object.keys(req.body),
+        fullBody: req.body,
       });
 
       if (!txId || !signedBlob) {
@@ -98,21 +103,34 @@ export class WalletController {
         return;
       }
 
-      // Validate signed transaction format early to catch common mistakes
+      // Validate signed transaction format early to catch common mistakes (especially UUIDs)
       const formatValidation = validateSignedTransactionFormat(signedBlob);
       if (!formatValidation.valid) {
-        res.status(400).json({
-          success: false,
-          message: formatValidation.error || 'Invalid signed transaction format',
-          error: 'Invalid transaction format',
-          details: {
-            detectedFormat: formatValidation.detectedFormat,
-            hint: formatValidation.detectedFormat === 'uuid' 
-              ? 'You are sending a transaction ID instead of the signed transaction. Please send the actual signed transaction returned by MetaMask/XRPL Snap.'
-              : 'Please ensure you are sending the signed transaction blob or object from MetaMask/XRPL Snap.',
-          },
+        // Only reject if it's clearly a UUID or obviously invalid
+        // For other cases, let the XRPL service handle validation
+        if (formatValidation.detectedFormat === 'uuid') {
+          res.status(400).json({
+            success: false,
+            message: formatValidation.error || 'Invalid signed transaction format',
+            error: 'Invalid transaction format',
+            details: {
+              detectedFormat: formatValidation.detectedFormat,
+              hint: 'You are sending a transaction ID instead of the signed transaction. Please send the actual signed transaction returned by MetaMask/XRPL Snap.',
+              receivedValue: typeof signedBlob === 'string' 
+                ? signedBlob.substring(0, 100) 
+                : JSON.stringify(signedBlob).substring(0, 100),
+            },
+          });
+          return;
+        }
+        // For other invalid formats, log but let it through to get more specific error from XRPL service
+        console.warn('Transaction format validation warning:', {
+          detectedFormat: formatValidation.detectedFormat,
+          error: formatValidation.error,
+          valuePreview: typeof signedBlob === 'string' 
+            ? signedBlob.substring(0, 200) 
+            : JSON.stringify(signedBlob).substring(0, 200),
         });
-        return;
       }
 
       const result = await walletService.submitSignedDeposit(userId, txId, signedBlob);
