@@ -516,19 +516,40 @@ export class WalletService {
         },
       };
     } catch (error) {
-      console.error('Error submitting signed deposit:', error);
+      console.error('Error submitting signed deposit:', {
+        error: error instanceof Error ? error.message : String(error),
+        transactionId,
+        signedTxType: typeof signedTxBlob,
+        signedTxPreview: typeof signedTxBlob === 'string' 
+          ? signedTxBlob.substring(0, 200) 
+          : JSON.stringify(signedTxBlob).substring(0, 200),
+      });
+      
       const errorMessage = error instanceof Error ? error.message : 'Failed to submit transaction';
       
-      // Provide more helpful error messages
+      // Provide more helpful error messages based on error type
       let userMessage = errorMessage;
-      if (errorMessage.includes('Invalid hex string') || errorMessage.includes('Invalid transaction format')) {
-        userMessage = `Invalid transaction format. MetaMask/XRPL Snap should return a signed transaction object or hex string. Please check the signed transaction format. Error: ${errorMessage}`;
+      let helpfulHint = '';
+      
+      if (errorMessage.includes('transaction ID') || errorMessage.includes('UUID')) {
+        userMessage = 'Invalid signed transaction format: You appear to be sending a transaction ID instead of the signed transaction blob.';
+        helpfulHint = 'Please ensure you are sending the actual signed transaction returned by MetaMask/XRPL Snap. The signed transaction should be either: (1) A hex string (1000+ characters), (2) A transaction object with TransactionType field, or (3) A wrapped format like { tx_blob: "..." }.';
+      } else if (errorMessage.includes('Invalid hex string') || errorMessage.includes('Invalid transaction format')) {
+        userMessage = 'Invalid transaction format. The signed transaction from MetaMask/XRPL Snap is not in the expected format.';
+        helpfulHint = 'Expected formats: (1) Hex string (1000+ characters) like "1200002280000000...", (2) Transaction object with TransactionType, Account, etc., or (3) Wrapped format like { tx_blob: "..." } or { signedTransaction: {...} }.';
+      } else if (errorMessage.includes('too short')) {
+        userMessage = 'Transaction blob appears too short to be a valid signed transaction.';
+        helpfulHint = 'XRPL transaction blobs are typically 1000+ characters long. Please ensure you are sending the complete signed transaction from MetaMask/XRPL Snap.';
+      } else if (errorMessage.includes('TransactionType')) {
+        userMessage = 'Transaction object is missing required fields.';
+        helpfulHint = 'A valid XRPL transaction object must include TransactionType, Account, and other required fields. Please ensure MetaMask/XRPL Snap returned a complete signed transaction.';
       }
       
       return {
         success: false,
         message: userMessage,
         error: errorMessage,
+        ...(helpfulHint && { hint: helpfulHint }),
       };
     }
   }

@@ -9,6 +9,7 @@ import {
   XUMMPayloadStatusResponse,
 } from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
+import { validateSignedTransactionFormat } from '../utils/transactionValidation';
 
 export class WalletController {
   /**
@@ -92,6 +93,23 @@ export class WalletController {
               bodyKeys: Object.keys(req.body),
             },
             expected: ['transactionId', 'signedTxBlob'],
+          },
+        });
+        return;
+      }
+
+      // Validate signed transaction format early to catch common mistakes
+      const formatValidation = validateSignedTransactionFormat(signedBlob);
+      if (!formatValidation.valid) {
+        res.status(400).json({
+          success: false,
+          message: formatValidation.error || 'Invalid signed transaction format',
+          error: 'Invalid transaction format',
+          details: {
+            detectedFormat: formatValidation.detectedFormat,
+            hint: formatValidation.detectedFormat === 'uuid' 
+              ? 'You are sending a transaction ID instead of the signed transaction. Please send the actual signed transaction returned by MetaMask/XRPL Snap.'
+              : 'Please ensure you are sending the signed transaction blob or object from MetaMask/XRPL Snap.',
           },
         });
         return;

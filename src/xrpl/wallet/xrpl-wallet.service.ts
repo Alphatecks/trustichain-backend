@@ -4,6 +4,7 @@
  */
 
 import { Client, Wallet, xrpToDrops, dropsToXrp, Payment } from 'xrpl';
+import { looksLikeTransactionId } from '../../utils/transactionValidation';
 
 export class XRPLWalletService {
   private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet'; // 'testnet' or 'mainnet'
@@ -172,6 +173,11 @@ export class XRPLWalletService {
       try {
         let txToSubmit: any;
 
+        // Early validation: Check for common mistakes (UUID/transaction ID)
+        if (typeof signedTxBlob === 'string' && looksLikeTransactionId(signedTxBlob)) {
+          throw new Error('Invalid transaction format: You appear to be sending a transaction ID (UUID) instead of the signed transaction blob. Please send the actual signed transaction returned by MetaMask/XRPL Snap.');
+        }
+
         // Handle different input formats
         if (typeof signedTxBlob === 'object') {
           // Already an object (from MetaMask/XRPL Snap)
@@ -200,9 +206,12 @@ export class XRPLWalletService {
               // It's a hex string - XRPL client can handle this directly
               txToSubmit = signedTxBlob;
             } else {
-              // Try as a transaction object stringified
-              // Some wallets return the transaction as a JSON string
-              throw new Error(`Invalid transaction format. Expected JSON object or hex string, got: ${signedTxBlob.substring(0, 100)}...`);
+              // Check if it looks like a transaction ID (UUID)
+              if (looksLikeTransactionId(signedTxBlob)) {
+                throw new Error('Invalid transaction format: You appear to be sending a transaction ID (UUID) instead of the signed transaction blob. Please send the actual signed transaction returned by MetaMask/XRPL Snap (e.g., { tx_blob: "..." } or the signed transaction object).');
+              }
+              // Invalid format
+              throw new Error(`Invalid transaction format. Expected a signed transaction from MetaMask/XRPL Snap (hex string 1000+ chars or transaction object). Got: ${signedTxBlob.substring(0, 100)}...`);
             }
           }
         } else {
@@ -210,12 +219,18 @@ export class XRPLWalletService {
         }
 
         // Validate transaction structure
-        if (typeof txToSubmit === 'string' && txToSubmit.length < 100) {
-          throw new Error('Transaction hex string appears too short');
+        if (typeof txToSubmit === 'string') {
+          if (txToSubmit.length < 100) {
+            throw new Error(`Transaction hex string appears too short (${txToSubmit.length} characters). Expected 1000+ characters for a valid XRPL transaction blob.`);
+          }
+          // Additional check: if it's a UUID, reject it
+          if (looksLikeTransactionId(txToSubmit)) {
+            throw new Error('Invalid transaction format: Detected transaction ID (UUID) in hex string. Please send the actual signed transaction blob from MetaMask/XRPL Snap.');
+          }
         }
 
         if (typeof txToSubmit === 'object' && !txToSubmit.TransactionType) {
-          throw new Error('Transaction object missing TransactionType field');
+          throw new Error('Transaction object missing TransactionType field. Expected a valid XRPL transaction object with TransactionType, Account, and other required fields.');
         }
 
         // Submit the signed transaction
