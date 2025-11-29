@@ -60,6 +60,36 @@ export interface CompleteFundWalletResponse {
   error?: string;
 }
 
+export interface CreateXUMMPayloadRequest {
+  transactionId: string;
+  transactionBlob: string;
+}
+
+export interface CreateXUMMPayloadResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    uuid: string;
+    next: {
+      always: string;
+    };
+  };
+  error?: string;
+}
+
+export interface XUMMPayloadStatusResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    signed: boolean;
+    signedTxBlob: string | null;
+    cancelled: boolean;
+    expired: boolean;
+    xrplTxHash: string | null;
+  };
+  error?: string;
+}
+
 export interface WithdrawWalletRequest {
   amount: number;
   currency: 'USD' | 'XRP';

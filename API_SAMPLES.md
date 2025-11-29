@@ -195,11 +195,128 @@ curl -X POST https://your-api.com/api/wallet/fund \
 ```
 
 **Note:** 
-- Frontend should prompt user's XRPL wallet (Xaman/Xumm SDK) to sign the transaction
-- If `requiresTrustLine` is true, user must sign the trust line transaction first before funding
-- After user signs, call `/api/wallet/fund/complete` with the signed transaction blob
+- After getting the transaction blob, call `/api/wallet/fund/create-payload` to create a XUMM payload
+- Frontend will receive a XUMM URL that opens the Xaman app for user signing
+- Poll `/api/wallet/fund/status` to check if the transaction has been signed
 
-### Fund Wallet (Deposit) - Step 2: Complete Transaction
+### Fund Wallet (Deposit) - Step 2: Create XUMM Payload
+
+**Endpoint:** `POST /api/wallet/fund/create-payload`
+
+**Description:** Creates a XUMM payload using backend XUMM API credentials. Returns a URL that the frontend can use to open the Xaman app for user signing.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+  "transactionBlob": "{\"TransactionType\":\"Payment\",\"Destination\":\"rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH\",\"Amount\":\"1000000000\"}"
+}
+```
+
+**Request:**
+```bash
+curl -X POST https://your-api.com/api/wallet/fund/create-payload \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "transactionBlob": "{\"TransactionType\":\"Payment\",...}"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "XUMM payload created successfully",
+  "data": {
+    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "next": {
+      "always": "https://xumm.app/sign/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    }
+  }
+}
+```
+
+**Note:** 
+- Frontend should open `data.next.always` URL in a new window or redirect user
+- This URL will open the Xaman app (if installed) or web interface for signing
+- The backend stores the XUMM UUID with the transaction for status checking
+
+### Fund Wallet (Deposit) - Step 3: Check Payload Status
+
+**Endpoint:** `GET /api/wallet/fund/status?transactionId=...`
+
+**Description:** Checks the status of a XUMM payload. Returns whether the transaction has been signed, cancelled, or expired. If signed, the backend automatically submits it to XRPL.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Request:**
+```bash
+curl -X GET "https://your-api.com/api/wallet/fund/status?transactionId=550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response (200 OK) - Pending:**
+```json
+{
+  "success": true,
+  "message": "Payload status retrieved",
+  "data": {
+    "signed": false,
+    "signedTxBlob": null,
+    "cancelled": false,
+    "expired": false,
+    "xrplTxHash": null
+  }
+}
+```
+
+**Response (200 OK) - Signed:**
+```json
+{
+  "success": true,
+  "message": "Transaction signed and submitted",
+  "data": {
+    "signed": true,
+    "signedTxBlob": "120000228000000024000000012E...",
+    "cancelled": false,
+    "expired": false,
+    "xrplTxHash": "A1B2C3D4E5F6..."
+  }
+}
+```
+
+**Response (200 OK) - Cancelled:**
+```json
+{
+  "success": true,
+  "message": "Payload status retrieved",
+  "data": {
+    "signed": false,
+    "signedTxBlob": null,
+    "cancelled": true,
+    "expired": false,
+    "xrplTxHash": null
+  }
+}
+```
+
+**Note:** 
+- Frontend should poll this endpoint every few seconds while waiting for user to sign
+- When `signed` is `true`, the transaction has been automatically submitted to XRPL
+- If `cancelled` or `expired` is `true`, the transaction failed and user needs to start over
+
+### Fund Wallet (Deposit) - Step 4: Complete Transaction (Alternative)
 
 **Endpoint:** `POST /api/wallet/fund/complete`
 

@@ -5,6 +5,9 @@ import {
   FundWalletResponse,
   CompleteFundWalletRequest,
   CompleteFundWalletResponse,
+  CreateXUMMPayloadRequest,
+  CreateXUMMPayloadResponse,
+  XUMMPayloadStatusResponse,
   WithdrawWalletRequest,
   WithdrawWalletResponse,
   WalletTransactionsResponse,
@@ -68,6 +71,65 @@ export class WalletController {
     try {
       const userId = req.userId!;
       const result = await walletService.completeFundWallet(userId, req.body.transactionId, req.body.signedTxBlob);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Create XUMM payload for transaction signing
+   * POST /api/wallet/fund/create-payload
+   */
+  async createXUMMPayload(req: Request<{}, CreateXUMMPayloadResponse, CreateXUMMPayloadRequest>, res: Response<CreateXUMMPayloadResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.createXUMMPayload(userId, req.body.transactionId, req.body.transactionBlob);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get XUMM payload status
+   * GET /api/wallet/fund/status?transactionId=...
+   */
+  async getXUMMPayloadStatus(req: Request, res: Response<XUMMPayloadStatusResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const transactionId = req.query.transactionId as string;
+
+      if (!transactionId) {
+        res.status(400).json({
+          success: false,
+          message: 'Transaction ID is required',
+          error: 'Transaction ID is required',
+        });
+        return;
+      }
+
+      const result = await walletService.getXUMMPayloadStatus(userId, transactionId);
 
       if (result.success) {
         res.status(200).json(result);

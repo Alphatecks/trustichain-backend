@@ -35,6 +35,26 @@ router.post('/fund/complete', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/wallet/fund/create-payload
+ * @desc    Create XUMM payload for transaction signing
+ * @access  Private
+ * @body    { transactionId: string, transactionBlob: string }
+ */
+router.post('/fund/create-payload', authenticate, asyncHandler(async (req, res) => {
+  await walletController.createXUMMPayload(req, res);
+}));
+
+/**
+ * @route   GET /api/wallet/fund/status
+ * @desc    Get XUMM payload status
+ * @access  Private
+ * @query   transactionId
+ */
+router.get('/fund/status', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getXUMMPayloadStatus(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/withdraw
  * @desc    Withdraw from wallet
  * @access  Private

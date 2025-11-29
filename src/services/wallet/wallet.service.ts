@@ -7,6 +7,7 @@ import { supabase, supabaseAdmin } from '../../config/supabase';
 import { FundWalletRequest, WithdrawWalletRequest, WalletTransaction } from '../../types/api/wallet.types';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
+import { xummService } from '../xumm/xumm.service';
 
 export class WalletService {
   /**
@@ -295,6 +296,182 @@ export class WalletService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to complete fund transaction',
         error: error instanceof Error ? error.message : 'Failed to complete fund transaction',
+      };
+    }
+  }
+
+  /**
+   * Create XUMM payload for transaction signing
+   */
+  async createXUMMPayload(
+    userId: string,
+    transactionId: string,
+    transactionBlob: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      uuid: string;
+      next: {
+        always: string;
+      };
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify transaction belongs to user
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'Transaction not found',
+          error: 'Transaction not found',
+        };
+      }
+
+      // Parse transaction blob
+      const txJson = JSON.parse(transactionBlob);
+
+      // Create XUMM payload
+      const xummPayload = await xummService.createPayload(txJson);
+
+      // Store XUMM UUID in transaction (we can add a column for this or use metadata)
+      // For now, we'll store it in a separate table or use transaction metadata
+      // Update transaction with XUMM UUID
+      await adminClient
+        .from('transactions')
+        .update({
+          // Store XUMM UUID in description or add a new column
+          description: `${transaction.description || ''} | XUMM_UUID:${xummPayload.uuid}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transactionId);
+
+      return {
+        success: true,
+        message: 'XUMM payload created successfully',
+        data: {
+          uuid: xummPayload.uuid,
+          next: xummPayload.next,
+        },
+      };
+    } catch (error) {
+      console.error('Error creating XUMM payload:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create XUMM payload',
+        error: error instanceof Error ? error.message : 'Failed to create XUMM payload',
+      };
+    }
+  }
+
+  /**
+   * Get XUMM payload status
+   */
+  async getXUMMPayloadStatus(
+    userId: string,
+    transactionId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      signed: boolean;
+      signedTxBlob: string | null;
+      cancelled: boolean;
+      expired: boolean;
+      xrplTxHash: string | null;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'Transaction not found',
+          error: 'Transaction not found',
+        };
+      }
+
+      // Extract XUMM UUID from description
+      const uuidMatch = transaction.description?.match(/XUMM_UUID:([a-f0-9-]+)/i);
+      if (!uuidMatch) {
+        return {
+          success: false,
+          message: 'XUMM UUID not found for this transaction',
+          error: 'XUMM UUID not found',
+        };
+      }
+
+      const xummUuid = uuidMatch[1];
+
+      // Get payload status from XUMM
+      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
+
+      // If signed, submit to XRPL and update transaction
+      if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
+        // XUMM returns hex-encoded transaction blob
+        // Submit signed transaction to XRPL (hex format)
+        const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
+
+        // Update transaction status
+        const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: submitResult.hash,
+            status: status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transactionId);
+
+        return {
+          success: true,
+          message: 'Transaction signed and submitted',
+          data: {
+            signed: true,
+            signedTxBlob: payloadStatus.response.hex,
+            cancelled: payloadStatus.meta.cancelled,
+            expired: payloadStatus.meta.expired,
+            xrplTxHash: submitResult.hash,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Payload status retrieved',
+        data: {
+          signed: payloadStatus.meta.signed,
+          signedTxBlob: payloadStatus.response?.hex || null,
+          cancelled: payloadStatus.meta.cancelled,
+          expired: payloadStatus.meta.expired,
+          xrplTxHash: payloadStatus.response?.txid || null,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting XUMM payload status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get payload status',
+        error: error instanceof Error ? error.message : 'Failed to get payload status',
       };
     }
   }
