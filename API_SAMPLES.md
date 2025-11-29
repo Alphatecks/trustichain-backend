@@ -101,11 +101,11 @@ curl -X GET https://your-api.com/api/wallet/balance \
 }
 ```
 
-### Fund Wallet (Deposit) - Step 1: Prepare Transaction
+### Fund Wallet (Deposit)
 
 **Endpoint:** `POST /api/wallet/fund`
 
-**Description:** Prepares a deposit transaction for user signing. Returns an unsigned transaction blob that the frontend should send to the user's XRPL wallet (Xaman/Xumm, Ledger, etc.) for signing.
+**Description:** Initiates a deposit transaction to fund the wallet.
 
 **Headers:**
 ```
@@ -117,11 +117,9 @@ Content-Type: application/json
 ```json
 {
   "amount": 1000,
-  "currency": "XRP"
+  "currency": "USD"
 }
 ```
-
-**Supported Currencies:** `XRP`, `USDT`, `USDC`, `USD` (defaults to USDT)
 
 **Request:**
 ```bash
@@ -130,220 +128,7 @@ curl -X POST https://your-api.com/api/wallet/fund \
   -H "Content-Type: application/json" \
   -d '{
     "amount": 1000,
-    "currency": "XRP"
-  }'
-```
-
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "message": "Transaction prepared. Please sign in your wallet.",
-  "data": {
-    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-    "transaction": {
-      "TransactionType": "Payment",
-      "Destination": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
-      "Amount": "1000000000",
-      "Fee": "12",
-      "Sequence": 12345,
-      "Account": "rUserWalletAddress..."
-    },
-    "transactionBlob": "{\"TransactionType\":\"Payment\",...}",
-    "instructions": "Please sign this transaction in your XRPL wallet to send 1000 XRP to rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
-    "amount": {
-      "xrp": 1000,
-      "usdt": 0,
-      "usdc": 0
-    },
-    "requiresTrustLine": false,
-    "trustLineTransaction": null
-  }
-}
-```
-
-**Response for Token (USDT/USDC) - May Require Trust Line:**
-```json
-{
-  "success": true,
-  "message": "Transaction prepared. Please sign in your wallet.",
-  "data": {
-    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-    "transaction": { ... },
-    "transactionBlob": "...",
-    "instructions": "Please sign this transaction in your XRPL wallet to send 1000 USDT to rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
-    "amount": {
-      "xrp": 0,
-      "usdt": 1000,
-      "usdc": 0
-    },
-    "requiresTrustLine": true,
-    "trustLineTransaction": {
-      "transaction": {
-        "TransactionType": "TrustSet",
-        "LimitAmount": {
-          "currency": "USD",
-          "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
-          "value": "1000000000"
-        }
-      },
-      "transactionBlob": "...",
-      "instructions": "Please sign this transaction to set up a trust line for USDT. This is required before you can receive USDT tokens."
-    }
-  }
-}
-```
-
-**Note:** 
-- After getting the transaction blob, call `/api/wallet/fund/create-payload` to create a XUMM payload
-- Frontend will receive a XUMM URL that opens the Xaman app for user signing
-- Poll `/api/wallet/fund/status` to check if the transaction has been signed
-
-### Fund Wallet (Deposit) - Step 2: Create XUMM Payload
-
-**Endpoint:** `POST /api/wallet/fund/create-payload`
-
-**Description:** Creates a XUMM payload using backend XUMM API credentials. Returns a URL that the frontend can use to open the Xaman app for user signing.
-
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-  "transactionBlob": "{\"TransactionType\":\"Payment\",\"Destination\":\"rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH\",\"Amount\":\"1000000000\"}"
-}
-```
-
-**Request:**
-```bash
-curl -X POST https://your-api.com/api/wallet/fund/create-payload \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-    "transactionBlob": "{\"TransactionType\":\"Payment\",...}"
-  }'
-```
-
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "message": "XUMM payload created successfully",
-  "data": {
-    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "next": {
-      "always": "https://xumm.app/sign/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-    }
-  }
-}
-```
-
-**Note:** 
-- Frontend should open `data.next.always` URL in a new window or redirect user
-- This URL will open the Xaman app (if installed) or web interface for signing
-- The backend stores the XUMM UUID with the transaction for status checking
-
-### Fund Wallet (Deposit) - Step 3: Check Payload Status
-
-**Endpoint:** `GET /api/wallet/fund/status?transactionId=...`
-
-**Description:** Checks the status of a XUMM payload. Returns whether the transaction has been signed, cancelled, or expired. If signed, the backend automatically submits it to XRPL.
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Request:**
-```bash
-curl -X GET "https://your-api.com/api/wallet/fund/status?transactionId=550e8400-e29b-41d4-a716-446655440000" \
-  -H "Authorization: Bearer <token>"
-```
-
-**Response (200 OK) - Pending:**
-```json
-{
-  "success": true,
-  "message": "Payload status retrieved",
-  "data": {
-    "signed": false,
-    "signedTxBlob": null,
-    "cancelled": false,
-    "expired": false,
-    "xrplTxHash": null
-  }
-}
-```
-
-**Response (200 OK) - Signed:**
-```json
-{
-  "success": true,
-  "message": "Transaction signed and submitted",
-  "data": {
-    "signed": true,
-    "signedTxBlob": "120000228000000024000000012E...",
-    "cancelled": false,
-    "expired": false,
-    "xrplTxHash": "A1B2C3D4E5F6..."
-  }
-}
-```
-
-**Response (200 OK) - Cancelled:**
-```json
-{
-  "success": true,
-  "message": "Payload status retrieved",
-  "data": {
-    "signed": false,
-    "signedTxBlob": null,
-    "cancelled": true,
-    "expired": false,
-    "xrplTxHash": null
-  }
-}
-```
-
-**Note:** 
-- Frontend should poll this endpoint every few seconds while waiting for user to sign
-- When `signed` is `true`, the transaction has been automatically submitted to XRPL
-- If `cancelled` or `expired` is `true`, the transaction failed and user needs to start over
-
-### Fund Wallet (Deposit) - Step 4: Complete Transaction (Alternative)
-
-**Endpoint:** `POST /api/wallet/fund/complete`
-
-**Description:** Completes the wallet funding after the user signs the transaction in their wallet. Submits the signed transaction to XRPL.
-
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-  "signedTxBlob": "{\"TransactionType\":\"Payment\",\"signed\":true,...}"
-}
-```
-
-**Request:**
-```bash
-curl -X POST https://your-api.com/api/wallet/fund/complete \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
-    "signedTxBlob": "{\"TransactionType\":\"Payment\",...}"
+    "currency": "USD"
   }'
 ```
 
@@ -354,18 +139,21 @@ curl -X POST https://your-api.com/api/wallet/fund/complete \
   "message": "Wallet funded successfully",
   "data": {
     "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "amount": {
+      "usd": 1000.00,
+      "xrp": 1841.62
+    },
     "xrplTxHash": "A1B2C3D4E5F6...",
-    "status": "completed"
+    "status": "processing"
   }
 }
 ```
 
-**Error Response (400 Bad Request):**
+**Alternative Request (XRP):**
 ```json
 {
-  "success": false,
-  "message": "Transaction not found",
-  "error": "Transaction not found"
+  "amount": 1000,
+  "currency": "XRP"
 }
 ```
 

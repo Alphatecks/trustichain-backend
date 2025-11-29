@@ -7,7 +7,7 @@ import { supabase, supabaseAdmin } from '../../config/supabase';
 import { FundWalletRequest, WithdrawWalletRequest, WalletTransaction } from '../../types/api/wallet.types';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
-import { xummService } from '../xumm/xumm.service';
+import { encryptionService } from '../encryption/encryption.service';
 
 export class WalletService {
   /**
@@ -38,14 +38,18 @@ export class WalletService {
 
       // If wallet doesn't exist, create one
       if (walletError || !wallet) {
-        // Generate XRPL address (this would normally be done through XRPL wallet service)
-        const xrplAddress = await xrplWalletService.generateAddress();
+        // Generate XRPL wallet (address + secret)
+        const { address: xrplAddress, secret: walletSecret } = await xrplWalletService.generateWallet();
+        
+        // Encrypt the wallet secret before storing
+        const encryptedSecret = encryptionService.encrypt(walletSecret);
         
         const { data: newWallet, error: createError } = await adminClient
           .from('wallets')
           .insert({
             user_id: userId,
             xrpl_address: xrplAddress,
+            encrypted_wallet_secret: encryptedSecret,
             balance_xrp: 0,
             balance_usdt: 0,
             balance_usdc: 0,
@@ -101,28 +105,19 @@ export class WalletService {
   }
 
   /**
-   * Fund wallet (deposit) - Prepare transaction for user signing
-   * Returns unsigned transaction blob that frontend sends to user's wallet
+   * Fund wallet (deposit)
    */
   async fundWallet(userId: string, request: FundWalletRequest): Promise<{
     success: boolean;
     message: string;
     data?: {
       transactionId: string;
-      transaction: any;
-      transactionBlob: string;
-      instructions: string;
       amount: {
+        usd: number;
         xrp: number;
-        usdt: number;
-        usdc: number;
       };
-      requiresTrustLine?: boolean;
-      trustLineTransaction?: {
-        transaction: any;
-        transactionBlob: string;
-        instructions: string;
-      };
+      xrplTxHash?: string;
+      status: string;
     };
     error?: string;
   }> {
@@ -144,19 +139,18 @@ export class WalletService {
         };
       }
 
-      // Determine currency type
-      let currency: 'XRP' | 'USDT' | 'USDC' = 'XRP';
-      let amount = request.amount;
+      // Convert amount to XRP if needed
+      let amountXrp = request.amount;
+      let amountUsd = request.amount;
 
       if (request.currency === 'USD') {
-        // For USD, we'll default to USDT (or could prompt user to choose)
-        currency = 'USDT';
-      } else if (request.currency === 'XRP') {
-        currency = 'XRP';
-      } else if (request.currency === 'USDT') {
-        currency = 'USDT';
-      } else if (request.currency === 'USDC') {
-        currency = 'USDC';
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        amountXrp = request.amount / usdRate;
+      } else {
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        amountUsd = request.amount * usdRate;
       }
 
       // Create transaction record
@@ -165,10 +159,10 @@ export class WalletService {
         .insert({
           user_id: userId,
           type: 'deposit',
-          amount_xrp: currency === 'XRP' ? amount : 0,
-          amount_usd: currency !== 'XRP' ? amount : 0,
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
           status: 'pending',
-          description: `Deposit ${request.amount} ${currency}`,
+          description: `Deposit ${request.amount} ${request.currency}`,
         })
         .select()
         .single();
@@ -181,297 +175,41 @@ export class WalletService {
         };
       }
 
-      // Prepare payment transaction for user signing
-      const paymentTx = await xrplWalletService.preparePaymentTransaction(
+      // In a real implementation, this would initiate the XRPL transaction
+      // For now, we'll simulate it
+      const xrplTxHash = await xrplWalletService.createDepositTransaction(
         wallet.xrpl_address,
-        amount,
-        currency
+        amountXrp
       );
 
-      // For tokens, check if trust line is needed
-      let requiresTrustLine = false;
-      let trustLineTx = undefined;
-
-      if (currency !== 'XRP') {
-        // Check if user has trust line (simplified - in production, check actual trust lines)
-        // For now, we'll prepare trust line transaction as backup
-        trustLineTx = await xrplWalletService.prepareTrustLineTransaction(currency);
-        requiresTrustLine = true; // Frontend should check and prompt if needed
-      }
-
-      // Calculate amounts for response
-      const amounts = {
-        xrp: currency === 'XRP' ? amount : 0,
-        usdt: currency === 'USDT' ? amount : 0,
-        usdc: currency === 'USDC' ? amount : 0,
-      };
-
-      return {
-        success: true,
-        message: 'Transaction prepared. Please sign in your wallet.',
-        data: {
-          transactionId: transaction.id,
-          transaction: paymentTx.transaction,
-          transactionBlob: paymentTx.transactionBlob,
-          instructions: paymentTx.instructions,
-          amount: amounts,
-          requiresTrustLine,
-          trustLineTransaction: trustLineTx,
-        },
-      };
-    } catch (error) {
-      console.error('Error preparing fund wallet transaction:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to prepare fund transaction',
-        error: error instanceof Error ? error.message : 'Failed to prepare fund transaction',
-      };
-    }
-  }
-
-  /**
-   * Complete wallet funding after user signs transaction
-   * Called by frontend after user signs the transaction in their wallet
-   */
-  async completeFundWallet(
-    userId: string,
-    transactionId: string,
-    signedTxBlob: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data?: {
-      transactionId: string;
-      xrplTxHash: string;
-      status: string;
-    };
-    error?: string;
-  }> {
-    try {
-      const adminClient = supabaseAdmin || supabase;
-
-      // Get transaction
-      const { data: transaction } = await adminClient
-        .from('transactions')
-        .select('*')
-        .eq('id', transactionId)
-        .eq('user_id', userId)
-        .single();
-
-      if (!transaction) {
-        return {
-          success: false,
-          message: 'Transaction not found',
-          error: 'Transaction not found',
-        };
-      }
-
-      // Submit signed transaction to XRPL
-      const submitResult = await xrplWalletService.submitSignedTransaction(signedTxBlob);
-
-      // Update transaction with XRPL hash and status
-      const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
-      
+      // Update transaction with XRPL hash
       await adminClient
         .from('transactions')
         .update({
-          xrpl_tx_hash: submitResult.hash,
-          status: status,
-          updated_at: new Date().toISOString(),
+          xrpl_tx_hash: xrplTxHash,
+          status: 'processing',
         })
-        .eq('id', transactionId);
+        .eq('id', transaction.id);
 
       return {
         success: true,
-        message: status === 'completed' ? 'Wallet funded successfully' : 'Transaction failed',
+        message: 'Wallet funded successfully',
         data: {
           transactionId: transaction.id,
-          xrplTxHash: submitResult.hash,
-          status: status,
-        },
-      };
-    } catch (error) {
-      console.error('Error completing fund wallet:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to complete fund transaction',
-        error: error instanceof Error ? error.message : 'Failed to complete fund transaction',
-      };
-    }
-  }
-
-  /**
-   * Create XUMM payload for transaction signing
-   */
-  async createXUMMPayload(
-    userId: string,
-    transactionId: string,
-    transactionBlob: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data?: {
-      uuid: string;
-      next: {
-        always: string;
-      };
-    };
-    error?: string;
-  }> {
-    try {
-      const adminClient = supabaseAdmin || supabase;
-
-      // Verify transaction belongs to user
-      const { data: transaction } = await adminClient
-        .from('transactions')
-        .select('*')
-        .eq('id', transactionId)
-        .eq('user_id', userId)
-        .single();
-
-      if (!transaction) {
-        return {
-          success: false,
-          message: 'Transaction not found',
-          error: 'Transaction not found',
-        };
-      }
-
-      // Parse transaction blob
-      const txJson = JSON.parse(transactionBlob);
-
-      // Create XUMM payload
-      const xummPayload = await xummService.createPayload(txJson);
-
-      // Store XUMM UUID in transaction (we can add a column for this or use metadata)
-      // For now, we'll store it in a separate table or use transaction metadata
-      // Update transaction with XUMM UUID
-      await adminClient
-        .from('transactions')
-        .update({
-          // Store XUMM UUID in description or add a new column
-          description: `${transaction.description || ''} | XUMM_UUID:${xummPayload.uuid}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', transactionId);
-
-      return {
-        success: true,
-        message: 'XUMM payload created successfully',
-        data: {
-          uuid: xummPayload.uuid,
-          next: xummPayload.next,
-        },
-      };
-    } catch (error) {
-      console.error('Error creating XUMM payload:', error);
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to create XUMM payload',
-        error: error instanceof Error ? error.message : 'Failed to create XUMM payload',
-      };
-    }
-  }
-
-  /**
-   * Get XUMM payload status
-   */
-  async getXUMMPayloadStatus(
-    userId: string,
-    transactionId: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data?: {
-      signed: boolean;
-      signedTxBlob: string | null;
-      cancelled: boolean;
-      expired: boolean;
-      xrplTxHash: string | null;
-    };
-    error?: string;
-  }> {
-    try {
-      const adminClient = supabaseAdmin || supabase;
-
-      // Get transaction
-      const { data: transaction } = await adminClient
-        .from('transactions')
-        .select('*')
-        .eq('id', transactionId)
-        .eq('user_id', userId)
-        .single();
-
-      if (!transaction) {
-        return {
-          success: false,
-          message: 'Transaction not found',
-          error: 'Transaction not found',
-        };
-      }
-
-      // Extract XUMM UUID from description
-      const uuidMatch = transaction.description?.match(/XUMM_UUID:([a-f0-9-]+)/i);
-      if (!uuidMatch) {
-        return {
-          success: false,
-          message: 'XUMM UUID not found for this transaction',
-          error: 'XUMM UUID not found',
-        };
-      }
-
-      const xummUuid = uuidMatch[1];
-
-      // Get payload status from XUMM
-      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
-
-      // If signed, submit to XRPL and update transaction
-      if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
-        // XUMM returns hex-encoded transaction blob
-        // Submit signed transaction to XRPL (hex format)
-        const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
-
-        // Update transaction status
-        const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
-        await adminClient
-          .from('transactions')
-          .update({
-            xrpl_tx_hash: submitResult.hash,
-            status: status,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', transactionId);
-
-        return {
-          success: true,
-          message: 'Transaction signed and submitted',
-          data: {
-            signed: true,
-            signedTxBlob: payloadStatus.response.hex,
-            cancelled: payloadStatus.meta.cancelled,
-            expired: payloadStatus.meta.expired,
-            xrplTxHash: submitResult.hash,
+          amount: {
+            usd: parseFloat(amountUsd.toFixed(2)),
+            xrp: parseFloat(amountXrp.toFixed(6)),
           },
-        };
-      }
-
-      return {
-        success: true,
-        message: 'Payload status retrieved',
-        data: {
-          signed: payloadStatus.meta.signed,
-          signedTxBlob: payloadStatus.response?.hex || null,
-          cancelled: payloadStatus.meta.cancelled,
-          expired: payloadStatus.meta.expired,
-          xrplTxHash: payloadStatus.response?.txid || null,
+          xrplTxHash,
+          status: 'processing',
         },
       };
     } catch (error) {
-      console.error('Error getting XUMM payload status:', error);
+      console.error('Error funding wallet:', error);
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Failed to get payload status',
-        error: error instanceof Error ? error.message : 'Failed to get payload status',
+        message: error instanceof Error ? error.message : 'Failed to fund wallet',
+        error: error instanceof Error ? error.message : 'Failed to fund wallet',
       };
     }
   }
@@ -565,11 +303,33 @@ export class WalletService {
         };
       }
 
-      // Create XRPL withdrawal transaction
+      // Get and decrypt wallet secret for signing withdrawal
+      if (!wallet.encrypted_wallet_secret) {
+        return {
+          success: false,
+          message: 'Wallet secret not available. Cannot process withdrawal.',
+          error: 'Wallet secret not available',
+        };
+      }
+
+      let walletSecret: string;
+      try {
+        walletSecret = encryptionService.decrypt(wallet.encrypted_wallet_secret);
+      } catch (error) {
+        console.error('Error decrypting wallet secret:', error);
+        return {
+          success: false,
+          message: 'Failed to decrypt wallet secret',
+          error: 'Decryption failed',
+        };
+      }
+
+      // Create XRPL withdrawal transaction with wallet secret
       const xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
         wallet.xrpl_address,
         request.destinationAddress,
-        amountXrp
+        amountXrp,
+        walletSecret
       );
 
       // Update transaction

@@ -31,11 +31,10 @@ npm install
      - `SUPABASE_URL`: Your Supabase project URL
      - `SUPABASE_ANON_KEY`: Your Supabase anon/public key
      - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key (optional, for admin operations)
-   - Fill in your XUMM (Xaman) API credentials (for wallet signing):
-     - `XUMM_API_KEY`: Your XUMM API key (get from https://apps.xaman.dev/)
-     - `XUMM_API_SECRET`: Your XUMM API secret (get from https://apps.xaman.dev/)
-   - Optional XRPL configuration:
-     - `XRPL_NETWORK`: Network to use (`testnet` or `mainnet`, defaults to `testnet`)
+   - **IMPORTANT**: Set encryption key for wallet secrets:
+     - `ENCRYPTION_KEY`: A secure 64-character hex string (256 bits) for encrypting wallet secrets
+     - Generate one using: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+     - **CRITICAL**: Never commit this key to version control. Store it securely in your deployment environment.
 
 3. **Set up Supabase database:**
    - Run the migration file in your Supabase SQL editor:
