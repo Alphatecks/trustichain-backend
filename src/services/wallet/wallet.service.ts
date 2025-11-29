@@ -421,7 +421,7 @@ export class WalletService {
   async submitSignedDeposit(
     userId: string,
     transactionId: string,
-    signedTxBlob: string
+    signedTxBlob: string | object
   ): Promise<{
     success: boolean;
     message: string;
@@ -459,6 +459,19 @@ export class WalletService {
       }
 
       // Submit signed transaction to XRPL
+      // MetaMask/XRPL Snap may return different formats - pass it directly to handle flexibly
+      // Log for debugging
+      console.log('Submitting signed transaction:', {
+        transactionId,
+        type: typeof signedTxBlob,
+        isString: typeof signedTxBlob === 'string',
+        isObject: typeof signedTxBlob === 'object',
+        length: typeof signedTxBlob === 'string' ? signedTxBlob.length : 'N/A',
+        preview: typeof signedTxBlob === 'string' 
+          ? signedTxBlob.substring(0, 200) 
+          : JSON.stringify(signedTxBlob).substring(0, 200),
+      });
+
       const submitResult = await xrplWalletService.submitSignedTransaction(signedTxBlob);
 
       // Update transaction status
@@ -504,10 +517,18 @@ export class WalletService {
       };
     } catch (error) {
       console.error('Error submitting signed deposit:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to submit transaction';
+      
+      // Provide more helpful error messages
+      let userMessage = errorMessage;
+      if (errorMessage.includes('Invalid hex string') || errorMessage.includes('Invalid transaction format')) {
+        userMessage = `Invalid transaction format. MetaMask/XRPL Snap should return a signed transaction object or hex string. Please check the signed transaction format. Error: ${errorMessage}`;
+      }
+      
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Failed to submit transaction',
-        error: error instanceof Error ? error.message : 'Failed to submit transaction',
+        message: userMessage,
+        error: errorMessage,
       };
     }
   }

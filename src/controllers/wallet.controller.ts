@@ -66,11 +66,11 @@ export class WalletController {
   async submitSignedDeposit(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.userId!;
-      const { transactionId, signedTxBlob, signedTransaction, txBlob } = req.body;
+      const { transactionId, signedTxBlob, signedTransaction, txBlob, signedTx } = req.body;
 
       // Support multiple field names for flexibility
       const txId = transactionId;
-      const signedBlob = signedTxBlob || signedTransaction || txBlob;
+      const signedBlob = signedTxBlob || signedTransaction || txBlob || signedTx;
 
       // Log received data for debugging
       console.log('Submit signed deposit request:', {

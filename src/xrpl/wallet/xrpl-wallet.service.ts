@@ -158,9 +158,9 @@ export class XRPLWalletService {
 
   /**
    * Submit a signed transaction blob
-   * Called after user signs the transaction via XUMM
+   * Called after user signs the transaction via XUMM, MetaMask, or other wallets
    */
-  async submitSignedTransaction(signedTxBlob: string): Promise<{
+  async submitSignedTransaction(signedTxBlob: string | object): Promise<{
     hash: string;
     status: string;
     result: any;
@@ -170,13 +170,52 @@ export class XRPLWalletService {
       await client.connect();
 
       try {
-        // Parse if it's a JSON string, otherwise assume it's already a hex blob
         let txToSubmit: any;
-        try {
-          txToSubmit = JSON.parse(signedTxBlob);
-        } catch {
-          // If parsing fails, assume it's a hex-encoded blob
-          txToSubmit = signedTxBlob;
+
+        // Handle different input formats
+        if (typeof signedTxBlob === 'object') {
+          // Already an object (from MetaMask/XRPL Snap)
+          // Check if it's wrapped in a response object (e.g., { tx_blob: "...", signedTransaction: {...} })
+          if ('tx_blob' in signedTxBlob && typeof (signedTxBlob as any).tx_blob === 'string') {
+            // MetaMask/XRPL Snap returns { tx_blob: "hex..." }
+            txToSubmit = (signedTxBlob as any).tx_blob;
+          } else if ('signedTransaction' in signedTxBlob) {
+            // Some wallets wrap it as { signedTransaction: {...} }
+            txToSubmit = (signedTxBlob as any).signedTransaction;
+          } else if ('transaction' in signedTxBlob) {
+            // Some wallets wrap it as { transaction: {...} }
+            txToSubmit = (signedTxBlob as any).transaction;
+          } else {
+            // Direct transaction object
+            txToSubmit = signedTxBlob;
+          }
+        } else if (typeof signedTxBlob === 'string') {
+          // Try to parse as JSON first
+          try {
+            txToSubmit = JSON.parse(signedTxBlob);
+          } catch {
+            // If parsing fails, check if it's a hex string
+            // Hex strings for XRPL are typically long (1000+ chars)
+            if (signedTxBlob.length > 100 && /^[0-9A-Fa-f]+$/.test(signedTxBlob)) {
+              // It's a hex string - XRPL client can handle this directly
+              txToSubmit = signedTxBlob;
+            } else {
+              // Try as a transaction object stringified
+              // Some wallets return the transaction as a JSON string
+              throw new Error(`Invalid transaction format. Expected JSON object or hex string, got: ${signedTxBlob.substring(0, 100)}...`);
+            }
+          }
+        } else {
+          throw new Error(`Invalid transaction type: ${typeof signedTxBlob}`);
+        }
+
+        // Validate transaction structure
+        if (typeof txToSubmit === 'string' && txToSubmit.length < 100) {
+          throw new Error('Transaction hex string appears too short');
+        }
+
+        if (typeof txToSubmit === 'object' && !txToSubmit.TransactionType) {
+          throw new Error('Transaction object missing TransactionType field');
         }
 
         // Submit the signed transaction
@@ -191,6 +230,13 @@ export class XRPLWalletService {
         };
       } catch (error) {
         await client.disconnect();
+        console.error('Error in submitSignedTransaction:', {
+          error: error instanceof Error ? error.message : String(error),
+          inputType: typeof signedTxBlob,
+          inputPreview: typeof signedTxBlob === 'string' 
+            ? signedTxBlob.substring(0, 200) 
+            : JSON.stringify(signedTxBlob).substring(0, 200),
+        });
         throw error;
       }
     } catch (error) {
