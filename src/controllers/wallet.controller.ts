@@ -66,18 +66,38 @@ export class WalletController {
   async submitSignedDeposit(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.userId!;
-      const { transactionId, signedTxBlob } = req.body;
+      const { transactionId, signedTxBlob, signedTransaction, txBlob } = req.body;
 
-      if (!transactionId || !signedTxBlob) {
+      // Support multiple field names for flexibility
+      const txId = transactionId;
+      const signedBlob = signedTxBlob || signedTransaction || txBlob;
+
+      // Log received data for debugging
+      console.log('Submit signed deposit request:', {
+        userId,
+        transactionId: txId,
+        hasSignedBlob: !!signedBlob,
+        bodyKeys: Object.keys(req.body),
+      });
+
+      if (!txId || !signedBlob) {
         res.status(400).json({
           success: false,
           message: 'Transaction ID and signed transaction blob are required',
           error: 'Missing required fields',
+          details: {
+            received: {
+              transactionId: !!txId,
+              signedTxBlob: !!signedBlob,
+              bodyKeys: Object.keys(req.body),
+            },
+            expected: ['transactionId', 'signedTxBlob'],
+          },
         });
         return;
       }
 
-      const result = await walletService.submitSignedDeposit(userId, transactionId, signedTxBlob);
+      const result = await walletService.submitSignedDeposit(userId, txId, signedBlob);
 
       if (result.success) {
         res.status(200).json(result);
@@ -86,6 +106,7 @@ export class WalletController {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      console.error('Error submitting signed deposit:', error);
       res.status(500).json({
         success: false,
         message: errorMessage,
