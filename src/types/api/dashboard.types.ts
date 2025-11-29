@@ -7,8 +7,9 @@ export interface DashboardSummaryResponse {
   message: string;
   data?: {
     balance: {
-      usd: number;
       xrp: number;
+      usdt: number;
+      usdc: number;
     };
     activeEscrows: {
       count: number;
@@ -28,8 +29,9 @@ export interface WalletBalanceResponse {
   message: string;
   data?: {
     balance: {
-      usd: number;
       xrp: number;
+      usdt: number;
+      usdc: number;
     };
     xrplAddress: string;
   };

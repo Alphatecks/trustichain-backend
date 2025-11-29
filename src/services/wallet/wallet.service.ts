@@ -17,8 +17,9 @@ export class WalletService {
     message: string;
     data?: {
       balance: {
-        usd: number;
         xrp: number;
+        usdt: number;
+        usdc: number;
       };
       xrplAddress: string;
     };
@@ -45,7 +46,8 @@ export class WalletService {
             user_id: userId,
             xrpl_address: xrplAddress,
             balance_xrp: 0,
-            balance_usd: 0,
+            balance_usdt: 0,
+            balance_usdc: 0,
           })
           .select()
           .single();
@@ -61,20 +63,16 @@ export class WalletService {
         wallet = newWallet;
       }
 
-      // Get live balance from XRPL
-      const xrplBalance = await xrplWalletService.getBalance(wallet.xrpl_address);
-      
-      // Get exchange rate for USD conversion
-      const exchangeRates = await exchangeService.getLiveExchangeRates();
-      const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
-      const balanceUsd = xrplBalance * usdRate;
+      // Get live balances from XRPL (XRP, USDT, USDC)
+      const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
 
       // Update wallet balance in database
       await adminClient
         .from('wallets')
         .update({
-          balance_xrp: xrplBalance,
-          balance_usd: balanceUsd,
+          balance_xrp: balances.xrp,
+          balance_usdt: balances.usdt,
+          balance_usdc: balances.usdc,
           updated_at: new Date().toISOString(),
         })
         .eq('id', wallet.id);
@@ -84,8 +82,9 @@ export class WalletService {
         message: 'Wallet balance retrieved successfully',
         data: {
           balance: {
-            usd: parseFloat(balanceUsd.toFixed(2)),
-            xrp: parseFloat(xrplBalance.toFixed(6)),
+            xrp: parseFloat(balances.xrp.toFixed(6)),
+            usdt: parseFloat(balances.usdt.toFixed(6)),
+            usdc: parseFloat(balances.usdc.toFixed(6)),
           },
           xrplAddress: wallet.xrpl_address,
         },

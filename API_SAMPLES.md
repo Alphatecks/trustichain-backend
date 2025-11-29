@@ -38,8 +38,9 @@ curl -X GET https://your-api.com/api/dashboard/summary \
   "message": "Dashboard summary retrieved successfully",
   "data": {
     "balance": {
-      "usd": 24567.89,
-      "xrp": 45234.123456
+      "xrp": 45234.123456,
+      "usdt": 1000.500000,
+      "usdc": 500.250000
     },
     "activeEscrows": {
       "count": 3,
@@ -71,7 +72,7 @@ curl -X GET https://your-api.com/api/dashboard/summary \
 
 **Endpoint:** `GET /api/wallet/balance`
 
-**Description:** Returns the current wallet balance in USD and XRP, along with the XRPL address.
+**Description:** Returns the current wallet balance in XRP, USDT, and USDC, along with the XRPL address.
 
 **Headers:**
 ```
@@ -91,8 +92,9 @@ curl -X GET https://your-api.com/api/wallet/balance \
   "message": "Wallet balance retrieved successfully",
   "data": {
     "balance": {
-      "usd": 24567.89,
-      "xrp": 45234.123456
+      "xrp": 45234.123456,
+      "usdt": 1000.500000,
+      "usdc": 500.250000
     },
     "xrplAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
   }
