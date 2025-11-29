@@ -9,8 +9,8 @@ const router = Router();
  * @desc    Get wallet balance
  * @access  Private
  */
-router.get('/balance', authenticate, (req, res) => {
-  walletController.getBalance(req, res);
+router.get('/balance', authenticate, async (req, res) => {
+  await walletController.getBalance(req, res);
 });
 
 /**
@@ -19,8 +19,8 @@ router.get('/balance', authenticate, (req, res) => {
  * @access  Private
  * @body    { amount: number, currency: 'USD' | 'XRP' }
  */
-router.post('/fund', authenticate, (req, res) => {
-  walletController.fundWallet(req, res);
+router.post('/fund', authenticate, async (req, res) => {
+  await walletController.fundWallet(req, res);
 });
 
 /**
@@ -29,8 +29,8 @@ router.post('/fund', authenticate, (req, res) => {
  * @access  Private
  * @body    { amount: number, currency: 'USD' | 'XRP', destinationAddress: string }
  */
-router.post('/withdraw', authenticate, (req, res) => {
-  walletController.withdrawWallet(req, res);
+router.post('/withdraw', authenticate, async (req, res) => {
+  await walletController.withdrawWallet(req, res);
 });
 
 /**
@@ -39,8 +39,10 @@ router.post('/withdraw', authenticate, (req, res) => {
  * @access  Private
  * @query   limit, offset
  */
-router.get('/transactions', authenticate, (req, res) => {
-  walletController.getTransactions(req, res);
+router.get('/transactions', authenticate, async (req, res) => {
+  await walletController.getTransactions(req, res);
 });
 
 export default router;
+
+

@@ -75,3 +75,5 @@ export interface TotalEscrowedResponse {
   };
   error?: string;
 }
+
+

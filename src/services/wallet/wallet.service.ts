@@ -14,6 +14,7 @@ export class WalletService {
    */
   async getBalance(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       balance: {
         usd: number;
@@ -52,6 +53,7 @@ export class WalletService {
         if (createError || !newWallet) {
           return {
             success: false,
+            message: 'Failed to create wallet',
             error: 'Failed to create wallet',
           };
         }
@@ -79,6 +81,7 @@ export class WalletService {
 
       return {
         success: true,
+        message: 'Wallet balance retrieved successfully',
         data: {
           balance: {
             usd: parseFloat(balanceUsd.toFixed(2)),
@@ -91,6 +94,7 @@ export class WalletService {
       console.error('Error getting wallet balance:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get wallet balance',
         error: error instanceof Error ? error.message : 'Failed to get wallet balance',
       };
     }
@@ -101,6 +105,7 @@ export class WalletService {
    */
   async fundWallet(userId: string, request: FundWalletRequest): Promise<{
     success: boolean;
+    message: string;
     data?: {
       transactionId: string;
       amount: {
@@ -125,6 +130,7 @@ export class WalletService {
       if (!wallet) {
         return {
           success: false,
+          message: 'Wallet not found',
           error: 'Wallet not found',
         };
       }
@@ -160,6 +166,7 @@ export class WalletService {
       if (txError || !transaction) {
         return {
           success: false,
+          message: 'Failed to create transaction',
           error: 'Failed to create transaction',
         };
       }
@@ -182,6 +189,7 @@ export class WalletService {
 
       return {
         success: true,
+        message: 'Wallet funded successfully',
         data: {
           transactionId: transaction.id,
           amount: {
@@ -196,6 +204,7 @@ export class WalletService {
       console.error('Error funding wallet:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to fund wallet',
         error: error instanceof Error ? error.message : 'Failed to fund wallet',
       };
     }
@@ -206,6 +215,7 @@ export class WalletService {
    */
   async withdrawWallet(userId: string, request: WithdrawWalletRequest): Promise<{
     success: boolean;
+    message: string;
     data?: {
       transactionId: string;
       amount: {
@@ -230,6 +240,7 @@ export class WalletService {
       if (!wallet) {
         return {
           success: false,
+          message: 'Wallet not found',
           error: 'Wallet not found',
         };
       }
@@ -253,6 +264,7 @@ export class WalletService {
       if (!balance.success || !balance.data) {
         return {
           success: false,
+          message: 'Failed to check balance',
           error: 'Failed to check balance',
         };
       }
@@ -260,6 +272,7 @@ export class WalletService {
       if (balance.data.balance.xrp < amountXrp) {
         return {
           success: false,
+          message: 'Insufficient balance',
           error: 'Insufficient balance',
         };
       }
@@ -281,6 +294,7 @@ export class WalletService {
       if (txError || !transaction) {
         return {
           success: false,
+          message: 'Failed to create transaction',
           error: 'Failed to create transaction',
         };
       }
@@ -303,6 +317,7 @@ export class WalletService {
 
       return {
         success: true,
+        message: 'Withdrawal initiated successfully',
         data: {
           transactionId: transaction.id,
           amount: {
@@ -317,6 +332,7 @@ export class WalletService {
       console.error('Error withdrawing from wallet:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to withdraw from wallet',
         error: error instanceof Error ? error.message : 'Failed to withdraw from wallet',
       };
     }
@@ -327,6 +343,7 @@ export class WalletService {
    */
   async getTransactions(userId: string, limit: number = 50, offset: number = 0): Promise<{
     success: boolean;
+    message: string;
     data?: {
       transactions: WalletTransaction[];
       total: number;
@@ -345,7 +362,7 @@ export class WalletService {
         .range(offset, offset + limit - 1);
 
       // Get total count
-      const { count, error: countError } = await adminClient
+      const { count } = await adminClient
         .from('transactions')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId);
@@ -353,6 +370,7 @@ export class WalletService {
       if (txError) {
         return {
           success: false,
+          message: 'Failed to fetch transactions',
           error: 'Failed to fetch transactions',
         };
       }
@@ -372,6 +390,7 @@ export class WalletService {
 
       return {
         success: true,
+        message: 'Transactions retrieved successfully',
         data: {
           transactions: formattedTransactions,
           total: count || 0,
@@ -381,6 +400,7 @@ export class WalletService {
       console.error('Error getting transactions:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get transactions',
         error: error instanceof Error ? error.message : 'Failed to get transactions',
       };
     }
@@ -388,3 +408,5 @@ export class WalletService {
 }
 
 export const walletService = new WalletService();
+
+

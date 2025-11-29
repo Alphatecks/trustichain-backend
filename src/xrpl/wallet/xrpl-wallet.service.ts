@@ -42,8 +42,11 @@ export class XRPLWalletService {
         await client.disconnect();
 
         // Convert drops to XRP (1 XRP = 1,000,000 drops)
+        // Balance is returned as a string in drops format
         const balanceDrops = accountInfo.result.account_data.Balance;
-        return parseFloat(dropsToXrp(balanceDrops));
+        // dropsToXrp expects a string, ensure it's always a string
+        const dropsStr: string = String(balanceDrops);
+        return dropsToXrp(dropsStr);
       } catch (error) {
         await client.disconnect();
         // If account doesn't exist, return 0
@@ -107,7 +110,7 @@ export class XRPLWalletService {
       try {
         const wallet = Wallet.fromSeed(walletSecret);
         
-        const payment = {
+        const payment: any = {
           TransactionType: 'Payment',
           Account: fromAddress,
           Destination: toAddress,
@@ -139,16 +142,19 @@ export class XRPLWalletService {
   /**
    * Convert XRP drops to XRP (helper method)
    */
-  convertDropsToXrp(drops: string): number {
-    return parseFloat(dropsToXrp(drops));
+  convertDropsToXrp(drops: string | number): number {
+    const dropsStr: string = typeof drops === 'number' ? String(drops) : String(drops);
+    return dropsToXrp(dropsStr);
   }
 
   /**
    * Convert XRP to drops (helper method)
    */
   convertXrpToDrops(xrp: number): string {
-    return xrpToDrops(xrp.toString());
+    return xrpToDrops(String(xrp));
   }
 }
 
 export const xrplWalletService = new XRPLWalletService();
+
+

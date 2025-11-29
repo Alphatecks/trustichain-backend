@@ -10,8 +10,8 @@ const router = Router();
  * @access  Public
  * @body    { email, fullName, password, confirmPassword, agreeToTerms, country? }
  */
-router.post('/register', validateRegister, (req, res) => {
-  authController.register(req, res);
+router.post('/register', validateRegister, async (req, res) => {
+  await authController.register(req, res);
 });
 
 /**
@@ -20,8 +20,8 @@ router.post('/register', validateRegister, (req, res) => {
  * @access  Public
  * @body    { email, password }
  */
-router.post('/login', validateLogin, (req, res) => {
-  authController.login(req, res);
+router.post('/login', validateLogin, async (req, res) => {
+  await authController.login(req, res);
 });
 
 /**
@@ -30,8 +30,8 @@ router.post('/login', validateLogin, (req, res) => {
  * @access  Public
  * @body    { token }
  */
-router.post('/verify-email', (req, res) => {
-  authController.verifyEmail(req, res);
+router.post('/verify-email', async (req, res) => {
+  await authController.verifyEmail(req, res);
 });
 
 /**
@@ -40,8 +40,8 @@ router.post('/verify-email', (req, res) => {
  * @access  Public
  * @query   token - Verification token from email
  */
-router.get('/verify-email', (req, res) => {
-  authController.verifyEmailGet(req, res);
+router.get('/verify-email', async (req, res) => {
+  await authController.verifyEmailGet(req, res);
 });
 
 /**

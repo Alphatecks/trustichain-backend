@@ -14,6 +14,7 @@ export class PortfolioService {
     timeframe: 'daily' | 'weekly' | 'monthly' | 'yearly' = 'monthly'
   ): Promise<{
     success: boolean;
+    message: string;
     data?: {
       timeframe: string;
       data: Array<{
@@ -41,6 +42,7 @@ export class PortfolioService {
       if (error) {
         return {
           success: false,
+          message: 'Failed to fetch portfolio data',
           error: 'Failed to fetch portfolio data',
         };
       }
@@ -50,6 +52,7 @@ export class PortfolioService {
         const generatedData = await this.generatePortfolioData(userId, timeframe, startDate);
         return {
           success: true,
+          message: 'Portfolio performance retrieved successfully',
           data: {
             timeframe,
             data: generatedData,
@@ -65,6 +68,7 @@ export class PortfolioService {
 
       return {
         success: true,
+        message: 'Portfolio performance retrieved successfully',
         data: {
           timeframe,
           data: formattedData,
@@ -74,6 +78,7 @@ export class PortfolioService {
       console.error('Error getting portfolio performance:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get portfolio performance',
         error: error instanceof Error ? error.message : 'Failed to get portfolio performance',
       };
     }
@@ -275,3 +280,5 @@ export class PortfolioService {
 }
 
 export const portfolioService = new PortfolioService();
+
+

@@ -26,6 +26,7 @@ export class ExchangeService {
    */
   async getLiveExchangeRates(): Promise<{
     success: boolean;
+    message: string;
     data?: {
       rates: ExchangeRate[];
       lastUpdated: string;
@@ -92,6 +93,7 @@ export class ExchangeService {
 
       return {
         success: true,
+        message: 'Exchange rates retrieved successfully',
         data: {
           rates,
           lastUpdated: new Date().toISOString(),
@@ -101,6 +103,7 @@ export class ExchangeService {
       console.error('Error fetching exchange rates:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch exchange rates',
         error: error instanceof Error ? error.message : 'Failed to fetch exchange rates',
       };
     }
@@ -122,7 +125,7 @@ export class ExchangeService {
         throw new Error(`Failed to fetch rate for ${currency}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as { ripple?: Record<string, number> };
       return data.ripple?.[currency.toLowerCase()] || null;
     } catch (error) {
       console.error(`Error fetching ${currency} rate:`, error);
@@ -152,3 +155,5 @@ export class ExchangeService {
 }
 
 export const exchangeService = new ExchangeService();
+
+

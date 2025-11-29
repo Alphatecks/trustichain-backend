@@ -44,3 +44,5 @@ CREATE TRIGGER update_trustiscore_updated_at
   BEFORE UPDATE ON trustiscore
   FOR EACH ROW
   EXECUTE FUNCTION update_trustiscore_updated_at();
+
+

@@ -139,7 +139,7 @@ export class XRPLEscrowService {
   /**
    * Get escrow details from XRPL
    */
-  async getEscrowDetails(escrowSequence: number, ownerAddress: string): Promise<{
+  async getEscrowDetails(_escrowSequence: number, _ownerAddress: string): Promise<{
     amount: number;
     destination: string;
     finishAfter?: number;
@@ -168,3 +168,5 @@ export class XRPLEscrowService {
 }
 
 export const xrplEscrowService = new XRPLEscrowService();
+
+

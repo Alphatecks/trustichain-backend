@@ -14,6 +14,7 @@ export class EscrowService {
    */
   async getActiveEscrows(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       count: number;
       lockedAmount: number;
@@ -33,6 +34,7 @@ export class EscrowService {
       if (error) {
         return {
           success: false,
+          message: 'Failed to fetch active escrows',
           error: 'Failed to fetch active escrows',
         };
       }
@@ -42,6 +44,7 @@ export class EscrowService {
 
       return {
         success: true,
+        message: 'Active escrows retrieved successfully',
         data: {
           count,
           lockedAmount: parseFloat(lockedAmount.toFixed(2)),
@@ -51,6 +54,7 @@ export class EscrowService {
       console.error('Error getting active escrows:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get active escrows',
         error: error instanceof Error ? error.message : 'Failed to get active escrows',
       };
     }
@@ -61,6 +65,7 @@ export class EscrowService {
    */
   async getTotalEscrowed(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       totalEscrowed: number;
     };
@@ -78,6 +83,7 @@ export class EscrowService {
       if (error) {
         return {
           success: false,
+          message: 'Failed to fetch escrows',
           error: 'Failed to fetch escrows',
         };
       }
@@ -86,6 +92,7 @@ export class EscrowService {
 
       return {
         success: true,
+        message: 'Total escrowed retrieved successfully',
         data: {
           totalEscrowed: parseFloat(totalEscrowed.toFixed(2)),
         },
@@ -94,6 +101,7 @@ export class EscrowService {
       console.error('Error getting total escrowed:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get total escrowed',
         error: error instanceof Error ? error.message : 'Failed to get total escrowed',
       };
     }
@@ -104,6 +112,7 @@ export class EscrowService {
    */
   async createEscrow(userId: string, request: CreateEscrowRequest): Promise<{
     success: boolean;
+    message: string;
     data?: {
       escrowId: string;
       amount: {
@@ -128,6 +137,7 @@ export class EscrowService {
       if (!wallet) {
         return {
           success: false,
+          message: 'Wallet not found. Please create a wallet first.',
           error: 'Wallet not found. Please create a wallet first.',
         };
       }
@@ -142,6 +152,7 @@ export class EscrowService {
       if (!counterpartyWallet) {
         return {
           success: false,
+          message: 'Counterparty wallet not found',
           error: 'Counterparty wallet not found',
         };
       }
@@ -185,6 +196,7 @@ export class EscrowService {
       if (escrowError || !escrow) {
         return {
           success: false,
+          message: 'Failed to create escrow',
           error: 'Failed to create escrow',
         };
       }
@@ -205,6 +217,7 @@ export class EscrowService {
 
       return {
         success: true,
+        message: 'Escrow created successfully',
         data: {
           escrowId: escrow.id,
           amount: {
@@ -219,6 +232,7 @@ export class EscrowService {
       console.error('Error creating escrow:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to create escrow',
         error: error instanceof Error ? error.message : 'Failed to create escrow',
       };
     }
@@ -229,6 +243,7 @@ export class EscrowService {
    */
   async getEscrowList(userId: string, limit: number = 50, offset: number = 0): Promise<{
     success: boolean;
+    message: string;
     data?: {
       escrows: Escrow[];
       total: number;
@@ -265,7 +280,7 @@ export class EscrowService {
       }
 
       // Get total count
-      const { count, error: countError } = await adminClient
+      const { count } = await adminClient
         .from('escrows')
         .select('*', { count: 'exact', head: true })
         .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
@@ -273,6 +288,7 @@ export class EscrowService {
       if (escrowError) {
         return {
           success: false,
+          message: 'Failed to fetch escrows',
           error: 'Failed to fetch escrows',
         };
       }
@@ -295,6 +311,7 @@ export class EscrowService {
 
       return {
         success: true,
+        message: 'Escrows retrieved successfully',
         data: {
           escrows: formattedEscrows,
           total: count || 0,
@@ -304,6 +321,7 @@ export class EscrowService {
       console.error('Error getting escrow list:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get escrow list',
         error: error instanceof Error ? error.message : 'Failed to get escrow list',
       };
     }
@@ -311,3 +329,5 @@ export class EscrowService {
 }
 
 export const escrowService = new EscrowService();
+
+

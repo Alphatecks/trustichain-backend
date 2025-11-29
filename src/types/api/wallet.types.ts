@@ -2,6 +2,19 @@
  * Wallet API Types
  */
 
+export interface WalletBalanceResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    balance: {
+      usd: number;
+      xrp: number;
+    };
+    xrplAddress: string;
+  };
+  error?: string;
+}
+
 export interface FundWalletRequest {
   amount: number;
   currency: 'USD' | 'XRP';
@@ -65,3 +78,5 @@ export interface WalletTransactionsResponse {
   };
   error?: string;
 }
+
+

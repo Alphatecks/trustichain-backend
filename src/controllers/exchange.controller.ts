@@ -8,7 +8,7 @@ export class ExchangeController {
    * GET /api/exchange/rates
    * Public endpoint (no auth required)
    */
-  async getLiveExchangeRates(req: Request, res: Response<ExchangeRateResponse>): Promise<void> {
+  async getLiveExchangeRates(_req: Request, res: Response<ExchangeRateResponse>): Promise<void> {
     try {
       const result = await exchangeService.getLiveExchangeRates();
 
@@ -29,3 +29,5 @@ export class ExchangeController {
 }
 
 export const exchangeController = new ExchangeController();
+
+

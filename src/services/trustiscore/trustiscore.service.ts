@@ -19,6 +19,7 @@ export class TrustiscoreService {
    */
   async getTrustiscore(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       score: number;
       level: string;
@@ -58,6 +59,7 @@ export class TrustiscoreService {
         if (createError || !newTrustiscore) {
           return {
             success: false,
+            message: 'Failed to create trustiscore',
             error: 'Failed to create trustiscore',
           };
         }
@@ -67,6 +69,7 @@ export class TrustiscoreService {
 
       return {
         success: true,
+        message: 'Trustiscore retrieved successfully',
         data: {
           score: trustiscore.score,
           level: trustiscore.level,
@@ -77,6 +80,7 @@ export class TrustiscoreService {
       console.error('Error getting trustiscore:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to get trustiscore',
         error: error instanceof Error ? error.message : 'Failed to get trustiscore',
       };
     }
@@ -87,6 +91,7 @@ export class TrustiscoreService {
    */
   async calculateTrustiscore(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       score: number;
       level: string;
@@ -179,6 +184,7 @@ export class TrustiscoreService {
 
       return {
         success: true,
+        message: 'Trustiscore calculated successfully',
         data: {
           score: finalScore,
           level,
@@ -189,6 +195,7 @@ export class TrustiscoreService {
       console.error('Error calculating trustiscore:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to calculate trustiscore',
         error: error instanceof Error ? error.message : 'Failed to calculate trustiscore',
       };
     }
@@ -199,6 +206,7 @@ export class TrustiscoreService {
    */
   async updateTrustiscore(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       score: number;
       level: string;
@@ -228,12 +236,14 @@ export class TrustiscoreService {
       if (error) {
         return {
           success: false,
+          message: 'Failed to update trustiscore',
           error: 'Failed to update trustiscore',
         };
       }
 
       return {
         success: true,
+        message: 'Trustiscore updated successfully',
         data: {
           score: calculated.data.score,
           level: calculated.data.level,
@@ -243,6 +253,7 @@ export class TrustiscoreService {
       console.error('Error updating trustiscore:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to update trustiscore',
         error: error instanceof Error ? error.message : 'Failed to update trustiscore',
       };
     }
@@ -250,3 +261,5 @@ export class TrustiscoreService {
 }
 
 export const trustiscoreService = new TrustiscoreService();
+
+

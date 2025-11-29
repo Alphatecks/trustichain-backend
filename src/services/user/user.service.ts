@@ -11,6 +11,7 @@ export class UserService {
    */
   async getUserProfile(userId: string): Promise<{
     success: boolean;
+    message: string;
     data?: {
       id: string;
       email: string;
@@ -34,6 +35,7 @@ export class UserService {
       if (userError || !userData) {
         return {
           success: false,
+          message: 'User not found',
           error: 'User not found',
         };
       }
@@ -45,6 +47,7 @@ export class UserService {
         // If we can't get auth data, assume not verified
         return {
           success: true,
+          message: 'User profile retrieved successfully',
           data: {
             id: userData.id,
             email: userData.email,
@@ -57,6 +60,7 @@ export class UserService {
 
       return {
         success: true,
+        message: 'User profile retrieved successfully',
         data: {
           id: userData.id,
           email: userData.email,
@@ -69,6 +73,7 @@ export class UserService {
       console.error('Error fetching user profile:', error);
       return {
         success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch user profile',
         error: error instanceof Error ? error.message : 'Failed to fetch user profile',
       };
     }
@@ -76,3 +81,5 @@ export class UserService {
 }
 
 export const userService = new UserService();
+
+

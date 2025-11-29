@@ -154,3 +154,5 @@ curl http://localhost:3000/api/exchange/rates
 - For deployed servers, update the `BASE_URL` variable
 - All protected endpoints require a valid JWT token
 - Exchange rates endpoint is public and doesn't require authentication
+
+

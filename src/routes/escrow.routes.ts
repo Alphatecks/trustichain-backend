@@ -9,8 +9,8 @@ const router = Router();
  * @desc    Get active escrows count and locked amount
  * @access  Private
  */
-router.get('/active', authenticate, (req, res) => {
-  escrowController.getActiveEscrows(req, res);
+router.get('/active', authenticate, async (req, res) => {
+  await escrowController.getActiveEscrows(req, res);
 });
 
 /**
@@ -18,8 +18,8 @@ router.get('/active', authenticate, (req, res) => {
  * @desc    Get total escrowed amount
  * @access  Private
  */
-router.get('/total', authenticate, (req, res) => {
-  escrowController.getTotalEscrowed(req, res);
+router.get('/total', authenticate, async (req, res) => {
+  await escrowController.getTotalEscrowed(req, res);
 });
 
 /**
@@ -28,8 +28,8 @@ router.get('/total', authenticate, (req, res) => {
  * @access  Private
  * @body    { counterpartyId: string, amount: number, currency: 'USD' | 'XRP', description?: string }
  */
-router.post('/create', authenticate, (req, res) => {
-  escrowController.createEscrow(req, res);
+router.post('/create', authenticate, async (req, res) => {
+  await escrowController.createEscrow(req, res);
 });
 
 /**
@@ -38,8 +38,10 @@ router.post('/create', authenticate, (req, res) => {
  * @access  Private
  * @query   limit, offset
  */
-router.get('/list', authenticate, (req, res) => {
-  escrowController.getEscrowList(req, res);
+router.get('/list', authenticate, async (req, res) => {
+  await escrowController.getEscrowList(req, res);
 });
 
 export default router;
+
+
