@@ -3,7 +3,7 @@
  * Handles XRPL blockchain operations for wallets
  */
 
-import { Client, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
+import { Client, Wallet, xrpToDrops, dropsToXrp, Payment } from 'xrpl';
 
 export class XRPLWalletService {
   private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet'; // 'testnet' or 'mainnet'
@@ -105,27 +105,96 @@ export class XRPLWalletService {
   }
 
   /**
-   * Create a deposit transaction
-   * Note: For deposits, the transaction would typically be initiated by the sender
-   * This method prepares the transaction details
+   * Prepare a payment transaction for user signing via Xaman/XUMM
+   * Returns unsigned transaction that frontend can send to XUMM for signing
    */
-  async createDepositTransaction(xrplAddress: string, amountXrp: number): Promise<string> {
+  async preparePaymentTransaction(
+    destinationAddress: string,
+    amount: number,
+    currency: 'XRP' | 'USDT' | 'USDC'
+  ): Promise<{
+    transaction: any;
+    transactionBlob: string;
+    instructions: string;
+  }> {
     try {
-      // For deposits, we typically wait for incoming transactions
-      // This method can be used to verify a deposit transaction
-      // In a real implementation, you would monitor for incoming payments to this address
-      
-      console.log(`[XRPL] Deposit transaction prepared: ${amountXrp} XRP to ${xrplAddress}`);
-      
-      // Return a placeholder transaction hash
-      // In production, this would monitor for actual incoming transactions
-      const txHash = Array.from({ length: 64 }, () => 
-        Math.floor(Math.random() * 16).toString(16)
-      ).join('');
-      
-      return txHash;
+      let paymentTx: Payment | any;
+
+      if (currency === 'XRP') {
+        // XRP Payment
+        paymentTx = {
+          TransactionType: 'Payment',
+          Destination: destinationAddress,
+          Amount: xrpToDrops(amount.toString()),
+        };
+      } else {
+        // Token Payment (USDT or USDC)
+        const issuer = currency === 'USDT' ? this.USDT_ISSUER : this.USDC_ISSUER;
+        paymentTx = {
+          TransactionType: 'Payment',
+          Destination: destinationAddress,
+          Amount: {
+            currency: 'USD', // XRPL uses 'USD' for both USDT and USDC
+            value: amount.toString(),
+            issuer: issuer,
+          },
+        };
+      }
+
+      // Serialize to transaction blob (unsigned)
+      // Note: User's wallet (Xaman/Xumm) will autofill Account, Sequence, Fee, etc.
+      const txBlob = JSON.stringify(paymentTx);
+
+      return {
+        transaction: paymentTx,
+        transactionBlob: txBlob,
+        instructions: `Please sign this transaction in your XRPL wallet to send ${amount} ${currency} to ${destinationAddress}`,
+      };
     } catch (error) {
-      console.error('Error creating deposit transaction:', error);
+      console.error('Error preparing payment transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Submit a signed transaction blob
+   * Called after user signs the transaction via XUMM
+   */
+  async submitSignedTransaction(signedTxBlob: string): Promise<{
+    hash: string;
+    status: string;
+    result: any;
+  }> {
+    try {
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      try {
+        // Parse if it's a JSON string, otherwise assume it's already a hex blob
+        let txToSubmit: any;
+        try {
+          txToSubmit = JSON.parse(signedTxBlob);
+        } catch {
+          // If parsing fails, assume it's a hex-encoded blob
+          txToSubmit = signedTxBlob;
+        }
+
+        // Submit the signed transaction
+        const result = await client.submitAndWait(txToSubmit);
+
+        await client.disconnect();
+
+        return {
+          hash: result.result.hash,
+          status: result.result.meta?.TransactionResult || 'unknown',
+          result: result.result,
+        };
+      } catch (error) {
+        await client.disconnect();
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error submitting signed transaction:', error);
       throw error;
     }
   }

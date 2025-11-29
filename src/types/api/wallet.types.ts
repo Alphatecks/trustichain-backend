@@ -31,6 +31,12 @@ export interface FundWalletResponse {
       xrp: number;
     };
     xrplTxHash?: string;
+    xummUrl?: string;
+    xummUuid?: string;
+    transaction?: any;
+    transactionBlob?: string;
+    destinationAddress?: string;
+    amountXrp?: number;
     status: string;
   };
   error?: string;
@@ -76,6 +82,19 @@ export interface WalletTransactionsResponse {
   data?: {
     transactions: WalletTransaction[];
     total: number;
+  };
+  error?: string;
+}
+
+export interface XUMMPayloadStatusResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    signed: boolean;
+    signedTxBlob: string | null;
+    cancelled: boolean;
+    expired: boolean;
+    xrplTxHash: string | null;
   };
   error?: string;
 }

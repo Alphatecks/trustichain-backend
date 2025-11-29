@@ -8,6 +8,7 @@ import { FundWalletRequest, WithdrawWalletRequest, WalletTransaction } from '../
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
 import { encryptionService } from '../encryption/encryption.service';
+import { xummService } from '../xumm/xumm.service';
 
 export class WalletService {
   /**
@@ -117,6 +118,12 @@ export class WalletService {
         xrp: number;
       };
       xrplTxHash?: string;
+      xummUrl?: string;
+      xummUuid?: string;
+      transaction?: any;
+      transactionBlob?: string;
+      destinationAddress?: string;
+      amountXrp?: number;
       status: string;
     };
     error?: string;
@@ -175,33 +182,62 @@ export class WalletService {
         };
       }
 
-      // In a real implementation, this would initiate the XRPL transaction
-      // For now, we'll simulate it
-      const xrplTxHash = await xrplWalletService.createDepositTransaction(
+      // Prepare payment transaction for wallet signing (Xaman, Crossmark, MetaMask+XRPL Snap, etc.)
+      const currency = request.currency === 'USD' ? 'XRP' : 'XRP'; // For now, only XRP
+      const preparedTx = await xrplWalletService.preparePaymentTransaction(
         wallet.xrpl_address,
-        amountXrp
+        amountXrp,
+        currency
       );
 
-      // Update transaction with XRPL hash
+      // Option 1: XUMM/Xaman (mobile app) - Create payload for QR code signing
+      // Option 2: Browser wallets (Crossmark, MetaMask+XRPL Snap) - Return transaction JSON for direct signing
+      // For now, we'll support both: XUMM for mobile, and direct transaction for browser wallets
+      
+      let xummPayload = null;
+      try {
+        // Try to create XUMM payload (works if XUMM API keys are configured)
+        xummPayload = await xummService.createPayload(preparedTx.transaction);
+      } catch (error) {
+        // If XUMM is not configured, we'll return the transaction for direct wallet signing
+        console.log('XUMM not configured, returning transaction for direct wallet signing');
+      }
+
+      // Store transaction info
+      const description = xummPayload 
+        ? `Deposit ${request.amount} ${request.currency} | XUMM_UUID:${xummPayload.uuid}`
+        : `Deposit ${request.amount} ${request.currency} | Direct signing`;
+      
       await adminClient
         .from('transactions')
         .update({
-          xrpl_tx_hash: xrplTxHash,
-          status: 'processing',
+          description: description,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', transaction.id);
 
       return {
         success: true,
-        message: 'Wallet funded successfully',
+        message: xummPayload 
+          ? 'Transaction prepared. Please sign in Xaman app or any XRPL wallet.'
+          : 'Transaction prepared. Please sign with your XRPL wallet (Crossmark, MetaMask+XRPL Snap, etc.).',
         data: {
           transactionId: transaction.id,
           amount: {
             usd: parseFloat(amountUsd.toFixed(2)),
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
-          xrplTxHash,
-          status: 'processing',
+          // XUMM-specific fields (if available)
+          ...(xummPayload && {
+            xummUrl: xummPayload.next.always,
+            xummUuid: xummPayload.uuid,
+          }),
+          // Transaction for direct wallet signing (Crossmark, MetaMask+XRPL Snap, etc.)
+          transaction: preparedTx.transaction,
+          transactionBlob: preparedTx.transactionBlob,
+          destinationAddress: wallet.xrpl_address,
+          amountXrp: parseFloat(amountXrp.toFixed(6)),
+          status: 'pending',
         },
       };
     } catch (error) {
@@ -210,6 +246,227 @@ export class WalletService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fund wallet',
         error: error instanceof Error ? error.message : 'Failed to fund wallet',
+      };
+    }
+  }
+
+  /**
+   * Get XUMM payload status for deposit
+   */
+  async getXUMMPayloadStatus(
+    userId: string,
+    transactionId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      signed: boolean;
+      signedTxBlob: string | null;
+      cancelled: boolean;
+      expired: boolean;
+      xrplTxHash: string | null;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'Transaction not found',
+          error: 'Transaction not found',
+        };
+      }
+
+      // Extract XUMM UUID from description
+      const uuidMatch = transaction.description?.match(/XUMM_UUID:([a-f0-9-]+)/i);
+      if (!uuidMatch) {
+        return {
+          success: false,
+          message: 'XUMM UUID not found for this transaction',
+          error: 'XUMM UUID not found',
+        };
+      }
+
+      const xummUuid = uuidMatch[1];
+
+      // Get payload status from XUMM
+      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
+
+      // If signed, submit to XRPL and update transaction
+      if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
+        // Submit signed transaction to XRPL
+        const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
+
+        // Update transaction status
+        const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: submitResult.hash,
+            status: status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transactionId);
+
+        // Update wallet balance if successful
+        if (status === 'completed') {
+          const { data: wallet } = await adminClient
+            .from('wallets')
+            .select('xrpl_address')
+            .eq('user_id', userId)
+            .single();
+
+          if (wallet) {
+            const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+            await adminClient
+              .from('wallets')
+              .update({
+                balance_xrp: balances.xrp,
+                balance_usdt: balances.usdt,
+                balance_usdc: balances.usdc,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', userId);
+          }
+        }
+
+        return {
+          success: true,
+          message: 'Transaction signed and submitted',
+          data: {
+            signed: true,
+            signedTxBlob: payloadStatus.response.hex,
+            cancelled: payloadStatus.meta.cancelled,
+            expired: payloadStatus.meta.expired,
+            xrplTxHash: submitResult.hash,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Payload status retrieved',
+        data: {
+          signed: payloadStatus.meta.signed,
+          signedTxBlob: payloadStatus.response?.hex || null,
+          cancelled: payloadStatus.meta.cancelled,
+          expired: payloadStatus.meta.expired,
+          xrplTxHash: payloadStatus.response?.txid || null,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting XUMM payload status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get payload status',
+        error: error instanceof Error ? error.message : 'Failed to get payload status',
+      };
+    }
+  }
+
+  /**
+   * Submit signed deposit transaction (for browser wallets like Crossmark, MetaMask+XRPL Snap)
+   */
+  async submitSignedDeposit(
+    userId: string,
+    transactionId: string,
+    signedTxBlob: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      xrplTxHash: string;
+      status: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'Transaction not found',
+          error: 'Transaction not found',
+        };
+      }
+
+      if (transaction.status !== 'pending') {
+        return {
+          success: false,
+          message: 'Transaction is not pending',
+          error: 'Transaction already processed',
+        };
+      }
+
+      // Submit signed transaction to XRPL
+      const submitResult = await xrplWalletService.submitSignedTransaction(signedTxBlob);
+
+      // Update transaction status
+      const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
+      await adminClient
+        .from('transactions')
+        .update({
+          xrpl_tx_hash: submitResult.hash,
+          status: status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transactionId);
+
+      // Update wallet balance if successful
+      if (status === 'completed') {
+        const { data: wallet } = await adminClient
+          .from('wallets')
+          .select('xrpl_address')
+          .eq('user_id', userId)
+          .single();
+
+        if (wallet) {
+          const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: balances.xrp,
+              balance_usdt: balances.usdt,
+              balance_usdc: balances.usdc,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId);
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Deposit transaction submitted successfully',
+        data: {
+          xrplTxHash: submitResult.hash,
+          status: status,
+        },
+      };
+    } catch (error) {
+      console.error('Error submitting signed deposit:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to submit transaction',
+        error: error instanceof Error ? error.message : 'Failed to submit transaction',
       };
     }
   }
@@ -337,13 +594,26 @@ export class WalletService {
         .from('transactions')
         .update({
           xrpl_tx_hash: xrplTxHash,
-          status: 'processing',
+          status: 'completed',
+          updated_at: new Date().toISOString(),
         })
         .eq('id', transaction.id);
 
+      // Update wallet balance after withdrawal
+      const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+      await adminClient
+        .from('wallets')
+        .update({
+          balance_xrp: balances.xrp,
+          balance_usdt: balances.usdt,
+          balance_usdc: balances.usdc,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', wallet.id);
+
       return {
         success: true,
-        message: 'Withdrawal initiated successfully',
+        message: 'Withdrawal completed successfully',
         data: {
           transactionId: transaction.id,
           amount: {
@@ -351,7 +621,7 @@ export class WalletService {
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
           xrplTxHash,
-          status: 'processing',
+          status: 'completed',
         },
       };
     } catch (error) {

@@ -25,6 +25,26 @@ router.post('/fund', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/wallet/fund/status
+ * @desc    Get XUMM payload status for deposit (if using XUMM)
+ * @access  Private
+ * @query   transactionId
+ */
+router.get('/fund/status', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getXUMMPayloadStatus(req, res);
+}));
+
+/**
+ * @route   POST /api/wallet/fund/submit
+ * @desc    Submit signed transaction (for browser wallets like Crossmark, MetaMask+XRPL Snap)
+ * @access  Private
+ * @body    { transactionId: string, signedTxBlob: string }
+ */
+router.post('/fund/submit', authenticate, asyncHandler(async (req, res) => {
+  await walletController.submitSignedDeposit(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/withdraw
  * @desc    Withdraw from wallet
  * @access  Private
