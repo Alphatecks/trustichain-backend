@@ -156,7 +156,7 @@ export class EscrowController {
   async getEscrowById(req: Request, res: Response<EscrowDetailResponse>): Promise<void> {
     try {
       const userId = req.userId!;
-      const escrowId = req.params.id;
+      const escrowId = req.params.id as string;
 
       const result = await escrowService.getEscrowById(userId, escrowId);
 
@@ -179,11 +179,11 @@ export class EscrowController {
    * Release (finish) an escrow
    * POST /api/escrow/:id/release
    */
-  async releaseEscrow(req: Request<{ id: string }, ReleaseEscrowResponse, ReleaseEscrowRequest>, res: Response<ReleaseEscrowResponse>): Promise<void> {
+  async releaseEscrow(req: Request, res: Response<ReleaseEscrowResponse>): Promise<void> {
     try {
       const userId = req.userId!;
-      const escrowId = req.params.id;
-      const { notes } = req.body;
+      const escrowId = req.params.id as string;
+      const { notes } = req.body as ReleaseEscrowRequest;
 
       const result = await escrowService.releaseEscrow(userId, escrowId, notes);
 
@@ -206,11 +206,11 @@ export class EscrowController {
    * Cancel an escrow
    * POST /api/escrow/:id/cancel
    */
-  async cancelEscrow(req: Request<{ id: string }, CancelEscrowResponse, CancelEscrowRequest>, res: Response<CancelEscrowResponse>): Promise<void> {
+  async cancelEscrow(req: Request, res: Response<CancelEscrowResponse>): Promise<void> {
     try {
       const userId = req.userId!;
-      const escrowId = req.params.id;
-      const { reason } = req.body;
+      const escrowId = req.params.id as string;
+      const { reason } = req.body as CancelEscrowRequest;
 
       if (!reason || reason.trim().length === 0) {
         res.status(400).json({
