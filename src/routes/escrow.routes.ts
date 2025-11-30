@@ -44,12 +44,51 @@ router.get('/completed/month', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   GET /api/escrow/list
- * @desc    Get escrow list
+ * @desc    Get escrow list with filters
  * @access  Private
- * @query   limit, offset
+ * @query   transactionType, industry, month, year, limit, offset
  */
 router.get('/list', authenticate, asyncHandler(async (req, res) => {
   await escrowController.getEscrowList(req, res);
+}));
+
+/**
+ * @route   GET /api/escrow/industries
+ * @desc    Get list of unique industries
+ * @access  Private
+ * @query   transactionType (optional) - Filter industries by transaction type
+ */
+router.get('/industries', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getIndustries(req, res);
+}));
+
+/**
+ * @route   GET /api/escrow/:id
+ * @desc    Get escrow by ID
+ * @access  Private
+ */
+router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowById(req, res);
+}));
+
+/**
+ * @route   POST /api/escrow/:id/release
+ * @desc    Release (finish) an escrow
+ * @access  Private
+ * @body    { notes?: string }
+ */
+router.post('/:id/release', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.releaseEscrow(req, res);
+}));
+
+/**
+ * @route   POST /api/escrow/:id/cancel
+ * @desc    Cancel an escrow
+ * @access  Private
+ * @body    { reason: string }
+ */
+router.post('/:id/cancel', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.cancelEscrow(req, res);
 }));
 
 export default router;
