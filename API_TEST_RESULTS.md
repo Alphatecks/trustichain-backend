@@ -156,3 +156,5 @@ curl http://localhost:3000/api/exchange/rates
 - Exchange rates endpoint is public and doesn't require authentication
 
 
+
+

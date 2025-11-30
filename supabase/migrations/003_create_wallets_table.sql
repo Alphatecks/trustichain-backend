@@ -41,3 +41,5 @@ CREATE TRIGGER update_wallets_updated_at
   EXECUTE FUNCTION update_updated_at_column();
 
 
+
+

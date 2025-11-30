@@ -239,6 +239,74 @@ export class EscrowService {
   }
 
   /**
+   * Get completed escrows count for the current month
+   */
+  async getCompletedEscrowsForMonth(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      count: number;
+      month: string;
+      year: number;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get start and end of current month
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const monthStart = new Date(year, month, 1);
+      const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+      // Format month name
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      const monthName = monthNames[month];
+
+      // Get completed escrows for the current month
+      // User can be either initiator (user_id) or counterparty (counterparty_id)
+      const { count, error } = await adminClient
+        .from('escrows')
+        .select('*', { count: 'exact', head: true })
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+        .eq('status', 'completed')
+        .not('completed_at', 'is', null)
+        .gte('completed_at', monthStart.toISOString())
+        .lte('completed_at', monthEnd.toISOString());
+
+      if (error) {
+        return {
+          success: false,
+          message: 'Failed to fetch completed escrows for month',
+          error: 'Failed to fetch completed escrows for month',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Completed escrows for month retrieved successfully',
+        data: {
+          count: count || 0,
+          month: monthName,
+          year,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting completed escrows for month:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get completed escrows for month',
+        error: error instanceof Error ? error.message : 'Failed to get completed escrows for month',
+      };
+    }
+  }
+
+  /**
    * Get escrow list for a user
    */
   async getEscrowList(userId: string, limit: number = 50, offset: number = 0): Promise<{
@@ -329,5 +397,7 @@ export class EscrowService {
 }
 
 export const escrowService = new EscrowService();
+
+
 
 

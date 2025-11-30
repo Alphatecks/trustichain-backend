@@ -8,3 +8,5 @@ COMMENT ON COLUMN wallets.encrypted_wallet_secret IS 'Encrypted XRPL wallet secr
 
 -- Note: This column should be excluded from RLS policies that allow SELECT
 -- Only backend service should access this column
+
+

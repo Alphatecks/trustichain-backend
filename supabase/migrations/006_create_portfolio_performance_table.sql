@@ -31,3 +31,5 @@ CREATE POLICY "Service role can manage portfolio"
   WITH CHECK (true);
 
 
+
+

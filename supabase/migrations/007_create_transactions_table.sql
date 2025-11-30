@@ -43,3 +43,5 @@ CREATE POLICY "Service role can manage transactions"
   WITH CHECK (true);
 
 
+
+

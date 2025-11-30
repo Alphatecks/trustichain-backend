@@ -76,4 +76,17 @@ export interface TotalEscrowedResponse {
   error?: string;
 }
 
+export interface CompletedEscrowsMonthResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    count: number;
+    month: string;
+    year: number;
+  };
+  error?: string;
+}
+
+
+
 

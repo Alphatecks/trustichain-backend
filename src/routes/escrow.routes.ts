@@ -34,6 +34,15 @@ router.post('/create', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/escrow/completed/month
+ * @desc    Get completed escrows count for the current month
+ * @access  Private
+ */
+router.get('/completed/month', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getCompletedEscrowsForMonth(req, res);
+}));
+
+/**
  * @route   GET /api/escrow/list
  * @desc    Get escrow list
  * @access  Private

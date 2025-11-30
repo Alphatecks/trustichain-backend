@@ -46,3 +46,5 @@ CREATE TRIGGER update_trustiscore_updated_at
   EXECUTE FUNCTION update_trustiscore_updated_at();
 
 
+
+
