@@ -18,8 +18,8 @@ export interface Milestone {
 }
 
 export interface CreateEscrowRequest {
-  // Wallet addresses (required)
-  payerXrpWalletAddress: string;
+  // Wallet addresses
+  payerXrpWalletAddress?: string; // Optional - will be automatically fetched from authenticated user's registered wallet
   counterpartyXrpWalletAddress: string;
   
   // Counterparty ID (optional - will be looked up by wallet address if not provided)

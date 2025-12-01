@@ -178,7 +178,7 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Validate payer wallet address - get authenticated user's wallet
+      // Automatically fetch payer wallet address from authenticated user's registered wallet
       const { data: payerWallet } = await adminClient
         .from('wallets')
         .select('xrpl_address')
@@ -193,14 +193,8 @@ export class EscrowService {
         };
       }
 
-      // Verify that provided payer wallet address matches authenticated user's wallet
-      if (payerWallet.xrpl_address !== request.payerXrpWalletAddress) {
-        return {
-          success: false,
-          message: 'Provided payer wallet address does not match your registered wallet',
-          error: 'Provided payer wallet address does not match your registered wallet',
-        };
-      }
+      // Use the authenticated user's registered wallet address automatically
+      // If payerXrpWalletAddress is provided, it will be ignored (for backward compatibility)
 
       // Look up counterparty by wallet address or use provided counterpartyId
       let counterpartyUserId: string | null = null;
