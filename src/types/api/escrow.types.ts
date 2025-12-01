@@ -94,7 +94,6 @@ export interface Escrow {
   payerName?: string;
   payerPhone?: string;
   counterpartyEmail?: string;
-  counterpartyName?: string;
   counterpartyPhone?: string;
   
   // Step 2: Terms and Release conditions

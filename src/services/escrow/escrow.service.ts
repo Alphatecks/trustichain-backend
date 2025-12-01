@@ -637,7 +637,6 @@ export class EscrowService {
           payerName: escrow.payer_name || undefined,
           payerPhone: escrow.payer_phone || undefined,
           counterpartyEmail: escrow.counterparty_email || undefined,
-          counterpartyName: escrow.counterparty_name || undefined,
           counterpartyPhone: escrow.counterparty_phone || undefined,
           // Step 2: Terms and Release conditions
           releaseType: escrow.release_type as ReleaseType | undefined,
@@ -746,7 +745,6 @@ export class EscrowService {
         payerName: escrow.payer_name || undefined,
         payerPhone: escrow.payer_phone || undefined,
         counterpartyEmail: escrow.counterparty_email || undefined,
-        counterpartyName: escrow.counterparty_name || undefined,
         counterpartyPhone: escrow.counterparty_phone || undefined,
         // Step 2: Terms and Release conditions
         releaseType: escrow.release_type as ReleaseType | undefined,
@@ -919,7 +917,6 @@ export class EscrowService {
         payerName: updatedEscrow.payer_name || undefined,
         payerPhone: updatedEscrow.payer_phone || undefined,
         counterpartyEmail: updatedEscrow.counterparty_email || undefined,
-        counterpartyName: updatedEscrow.counterparty_name || undefined,
         counterpartyPhone: updatedEscrow.counterparty_phone || undefined,
         // Step 2: Terms and Release conditions
         releaseType: updatedEscrow.release_type as ReleaseType | undefined,
@@ -1089,7 +1086,6 @@ export class EscrowService {
         payerName: updatedEscrow.payer_name || undefined,
         payerPhone: updatedEscrow.payer_phone || undefined,
         counterpartyEmail: updatedEscrow.counterparty_email || undefined,
-        counterpartyName: updatedEscrow.counterparty_name || undefined,
         counterpartyPhone: updatedEscrow.counterparty_phone || undefined,
         // Step 2: Terms and Release conditions
         releaseType: updatedEscrow.release_type as ReleaseType | undefined,
