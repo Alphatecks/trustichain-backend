@@ -4,7 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import { CreateEscrowRequest, Escrow, GetEscrowListRequest, TransactionType } from '../../types/api/escrow.types';
+import { CreateEscrowRequest, Escrow, GetEscrowListRequest, TransactionType, ReleaseType, Milestone } from '../../types/api/escrow.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -32,6 +32,33 @@ export class EscrowService {
       acc[user.id] = user.full_name;
       return acc;
     }, {} as Record<string, string>);
+  }
+
+  /**
+   * Get milestones for an escrow
+   */
+  private async getMilestones(escrowId: string): Promise<Milestone[]> {
+    const adminClient = supabaseAdmin || supabase;
+    const { data: milestones, error } = await adminClient
+      .from('escrow_milestones')
+      .select('*')
+      .eq('escrow_id', escrowId)
+      .order('milestone_order', { ascending: true });
+
+    if (error || !milestones) {
+      return [];
+    }
+
+    return milestones.map(m => ({
+      id: m.id,
+      milestoneDetails: m.milestone_details,
+      milestoneAmount: parseFloat(m.milestone_amount),
+      milestoneAmountUsd: parseFloat(m.milestone_amount_usd),
+      milestoneOrder: m.milestone_order,
+      status: m.status,
+      createdAt: m.created_at,
+      completedAt: m.completed_at || undefined,
+    }));
   }
   /**
    * Get active escrows count and locked amount for a user
@@ -151,14 +178,14 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get user's wallet
-      const { data: wallet } = await adminClient
+      // Validate payer wallet address - get authenticated user's wallet
+      const { data: payerWallet } = await adminClient
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
         .single();
 
-      if (!wallet) {
+      if (!payerWallet) {
         return {
           success: false,
           message: 'Wallet not found. Please create a wallet first.',
@@ -166,39 +193,157 @@ export class EscrowService {
         };
       }
 
-      // Get counterparty wallet
-      const { data: counterpartyWallet } = await adminClient
-        .from('wallets')
-        .select('xrpl_address')
-        .eq('user_id', request.counterpartyId)
-        .single();
-
-      if (!counterpartyWallet) {
+      // Verify that provided payer wallet address matches authenticated user's wallet
+      if (payerWallet.xrpl_address !== request.payerXrpWalletAddress) {
         return {
           success: false,
-          message: 'Counterparty wallet not found',
-          error: 'Counterparty wallet not found',
+          message: 'Provided payer wallet address does not match your registered wallet',
+          error: 'Provided payer wallet address does not match your registered wallet',
         };
       }
 
+      // Look up counterparty by wallet address or use provided counterpartyId
+      let counterpartyUserId: string | null = null;
+      let counterpartyWalletAddress: string;
+
+      if (request.counterpartyId) {
+        // If counterpartyId is provided, use it but still validate wallet address
+        const { data: counterpartyWallet, error: walletError } = await adminClient
+          .from('wallets')
+          .select('xrpl_address, user_id')
+          .eq('user_id', request.counterpartyId)
+          .maybeSingle();
+
+        if (walletError || !counterpartyWallet) {
+          return {
+            success: false,
+            message: 'Counterparty wallet not found',
+            error: 'Counterparty wallet not found',
+          };
+        }
+
+        // Validate that the provided wallet address matches the counterparty's wallet
+        if (counterpartyWallet.xrpl_address !== request.counterpartyXrpWalletAddress) {
+          return {
+            success: false,
+            message: 'Provided counterparty wallet address does not match the counterparty user',
+            error: 'Provided counterparty wallet address does not match the counterparty user',
+          };
+        }
+
+        counterpartyUserId = request.counterpartyId;
+        counterpartyWalletAddress = counterpartyWallet.xrpl_address;
+      } else {
+        // Look up counterparty by wallet address
+        const { data: counterpartyWallet, error: walletLookupError } = await adminClient
+          .from('wallets')
+          .select('user_id, xrpl_address')
+          .eq('xrpl_address', request.counterpartyXrpWalletAddress)
+          .maybeSingle();
+
+        if (walletLookupError || !counterpartyWallet) {
+          return {
+            success: false,
+            message: 'Counterparty wallet not found. The counterparty must have a registered wallet.',
+            error: 'Counterparty wallet not found. The counterparty must have a registered wallet.',
+          };
+        }
+
+        counterpartyUserId = counterpartyWallet.user_id;
+        counterpartyWalletAddress = counterpartyWallet.xrpl_address;
+      }
+
+      // Prevent creating escrow with yourself
+      if (userId === counterpartyUserId) {
+        return {
+          success: false,
+          message: 'You cannot create an escrow with yourself',
+          error: 'You cannot create an escrow with yourself',
+        };
+      }
+
+      // Validate "Time based" release type requirements
+      if (request.releaseType === 'Time based') {
+        if (!request.expectedReleaseDate) {
+          return {
+            success: false,
+            message: 'Expected release date is required for time-based escrows',
+            error: 'Expected release date is required for time-based escrows',
+          };
+        }
+        if (request.totalAmount === undefined || request.totalAmount === null) {
+          return {
+            success: false,
+            message: 'Total amount is required for time-based escrows',
+            error: 'Total amount is required for time-based escrows',
+          };
+        }
+      }
+
+      // Validate "Milestones" release type requirements
+      if (request.releaseType === 'Milestones') {
+        if (!request.expectedCompletionDate) {
+          return {
+            success: false,
+            message: 'Expected completion date is required for milestone-based escrows',
+            error: 'Expected completion date is required for milestone-based escrows',
+          };
+        }
+        if (request.totalAmount === undefined || request.totalAmount === null) {
+          return {
+            success: false,
+            message: 'Total amount is required for milestone-based escrows',
+            error: 'Total amount is required for milestone-based escrows',
+          };
+        }
+        if (!request.milestones || request.milestones.length === 0) {
+          return {
+            success: false,
+            message: 'At least one milestone is required for milestone-based escrows',
+            error: 'At least one milestone is required for milestone-based escrows',
+          };
+        }
+        // Validate each milestone
+        for (let i = 0; i < request.milestones.length; i++) {
+          const milestone = request.milestones[i];
+          if (!milestone.milestoneDetails || milestone.milestoneDetails.trim().length === 0) {
+            return {
+              success: false,
+              message: `Milestone ${i + 1} details are required`,
+              error: `Milestone ${i + 1} details are required`,
+            };
+          }
+          if (!milestone.milestoneAmount || milestone.milestoneAmount <= 0) {
+            return {
+              success: false,
+              message: `Milestone ${i + 1} amount must be greater than 0`,
+              error: `Milestone ${i + 1} amount must be greater than 0`,
+            };
+          }
+        }
+      }
+
+      // Use totalAmount if provided, otherwise use amount
+      const escrowAmount = request.totalAmount !== undefined ? request.totalAmount : request.amount;
+
       // Convert amount to XRP if needed
-      let amountXrp = request.amount;
-      let amountUsd = request.amount;
+      let amountXrp = escrowAmount;
+      let amountUsd = escrowAmount;
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
-        amountXrp = request.amount / usdRate;
+        amountXrp = escrowAmount / usdRate;
       } else {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
-        amountUsd = request.amount * usdRate;
+        amountUsd = escrowAmount * usdRate;
       }
 
       // Create escrow on XRPL
       const xrplTxHash = await xrplEscrowService.createEscrow({
-        fromAddress: wallet.xrpl_address,
-        toAddress: counterpartyWallet.xrpl_address,
+        fromAddress: payerWallet.xrpl_address,
+        toAddress: counterpartyWalletAddress,
         amountXrp,
       });
 
@@ -214,12 +359,12 @@ export class EscrowService {
 
       const nextSequence = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
 
-      // Create escrow record in database
+      // Create escrow record in database with contact information and terms
       const { data: escrow, error: escrowError } = await adminClient
         .from('escrows')
         .insert({
           user_id: userId,
-          counterparty_id: request.counterpartyId,
+          counterparty_id: counterpartyUserId,
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
           status: 'pending',
@@ -229,6 +374,20 @@ export class EscrowService {
           industry: request.industry || null,
           progress: 0,
           escrow_sequence: nextSequence,
+          // Payer contact information
+          payer_email: request.payerEmail || null,
+          payer_name: request.payerName || null,
+          payer_phone: request.payerPhoneNumber || null,
+          // Counterparty contact information
+          counterparty_email: request.counterpartyEmail || null,
+          counterparty_name: request.counterpartyName || null,
+          counterparty_phone: request.counterpartyPhoneNumber || null,
+          // Step 2: Terms and Release conditions
+          release_type: request.releaseType || null,
+          expected_completion_date: request.expectedCompletionDate ? new Date(request.expectedCompletionDate).toISOString() : null,
+          expected_release_date: request.expectedReleaseDate ? new Date(request.expectedReleaseDate).toISOString() : null,
+          dispute_resolution_period: request.disputeResolutionPeriod || null,
+          release_conditions: request.releaseConditions || null,
         })
         .select()
         .single();
@@ -237,8 +396,45 @@ export class EscrowService {
         return {
           success: false,
           message: 'Failed to create escrow',
-          error: 'Failed to create escrow',
+          error: escrowError?.message || 'Failed to create escrow',
         };
+      }
+
+      // Create milestones if this is a milestone-based escrow
+      if (request.releaseType === 'Milestones' && request.milestones && request.milestones.length > 0) {
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+
+        const milestonesToInsert = request.milestones.map((milestone, index) => {
+          let milestoneAmountXrp = milestone.milestoneAmount;
+          let milestoneAmountUsd = milestone.milestoneAmount;
+
+          // Convert milestone amount to XRP if currency is USD
+          if (request.currency === 'USD') {
+            milestoneAmountXrp = milestone.milestoneAmount / usdRate;
+          } else {
+            milestoneAmountUsd = milestone.milestoneAmount * usdRate;
+          }
+
+          return {
+            escrow_id: escrow.id,
+            milestone_order: milestone.milestoneOrder || (index + 1),
+            milestone_details: milestone.milestoneDetails,
+            milestone_amount: milestoneAmountXrp,
+            milestone_amount_usd: milestoneAmountUsd,
+            status: 'pending',
+          };
+        });
+
+        const { error: milestonesError } = await adminClient
+          .from('escrow_milestones')
+          .insert(milestonesToInsert);
+
+        if (milestonesError) {
+          console.error('Error creating milestones:', milestonesError);
+          // Don't fail the escrow creation if milestones fail - log and continue
+          // Optionally, you could rollback the escrow creation here
+        }
       }
 
       // Create transaction record
@@ -436,6 +632,19 @@ export class EscrowService {
           updatedAt: escrow.updated_at,
           completedAt: escrow.completed_at || undefined,
           cancelReason: escrow.cancel_reason || undefined,
+          // Contact information
+          payerEmail: escrow.payer_email || undefined,
+          payerName: escrow.payer_name || undefined,
+          payerPhone: escrow.payer_phone || undefined,
+          counterpartyEmail: escrow.counterparty_email || undefined,
+          counterpartyName: escrow.counterparty_name || undefined,
+          counterpartyPhone: escrow.counterparty_phone || undefined,
+          // Step 2: Terms and Release conditions
+          releaseType: escrow.release_type as ReleaseType | undefined,
+          expectedCompletionDate: escrow.expected_completion_date || undefined,
+          expectedReleaseDate: escrow.expected_release_date || undefined,
+          disputeResolutionPeriod: escrow.dispute_resolution_period || undefined,
+          releaseConditions: escrow.release_conditions || undefined,
         };
       });
 
@@ -505,6 +714,9 @@ export class EscrowService {
       if (escrow.counterparty_id) userIds.push(escrow.counterparty_id);
       const partyNames = await this.getPartyNames(userIds);
 
+      // Get milestones if this is a milestone-based escrow
+      const milestones = await this.getMilestones(escrow.id);
+
       const year = new Date(escrow.created_at).getFullYear();
       const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
 
@@ -529,6 +741,20 @@ export class EscrowService {
         updatedAt: escrow.updated_at,
         completedAt: escrow.completed_at || undefined,
         cancelReason: escrow.cancel_reason || undefined,
+        // Contact information
+        payerEmail: escrow.payer_email || undefined,
+        payerName: escrow.payer_name || undefined,
+        payerPhone: escrow.payer_phone || undefined,
+        counterpartyEmail: escrow.counterparty_email || undefined,
+        counterpartyName: escrow.counterparty_name || undefined,
+        counterpartyPhone: escrow.counterparty_phone || undefined,
+        // Step 2: Terms and Release conditions
+        releaseType: escrow.release_type as ReleaseType | undefined,
+        expectedCompletionDate: escrow.expected_completion_date || undefined,
+        expectedReleaseDate: escrow.expected_release_date || undefined,
+        disputeResolutionPeriod: escrow.dispute_resolution_period || undefined,
+        releaseConditions: escrow.release_conditions || undefined,
+        milestones: milestones.length > 0 ? milestones : undefined,
       };
 
       return {
@@ -662,6 +888,9 @@ export class EscrowService {
       if (updatedEscrow.counterparty_id) userIds.push(updatedEscrow.counterparty_id);
       const partyNames = await this.getPartyNames(userIds);
 
+      // Get milestones if this is a milestone-based escrow
+      const milestones = await this.getMilestones(updatedEscrow.id);
+
       const year = new Date(updatedEscrow.created_at).getFullYear();
       const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
 
@@ -685,6 +914,20 @@ export class EscrowService {
         createdAt: updatedEscrow.created_at,
         updatedAt: updatedEscrow.updated_at,
         completedAt: updatedEscrow.completed_at || undefined,
+        // Contact information
+        payerEmail: updatedEscrow.payer_email || undefined,
+        payerName: updatedEscrow.payer_name || undefined,
+        payerPhone: updatedEscrow.payer_phone || undefined,
+        counterpartyEmail: updatedEscrow.counterparty_email || undefined,
+        counterpartyName: updatedEscrow.counterparty_name || undefined,
+        counterpartyPhone: updatedEscrow.counterparty_phone || undefined,
+        // Step 2: Terms and Release conditions
+        releaseType: updatedEscrow.release_type as ReleaseType | undefined,
+        expectedCompletionDate: updatedEscrow.expected_completion_date || undefined,
+        expectedReleaseDate: updatedEscrow.expected_release_date || undefined,
+        disputeResolutionPeriod: updatedEscrow.dispute_resolution_period || undefined,
+        releaseConditions: updatedEscrow.release_conditions || undefined,
+        milestones: milestones.length > 0 ? milestones : undefined,
       };
 
       return {
@@ -814,6 +1057,9 @@ export class EscrowService {
       if (updatedEscrow.counterparty_id) userIds.push(updatedEscrow.counterparty_id);
       const partyNames = await this.getPartyNames(userIds);
 
+      // Get milestones if this is a milestone-based escrow
+      const milestones = await this.getMilestones(updatedEscrow.id);
+
       const year = new Date(updatedEscrow.created_at).getFullYear();
       const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
 
@@ -838,6 +1084,20 @@ export class EscrowService {
         updatedAt: updatedEscrow.updated_at,
         completedAt: updatedEscrow.completed_at || undefined,
         cancelReason: reason,
+        // Contact information
+        payerEmail: updatedEscrow.payer_email || undefined,
+        payerName: updatedEscrow.payer_name || undefined,
+        payerPhone: updatedEscrow.payer_phone || undefined,
+        counterpartyEmail: updatedEscrow.counterparty_email || undefined,
+        counterpartyName: updatedEscrow.counterparty_name || undefined,
+        counterpartyPhone: updatedEscrow.counterparty_phone || undefined,
+        // Step 2: Terms and Release conditions
+        releaseType: updatedEscrow.release_type as ReleaseType | undefined,
+        expectedCompletionDate: updatedEscrow.expected_completion_date || undefined,
+        expectedReleaseDate: updatedEscrow.expected_release_date || undefined,
+        disputeResolutionPeriod: updatedEscrow.dispute_resolution_period || undefined,
+        releaseConditions: updatedEscrow.release_conditions || undefined,
+        milestones: milestones.length > 0 ? milestones : undefined,
       };
 
       return {

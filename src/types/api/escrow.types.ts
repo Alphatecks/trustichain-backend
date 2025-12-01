@@ -4,13 +4,52 @@
 
 export type TransactionType = 'freelance' | 'product_purchase' | 'real_estate' | 'custom';
 
+export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
+
+export interface Milestone {
+  id?: string; // Milestone ID (included in responses)
+  milestoneDetails: string; // Description/details of the milestone
+  milestoneAmount: number; // Amount for this milestone
+  milestoneAmountUsd?: number; // Amount in USD (included in responses)
+  milestoneOrder?: number; // Order/sequence number
+  status?: string; // Status: pending, completed, released (included in responses)
+  createdAt?: string; // Created timestamp (included in responses)
+  completedAt?: string; // Completed timestamp (included in responses)
+}
+
 export interface CreateEscrowRequest {
-  counterpartyId: string;
+  // Wallet addresses (required)
+  payerXrpWalletAddress: string;
+  counterpartyXrpWalletAddress: string;
+  
+  // Counterparty ID (optional - will be looked up by wallet address if not provided)
+  counterpartyId?: string;
+  
+  // Escrow details
   amount: number;
   currency: 'USD' | 'XRP';
   description?: string;
   transactionType: TransactionType;
   industry?: string;
+  
+  // Payer contact information (optional)
+  payerEmail?: string;
+  payerName?: string;
+  payerPhoneNumber?: string;
+  
+  // Counterparty contact information (optional)
+  counterpartyEmail?: string;
+  counterpartyName?: string;
+  counterpartyPhoneNumber?: string;
+  
+  // Step 2: Terms and Release conditions (optional)
+  releaseType?: ReleaseType;
+  expectedCompletionDate?: string; // ISO date string - Required for "Milestones" release type
+  expectedReleaseDate?: string; // ISO date string - Required for "Time based" release type
+  disputeResolutionPeriod?: string; // e.g., "7 days", "14 days" - Required for "Milestones" release type
+  totalAmount?: number; // If provided, will override amount field - Required for both "Time based" and "Milestones" release types
+  releaseConditions?: string; // Detailed release conditions text
+  milestones?: Milestone[]; // Array of milestones - Required for "Milestones" release type
 }
 
 export interface CreateEscrowResponse {
@@ -49,6 +88,22 @@ export interface Escrow {
   updatedAt: string;
   completedAt?: string;
   cancelReason?: string;
+  
+  // Contact information
+  payerEmail?: string;
+  payerName?: string;
+  payerPhone?: string;
+  counterpartyEmail?: string;
+  counterpartyName?: string;
+  counterpartyPhone?: string;
+  
+  // Step 2: Terms and Release conditions
+  releaseType?: ReleaseType;
+  expectedCompletionDate?: string;
+  expectedReleaseDate?: string;
+  disputeResolutionPeriod?: string;
+  releaseConditions?: string;
+  milestones?: Milestone[]; // Array of milestones for milestone-based escrows
 }
 
 export interface EscrowListResponse {
