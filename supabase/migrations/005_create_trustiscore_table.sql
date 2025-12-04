@@ -48,3 +48,5 @@ CREATE TRIGGER update_trustiscore_updated_at
 
 
 
+
+

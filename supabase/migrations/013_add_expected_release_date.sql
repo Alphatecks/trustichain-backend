@@ -9,3 +9,4 @@ CREATE INDEX IF NOT EXISTS idx_escrows_expected_release_date ON escrows(expected
 
 -- Add comment explaining the purpose of this field
 COMMENT ON COLUMN escrows.expected_release_date IS 'Expected release date for time-based escrows. Used when release_type is "Time based"';
+

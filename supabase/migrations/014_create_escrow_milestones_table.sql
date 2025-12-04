@@ -53,3 +53,4 @@ COMMENT ON COLUMN escrow_milestones.milestone_order IS 'Order/sequence number of
 COMMENT ON COLUMN escrow_milestones.milestone_details IS 'Description or details of what needs to be completed for this milestone';
 COMMENT ON COLUMN escrow_milestones.milestone_amount IS 'Amount to be released for this milestone in XRP';
 COMMENT ON COLUMN escrow_milestones.milestone_amount_usd IS 'Amount to be released for this milestone in USD';
+

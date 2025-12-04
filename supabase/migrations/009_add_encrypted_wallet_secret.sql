@@ -10,3 +10,5 @@ COMMENT ON COLUMN wallets.encrypted_wallet_secret IS 'Encrypted XRPL wallet secr
 -- Only backend service should access this column
 
 
+
+

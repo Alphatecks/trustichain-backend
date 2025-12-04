@@ -28,3 +28,4 @@ COMMENT ON COLUMN escrows.release_type IS 'Release mechanism type: Manual Releas
 COMMENT ON COLUMN escrows.expected_completion_date IS 'Expected date when the escrow should be completed';
 COMMENT ON COLUMN escrows.dispute_resolution_period IS 'Period for dispute resolution (e.g., "7 days", "14 days")';
 COMMENT ON COLUMN escrows.release_conditions IS 'Detailed conditions for releasing the escrow funds';
+
