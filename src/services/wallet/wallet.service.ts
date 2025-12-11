@@ -439,6 +439,14 @@ export class WalletService {
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:433',message:'getXUMMPayloadStatus: XUMM auto-submitted transaction, updating DB',data:{txid:payloadStatus.response.txid,submit:payloadStatus.meta.submit},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         
+        console.log('[XUMM Fix] Auto-submitted transaction detected:', {
+          transactionId,
+          userId,
+          txid: payloadStatus.response.txid,
+          signed: payloadStatus.meta.signed,
+          submit: payloadStatus.meta.submit,
+        });
+        
         // Transaction is already on XRPL, just update database
         await adminClient
           .from('transactions')
@@ -479,6 +487,15 @@ export class WalletService {
           // #region agent log
           fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:459',message:'getXUMMPayloadStatus: Updated wallet balance in DB (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
           // #endregion
+          
+          console.log('[XUMM Fix] Balance updated successfully for auto-submitted transaction:', {
+            transactionId,
+            userId,
+            xrp: balances.xrp,
+            usdt: balances.usdt,
+            usdc: balances.usdc,
+            txid: payloadStatus.response.txid,
+          });
         }
 
         return {
