@@ -160,6 +160,10 @@ export class WalletController {
       const userId = req.userId!;
       const transactionId = req.query.transactionId as string;
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.controller.ts:161',message:'getXUMMPayloadStatus: Endpoint called',data:{userId,transactionId,hasTransactionId:!!transactionId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
       if (!transactionId) {
         res.status(400).json({
           success: false,
