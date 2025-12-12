@@ -34,6 +34,7 @@ export class ExchangeService {
     error?: string;
   }> {
     try {
+      console.log('[DEBUG] getLiveExchangeRates: Starting');
       const now = Date.now();
       const currencies = ['USD', 'EUR', 'GBP', 'JPY'];
       const rates: ExchangeRate[] = [];
@@ -56,7 +57,15 @@ export class ExchangeService {
           });
         } else {
           // Fetch fresh rate
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:58',message:'getLiveExchangeRates: Fetching rate',data:{currency,hasCached:!!cached,cachedRate:cached?.rate},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          console.log('[DEBUG] getLiveExchangeRates fetching rate:', { currency, hasCached: !!cached, cachedRate: cached?.rate });
           const rate = await this.fetchExchangeRate(currency);
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:61',message:'getLiveExchangeRates: Rate fetched',data:{currency,rate,isNull:rate===null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          console.log('[DEBUG] getLiveExchangeRates rate fetched:', { currency, rate, isNull: rate === null });
           
           if (rate !== null) {
             const previousRate = cached?.rate || rate;
@@ -78,9 +87,14 @@ export class ExchangeService {
               change,
               changePercent: parseFloat(changePercent.toFixed(2)),
             });
+            console.log('[DEBUG] getLiveExchangeRates using fetched rate:', { currency, rate });
           } else {
             // Fallback to cached data even if expired, or use default
             const fallbackRate = cached?.rate || this.getDefaultRate(currency);
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:83',message:'getLiveExchangeRates: Using fallback',data:{currency,fallbackRate,hasCached:!!cached},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+            console.log('[DEBUG] getLiveExchangeRates using fallback:', { currency, fallbackRate, hasCached: !!cached });
             rates.push({
               currency,
               rate: fallbackRate,
@@ -91,6 +105,7 @@ export class ExchangeService {
         }
       }
 
+      console.log('[DEBUG] getLiveExchangeRates: Success', { ratesCount: rates.length, rates });
       return {
         success: true,
         message: 'Exchange rates retrieved successfully',
@@ -100,7 +115,10 @@ export class ExchangeService {
         },
       };
     } catch (error) {
-      console.error('Error fetching exchange rates:', error);
+      console.error('[DEBUG] getLiveExchangeRates: Error in outer catch', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fetch exchange rates',
@@ -115,20 +133,68 @@ export class ExchangeService {
    */
   private async fetchExchangeRate(currency: string): Promise<number | null> {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:116',message:'fetchExchangeRate: Entry',data:{currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       // Using CoinGecko API as an example
       // In production, you might want to use XRPL's native rates or a more reliable source
-      const response = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=${currency.toLowerCase()}`
-      );
+      const url = `https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=${currency.toLowerCase()}`;
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:121',message:'fetchExchangeRate: Before fetch',data:{currency,url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const response = await fetch(url);
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:124',message:'fetchExchangeRate: After fetch',data:{currency,status:response.status,statusText:response.statusText,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      // Log for Render debugging
+      console.log('[DEBUG] fetchExchangeRate response:', {
+        currency,
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries()),
+      });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch rate for ${currency}`);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:127',message:'fetchExchangeRate: Response not OK',data:{currency,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        // Log error response body for debugging
+        let errorBody = '';
+        try {
+          errorBody = await response.text();
+          console.log('[DEBUG] fetchExchangeRate error response body:', { currency, status: response.status, body: errorBody });
+        } catch (e) {
+          console.log('[DEBUG] fetchExchangeRate could not read error body:', { currency, status: response.status });
+        }
+        // Don't throw - return null instead to allow fallback
+        return null;
       }
 
       const data = await response.json() as { ripple?: Record<string, number> };
-      return data.ripple?.[currency.toLowerCase()] || null;
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:132',message:'fetchExchangeRate: Parsed response',data:{currency,hasRipple:!!data.ripple,rate:data.ripple?.[currency.toLowerCase()]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      const rate = data.ripple?.[currency.toLowerCase()] || null;
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:135',message:'fetchExchangeRate: Returning rate',data:{currency,rate},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      console.log('[DEBUG] fetchExchangeRate success:', { currency, rate, data });
+      return rate;
     } catch (error) {
-      console.error(`Error fetching ${currency} rate:`, error);
+      // #region agent log
+      const errorData = error instanceof Error ? {message:error.message,stack:error.stack,name:error.name} : {error:String(error)};
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:137',message:'fetchExchangeRate: Catch block',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      // Log error details for Render debugging
+      console.log('[DEBUG] fetchExchangeRate catch:', {
+        currency,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : undefined,
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
+      // Return null to allow fallback to cached/default rates
       return null;
     }
   }

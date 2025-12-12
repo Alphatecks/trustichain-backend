@@ -72,6 +72,9 @@ export class XRPLWalletService {
    */
   async getBalance(xrplAddress: string): Promise<number> {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:73',message:'getBalance: Entry',data:{xrplAddress},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       const client = new Client(this.XRPL_SERVER);
       await client.connect();
 
@@ -89,17 +92,68 @@ export class XRPLWalletService {
         const balanceDrops = accountInfo.result.account_data.Balance;
         // dropsToXrp expects a string, ensure it's always a string
         const dropsStr: string = String(balanceDrops);
-        return dropsToXrp(dropsStr);
+        const balance = dropsToXrp(dropsStr);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:93',message:'getBalance: Success',data:{xrplAddress,balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        return balance;
       } catch (error) {
         await client.disconnect();
+        // #region agent log
+        const errorData = error instanceof Error ? {message:error.message,stack:error.stack} : {error:String(error)};
+        const errorObj = error as any;
+        const errorDetails = {errorData,hasData:!!errorObj?.data,dataError:errorObj?.data?.error,dataErrorCode:errorObj?.data?.error_code,dataErrorMessage:errorObj?.data?.error_message};
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:96',message:'getBalance: Inner catch',data:{xrplAddress,errorDetails},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        // Log error details for Render debugging
+        console.log('[DEBUG] getBalance inner catch:', {
+          xrplAddress,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorData: errorObj?.data,
+          hasData: !!errorObj?.data,
+          dataError: errorObj?.data?.error,
+          dataErrorCode: errorObj?.data?.error_code,
+          dataErrorMessage: errorObj?.data?.error_message,
+        });
         // If account doesn't exist, return 0
-        if (error instanceof Error && error.message.includes('actNotFound')) {
+        const isAccountNotFound = (error instanceof Error && error.message.includes('actNotFound')) || 
+          (error as any)?.data?.error === 'actNotFound' || 
+          (error as any)?.data?.error_message === 'accountNotFound' ||
+          (error as any)?.data?.error_code === 19;
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:103',message:'getBalance: Checking accountNotFound',data:{xrplAddress,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        console.log('[DEBUG] getBalance accountNotFound check:', { xrplAddress, isAccountNotFound });
+        if (isAccountNotFound) {
+          console.log('[DEBUG] Account not found, returning 0 for:', xrplAddress);
           return 0;
         }
         throw error;
       }
     } catch (error) {
-      console.error('Error getting XRPL balance:', error);
+      // #region agent log
+      const errorData = error instanceof Error ? {message:error.message,stack:error.stack} : {error:String(error)};
+      const errorObj = error as any;
+      const errorDetails = {errorData,hasData:!!errorObj?.data,dataError:errorObj?.data?.error,dataErrorCode:errorObj?.data?.error_code,dataErrorMessage:errorObj?.data?.error_message};
+      const isAccountNotFound = (error instanceof Error && error.message.includes('actNotFound')) || 
+        errorObj?.data?.error === 'actNotFound' || 
+        errorObj?.data?.error_message === 'accountNotFound' ||
+        errorObj?.data?.error_code === 19;
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:110',message:'getBalance: Outer catch',data:{xrplAddress,errorDetails,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      // Log error details for Render debugging
+      console.log('[DEBUG] getBalance outer catch:', {
+        xrplAddress,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorData: errorObj?.data,
+        isAccountNotFound,
+      });
+      // Only log if it's not an expected account not found error
+      if (!isAccountNotFound) {
+        console.error('Error getting XRPL balance:', error);
+      } else {
+        console.log('[DEBUG] Suppressing expected accountNotFound error for:', xrplAddress);
+      }
       // Fallback to 0 if there's an error
       return 0;
     }
@@ -344,6 +398,9 @@ export class XRPLWalletService {
    */
   async getTokenBalance(xrplAddress: string, currency: string, issuer: string): Promise<number> {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:345',message:'getTokenBalance: Entry',data:{xrplAddress,currency,issuer},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       const client = new Client(this.XRPL_SERVER);
       await client.connect();
 
@@ -363,23 +420,81 @@ export class XRPLWalletService {
         );
 
         if (!trustLine) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:365',message:'getTokenBalance: No trust line found',data:{xrplAddress,currency,issuer,linesCount:lines.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
           return 0;
         }
 
         // Balance is returned as a string, convert to number
         // Negative balance means the account owes tokens (shouldn't happen for user wallets)
         const balance = parseFloat(trustLine.balance || '0');
-        return Math.max(0, balance); // Return 0 if negative
+        const finalBalance = Math.max(0, balance); // Return 0 if negative
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:372',message:'getTokenBalance: Success',data:{xrplAddress,currency,issuer,finalBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        return finalBalance;
       } catch (error) {
         await client.disconnect();
+        // #region agent log
+        const errorData = error instanceof Error ? {message:error.message,stack:error.stack} : {error:String(error)};
+        const errorObj = error as any;
+        const errorDetails = {errorData,hasData:!!errorObj?.data,dataError:errorObj?.data?.error,dataErrorCode:errorObj?.data?.error_code,dataErrorMessage:errorObj?.data?.error_message};
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:376',message:'getTokenBalance: Inner catch',data:{xrplAddress,currency,issuer,errorDetails},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        // Log error details for Render debugging
+        console.log('[DEBUG] getTokenBalance inner catch:', {
+          xrplAddress,
+          currency,
+          issuer,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorData: errorObj?.data,
+          hasData: !!errorObj?.data,
+          dataError: errorObj?.data?.error,
+          dataErrorCode: errorObj?.data?.error_code,
+          dataErrorMessage: errorObj?.data?.error_message,
+        });
         // If account doesn't exist, return 0
-        if (error instanceof Error && error.message.includes('actNotFound')) {
+        const isAccountNotFound = (error instanceof Error && error.message.includes('actNotFound')) || 
+          (error as any)?.data?.error === 'actNotFound' || 
+          (error as any)?.data?.error_message === 'accountNotFound' ||
+          (error as any)?.data?.error_code === 19;
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:382',message:'getTokenBalance: Checking accountNotFound',data:{xrplAddress,currency,issuer,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        console.log('[DEBUG] getTokenBalance accountNotFound check:', { xrplAddress, currency, issuer, isAccountNotFound });
+        if (isAccountNotFound) {
+          console.log('[DEBUG] Account not found, returning 0 for token:', { xrplAddress, currency, issuer });
           return 0;
         }
         throw error;
       }
     } catch (error) {
-      console.error(`Error getting ${currency} balance:`, error);
+      // #region agent log
+      const errorData = error instanceof Error ? {message:error.message,stack:error.stack} : {error:String(error)};
+      const errorObj = error as any;
+      const errorDetails = {errorData,hasData:!!errorObj?.data,dataError:errorObj?.data?.error,dataErrorCode:errorObj?.data?.error_code,dataErrorMessage:errorObj?.data?.error_message};
+      const isAccountNotFound = (error instanceof Error && error.message.includes('actNotFound')) || 
+        errorObj?.data?.error === 'actNotFound' || 
+        errorObj?.data?.error_message === 'accountNotFound' ||
+        errorObj?.data?.error_code === 19;
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:390',message:'getTokenBalance: Outer catch',data:{xrplAddress,currency,issuer,errorDetails,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      // Log error details for Render debugging
+      console.log('[DEBUG] getTokenBalance outer catch:', {
+        xrplAddress,
+        currency,
+        issuer,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorData: errorObj?.data,
+        isAccountNotFound,
+      });
+      // Only log if it's not an expected account not found error
+      if (!isAccountNotFound) {
+        console.error(`Error getting ${currency} balance:`, error);
+      } else {
+        console.log('[DEBUG] Suppressing expected accountNotFound error for token:', { xrplAddress, currency, issuer });
+      }
       // Fallback to 0 if there's an error
       return 0;
     }
