@@ -153,11 +153,13 @@ export class XRPLWalletService {
                 configuredNetwork: this.XRPL_NETWORK,
                 actualNetwork: otherNetwork,
                 balance: otherBalance,
-                action: `Set XRPL_NETWORK=${otherNetwork} in environment variables`,
+                action: `Set XRPL_NETWORK=${otherNetwork} in environment variables to fix this permanently`,
+                note: 'Returning balance from correct network, but please update environment variable',
               });
               
-              // Return 0 for now, but log the mismatch
-              return 0;
+              // Return the balance from the correct network so user sees their funds
+              // But log the mismatch so it can be fixed
+              return otherBalance;
             } catch (otherError) {
               await otherClient.disconnect();
               // Account not found on either network
@@ -513,17 +515,83 @@ export class XRPLWalletService {
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:382',message:'getTokenBalance: Checking accountNotFound',data:{xrplAddress,currency,issuer,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         if (isAccountNotFound) {
-          // Account doesn't exist yet - log warning if user claims to have funded
-          console.log('[WARNING] Account not found on XRPL (token balance)', {
-            network: this.XRPL_NETWORK,
-            server: this.XRPL_SERVER,
+          // Account doesn't exist yet - check the other network in case of mismatch
+          const otherNetwork = this.XRPL_NETWORK === 'mainnet' ? 'testnet' : 'mainnet';
+          const otherServer = otherNetwork === 'mainnet' 
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          console.log('[WARNING] Account not found on configured network (token balance), checking other network', {
+            configuredNetwork: this.XRPL_NETWORK,
+            checkingNetwork: otherNetwork,
             address: xrplAddress,
             currency,
             issuer,
-            errorCode: (error as any)?.data?.error_code,
-            errorMessage: (error as any)?.data?.error_message,
-            note: 'If user funded this address, check: 1) Network mismatch (testnet vs mainnet), 2) Wrong address, 3) Transaction pending/failed',
           });
+          
+          // Try the other network
+          try {
+            const otherClient = new Client(otherServer);
+            await otherClient.connect();
+            try {
+              // First check if account exists on other network
+              const otherAccountInfo = await otherClient.request({
+                command: 'account_info',
+                account: xrplAddress,
+                ledger_index: 'validated',
+              });
+              
+              // Account exists on other network, now check token balance
+              const otherAccountLines = await otherClient.request({
+                command: 'account_lines',
+                account: xrplAddress,
+                ledger_index: 'validated',
+              });
+              
+              await otherClient.disconnect();
+              
+              // Find the trust line for this currency and issuer
+              const lines = otherAccountLines.result.lines || [];
+              const trustLine = lines.find((line: any) => 
+                line.currency === currency && line.account === issuer
+              );
+              
+              const otherBalance = trustLine ? Math.max(0, parseFloat(trustLine.balance || '0')) : 0;
+              
+              console.log('[CRITICAL] Network mismatch detected (token balance)!', {
+                address: xrplAddress,
+                currency,
+                issuer,
+                configuredNetwork: this.XRPL_NETWORK,
+                actualNetwork: otherNetwork,
+                balance: otherBalance,
+                action: `Set XRPL_NETWORK=${otherNetwork} in environment variables to fix this permanently`,
+                note: 'Returning balance from correct network, but please update environment variable',
+              });
+              
+              // Return the balance from the correct network
+              return otherBalance;
+            } catch (otherError) {
+              await otherClient.disconnect();
+              // Account not found on either network or no token balance
+              console.log('[INFO] Account not found on either network (token balance)', {
+                address: xrplAddress,
+                currency,
+                issuer,
+                testnet: this.XRPL_NETWORK === 'testnet' ? 'not found' : 'not checked',
+                mainnet: this.XRPL_NETWORK === 'mainnet' ? 'not found' : 'not found',
+                note: 'This is expected for new wallets that haven\'t been funded yet or don\'t have this token',
+              });
+            }
+          } catch (checkError) {
+            console.log('[DEBUG] Could not check other network (token balance)', {
+              address: xrplAddress,
+              currency,
+              issuer,
+              error: checkError instanceof Error ? checkError.message : String(checkError),
+            });
+          }
+          
           // Account doesn't exist yet - this is expected for new wallets, return 0 silently
           return 0;
         }
