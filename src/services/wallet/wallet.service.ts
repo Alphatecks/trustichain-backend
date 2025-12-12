@@ -73,6 +73,15 @@ export class WalletService {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:73',message:'getBalance: Fetching balances from XRPL',data:{userId,xrplAddress:wallet.xrpl_address,dbBalanceXrp:wallet.balance_xrp,dbBalanceUsdt:wallet.balance_usdt,dbBalanceUsdc:wallet.balance_usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
       // #endregion
+      console.log('[DEBUG] wallet.service.getBalance: Querying XRPL for user wallet', {
+        userId,
+        xrplAddress: wallet.xrpl_address,
+        walletId: wallet.id,
+        dbBalanceXrp: wallet.balance_xrp,
+        dbBalanceUsdt: wallet.balance_usdt,
+        dbBalanceUsdc: wallet.balance_usdc,
+        note: 'Verify this address matches what user funded. Check network (testnet vs mainnet) if account not found.',
+      });
       const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
 
       // #region agent log

@@ -75,6 +75,13 @@ export class XRPLWalletService {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:73',message:'getBalance: Entry',data:{xrplAddress},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
+      // Log network and address for debugging funded account issues
+      console.log('[DEBUG] getBalance: Querying XRPL', {
+        network: this.XRPL_NETWORK,
+        server: this.XRPL_SERVER,
+        address: xrplAddress,
+        note: 'If user funded but account not found, check network mismatch (testnet vs mainnet)',
+      });
       const client = new Client(this.XRPL_SERVER);
       await client.connect();
 
@@ -114,6 +121,15 @@ export class XRPLWalletService {
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:103',message:'getBalance: Checking accountNotFound',data:{xrplAddress,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
         // #endregion
         if (isAccountNotFound) {
+          // Account doesn't exist yet - log warning if user claims to have funded
+          console.log('[WARNING] Account not found on XRPL', {
+            network: this.XRPL_NETWORK,
+            server: this.XRPL_SERVER,
+            address: xrplAddress,
+            errorCode: (error as any)?.data?.error_code,
+            errorMessage: (error as any)?.data?.error_message,
+            note: 'If user funded this address, check: 1) Network mismatch (testnet vs mainnet), 2) Wrong address, 3) Transaction pending/failed',
+          });
           // Account doesn't exist yet - this is expected for new wallets, return 0 silently
           return 0;
         }
@@ -393,6 +409,15 @@ export class XRPLWalletService {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:345',message:'getTokenBalance: Entry',data:{xrplAddress,currency,issuer},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
       // #endregion
+      // Log network and address for debugging funded account issues
+      console.log('[DEBUG] getTokenBalance: Querying XRPL', {
+        network: this.XRPL_NETWORK,
+        server: this.XRPL_SERVER,
+        address: xrplAddress,
+        currency,
+        issuer,
+        note: 'If user funded but account not found, check network mismatch (testnet vs mainnet)',
+      });
       const client = new Client(this.XRPL_SERVER);
       await client.connect();
 
@@ -443,6 +468,17 @@ export class XRPLWalletService {
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:382',message:'getTokenBalance: Checking accountNotFound',data:{xrplAddress,currency,issuer,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         if (isAccountNotFound) {
+          // Account doesn't exist yet - log warning if user claims to have funded
+          console.log('[WARNING] Account not found on XRPL (token balance)', {
+            network: this.XRPL_NETWORK,
+            server: this.XRPL_SERVER,
+            address: xrplAddress,
+            currency,
+            issuer,
+            errorCode: (error as any)?.data?.error_code,
+            errorMessage: (error as any)?.data?.error_message,
+            note: 'If user funded this address, check: 1) Network mismatch (testnet vs mainnet), 2) Wrong address, 3) Transaction pending/failed',
+          });
           // Account doesn't exist yet - this is expected for new wallets, return 0 silently
           return 0;
         }
