@@ -534,14 +534,7 @@ export class XRPLWalletService {
             const otherClient = new Client(otherServer);
             await otherClient.connect();
             try {
-              // First check if account exists on other network
-              const otherAccountInfo = await otherClient.request({
-                command: 'account_info',
-                account: xrplAddress,
-                ledger_index: 'validated',
-              });
-              
-              // Account exists on other network, now check token balance
+              // Check token balance on other network (will fail if account doesn't exist)
               const otherAccountLines = await otherClient.request({
                 command: 'account_lines',
                 account: xrplAddress,
