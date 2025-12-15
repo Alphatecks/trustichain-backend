@@ -70,9 +70,6 @@ export class WalletService {
       }
 
       // Get live balances from XRPL (XRP, USDT, USDC)
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:73',message:'getBalance: Fetching balances from XRPL',data:{userId,xrplAddress:wallet.xrpl_address,dbBalanceXrp:wallet.balance_xrp,dbBalanceUsdt:wallet.balance_usdt,dbBalanceUsdc:wallet.balance_usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       console.log('[DEBUG] wallet.service.getBalance: Querying XRPL for user wallet', {
         userId,
         xrplAddress: wallet.xrpl_address,
@@ -82,11 +79,38 @@ export class WalletService {
         dbBalanceUsdc: wallet.balance_usdc,
         note: 'Verify this address matches what user funded. Check network (testnet vs mainnet) if account not found.',
       });
-      const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:75',message:'getBalance: Got balances from XRPL',data:{userId,xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc,dbBalanceXrp:wallet.balance_xrp,dbBalanceUsdt:wallet.balance_usdt,dbBalanceUsdc:wallet.balance_usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      
+      let balances;
+      try {
+        balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+        console.log('[DEBUG] wallet.service.getBalance: Got balances from XRPL', {
+          userId,
+          xrplAddress: wallet.xrpl_address,
+          balances,
+          dbBalanceXrp: wallet.balance_xrp,
+          dbBalanceUsdt: wallet.balance_usdt,
+          dbBalanceUsdc: wallet.balance_usdc,
+        });
+      } catch (balanceError) {
+        console.error('[ERROR] wallet.service.getBalance: Failed to fetch balances from XRPL', {
+          userId,
+          xrplAddress: wallet.xrpl_address,
+          error: balanceError instanceof Error ? balanceError.message : String(balanceError),
+        });
+        // Return database balances as fallback if XRPL query fails
+        return {
+          success: true,
+          message: 'Wallet balance retrieved from database (XRPL query failed)',
+          data: {
+            balance: {
+              xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
+              usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
+              usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
+            },
+            xrplAddress: wallet.xrpl_address,
+          },
+        };
+      }
 
       // Update wallet balance in database
       await adminClient

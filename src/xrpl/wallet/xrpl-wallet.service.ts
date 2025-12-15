@@ -656,10 +656,27 @@ export class XRPLWalletService {
   }> {
     try {
       const [xrp, usdt, usdc] = await Promise.all([
-        this.getBalance(xrplAddress),
-        this.getUSDTBalance(xrplAddress),
-        this.getUSDCBalance(xrplAddress),
+        this.getBalance(xrplAddress).catch(err => {
+          console.error('[XRPL] Error getting XRP balance:', err);
+          return 0; // Return 0 for individual failures, but continue
+        }),
+        this.getUSDTBalance(xrplAddress).catch(err => {
+          console.error('[XRPL] Error getting USDT balance:', err);
+          return 0;
+        }),
+        this.getUSDCBalance(xrplAddress).catch(err => {
+          console.error('[XRPL] Error getting USDC balance:', err);
+          return 0;
+        }),
       ]);
+
+      console.log('[XRPL] getAllBalances result:', {
+        xrplAddress,
+        xrp,
+        usdt,
+        usdc,
+        network: this.XRPL_NETWORK,
+      });
 
       return {
         xrp,
@@ -667,7 +684,12 @@ export class XRPLWalletService {
         usdc,
       };
     } catch (error) {
-      console.error('Error getting all balances:', error);
+      console.error('[XRPL] Critical error getting all balances:', {
+        error: error instanceof Error ? error.message : String(error),
+        xrplAddress,
+        network: this.XRPL_NETWORK,
+      });
+      // Still return zeros but log the error for debugging
       return {
         xrp: 0,
         usdt: 0,

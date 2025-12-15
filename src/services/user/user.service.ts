@@ -82,7 +82,7 @@ export class UserService {
   /**
    * Get linked accounts for a user
    */
-  async getLinkedAccounts(userId: string): Promise<{
+  async getLinkedAccounts(_userId: string): Promise<{
     success: boolean;
     message: string;
     data?: any[];
@@ -91,6 +91,7 @@ export class UserService {
     try {
       // TODO: Implement linked accounts logic when database schema is ready
       // For now, return empty array
+      // userId parameter reserved for future implementation
       return {
         success: true,
         message: 'Linked accounts retrieved successfully',
@@ -109,7 +110,7 @@ export class UserService {
   /**
    * Get beneficiaries for a user
    */
-  async getBeneficiaries(userId: string): Promise<{
+  async getBeneficiaries(_userId: string): Promise<{
     success: boolean;
     message: string;
     data?: any[];
@@ -118,6 +119,7 @@ export class UserService {
     try {
       // TODO: Implement beneficiaries logic when database schema is ready
       // For now, return empty array
+      // userId parameter reserved for future implementation
       return {
         success: true,
         message: 'Beneficiaries retrieved successfully',
