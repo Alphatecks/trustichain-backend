@@ -78,6 +78,60 @@ export class UserService {
       };
     }
   }
+
+  /**
+   * Get linked accounts for a user
+   */
+  async getLinkedAccounts(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: any[];
+    error?: string;
+  }> {
+    try {
+      // TODO: Implement linked accounts logic when database schema is ready
+      // For now, return empty array
+      return {
+        success: true,
+        message: 'Linked accounts retrieved successfully',
+        data: [],
+      };
+    } catch (error) {
+      console.error('Error fetching linked accounts:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch linked accounts',
+        error: error instanceof Error ? error.message : 'Failed to fetch linked accounts',
+      };
+    }
+  }
+
+  /**
+   * Get beneficiaries for a user
+   */
+  async getBeneficiaries(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: any[];
+    error?: string;
+  }> {
+    try {
+      // TODO: Implement beneficiaries logic when database schema is ready
+      // For now, return empty array
+      return {
+        success: true,
+        message: 'Beneficiaries retrieved successfully',
+        data: [],
+      };
+    } catch (error) {
+      console.error('Error fetching beneficiaries:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch beneficiaries',
+        error: error instanceof Error ? error.message : 'Failed to fetch beneficiaries',
+      };
+    }
+  }
 }
 
 export const userService = new UserService();

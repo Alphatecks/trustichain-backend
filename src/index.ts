@@ -9,6 +9,7 @@ import trustiscoreRoutes from './routes/trustiscore.routes';
 import portfolioRoutes from './routes/portfolio.routes';
 import exchangeRoutes from './routes/exchange.routes';
 import userRoutes from './routes/user.routes';
+import transactionsRoutes from './routes/transactions.routes';
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.use('/api/trustiscore', trustiscoreRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/exchange', exchangeRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/transactions', transactionsRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

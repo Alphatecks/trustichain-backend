@@ -14,6 +14,24 @@ router.get('/profile', authenticate, asyncHandler(async (req, res) => {
   await userController.getUserProfile(req, res);
 }));
 
+/**
+ * @route   GET /api/user/linked-accounts
+ * @desc    Get user linked accounts
+ * @access  Private
+ */
+router.get('/linked-accounts', authenticate, asyncHandler(async (req, res) => {
+  await userController.getLinkedAccounts(req, res);
+}));
+
+/**
+ * @route   GET /api/user/beneficiaries
+ * @desc    Get user beneficiaries
+ * @access  Private
+ */
+router.get('/beneficiaries', authenticate, asyncHandler(async (req, res) => {
+  await userController.getBeneficiaries(req, res);
+}));
+
 export default router;
 
 
