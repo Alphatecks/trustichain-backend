@@ -379,53 +379,59 @@ export class XRPLWalletService {
     amountXrp: number,
     walletSecret?: string
   ): Promise<string> {
+    if (!walletSecret) {
+      throw new Error('Wallet secret required for withdrawal');
+    }
+
+    const client = new Client(this.XRPL_SERVER);
+    
     try {
-      if (!walletSecret) {
-        // In production, retrieve wallet secret securely (from encrypted storage, HSM, etc.)
-        throw new Error('Wallet secret required for withdrawal');
-      }
-
-      const client = new Client(this.XRPL_SERVER);
       await client.connect();
+      const wallet = Wallet.fromSeed(walletSecret);
+      
+      const payment: any = {
+        TransactionType: 'Payment',
+        Account: fromAddress,
+        Destination: toAddress,
+        Amount: xrpToDrops(amountXrp.toString()),
+      };
 
-      try {
-        const wallet = Wallet.fromSeed(walletSecret);
-        
-        const payment: any = {
-          TransactionType: 'Payment',
-          Account: fromAddress,
-          Destination: toAddress,
-          Amount: xrpToDrops(amountXrp.toString()),
-        };
+      const prepared = await client.autofill(payment);
+      const signed = wallet.sign(prepared);
+      
+      // Submit transaction and wait for validation (with timeout)
+      const result = await Promise.race([
+        client.submitAndWait(signed.tx_blob),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Transaction submission timeout after 30 seconds')), 30000)
+        )
+      ]) as any;
 
-        const prepared = await client.autofill(payment);
-        const signed = wallet.sign(prepared);
-          const result = await client.submitAndWait(signed.tx_blob);
-
-        await client.disconnect();
-
-        // Check transaction result
-        const txResult = typeof result.result.meta === 'object' && result.result.meta !== null
-          ? (result.result.meta as any).TransactionResult
-          : null;
-        
-        if (txResult !== 'tesSUCCESS') {
-          throw new Error(`Transaction failed: ${txResult || 'unknown'}`);
-        }
-
-        return result.result.hash;
-      } catch (error) {
-        await client.disconnect();
-        throw error;
+      // Check transaction result
+      const txResult = typeof result.result.meta === 'object' && result.result.meta !== null
+        ? (result.result.meta as any).TransactionResult
+        : null;
+      
+      if (txResult !== 'tesSUCCESS') {
+        throw new Error(`Transaction failed on XRPL: ${txResult || 'unknown'}`);
       }
+
+      return result.result.hash;
     } catch (error) {
-      console.error('Error creating withdrawal transaction:', error);
-      // Return placeholder for now if wallet secret not available
-      const txHash = Array.from({ length: 64 }, () => 
-        Math.floor(Math.random() * 16).toString(16)
-      ).join('');
-      console.log(`[XRPL] Withdrawal transaction placeholder: ${amountXrp} XRP from ${fromAddress} to ${toAddress}`);
-      return txHash;
+      console.error('Error creating withdrawal transaction:', {
+        error: error instanceof Error ? error.message : String(error),
+        fromAddress,
+        toAddress,
+        amountXrp,
+      });
+      // Re-throw error instead of returning placeholder
+      throw error;
+    } finally {
+      try {
+        await client.disconnect();
+      } catch (disconnectError) {
+        // Ignore disconnect errors
+      }
     }
   }
 

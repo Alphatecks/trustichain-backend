@@ -794,14 +794,33 @@ export class WalletService {
       }
 
       // Create XRPL withdrawal transaction with wallet secret
-      const xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
-        wallet.xrpl_address,
-        request.destinationAddress,
-        amountXrp,
-        walletSecret
-      );
+      let xrplTxHash: string;
+      try {
+        xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
+          wallet.xrpl_address,
+          request.destinationAddress,
+          amountXrp,
+          walletSecret
+        );
+      } catch (xrplError) {
+        // Update transaction status to failed if XRPL submission fails
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'failed',
+            updated_at: new Date().toISOString(),
+            description: `Withdrawal failed: ${xrplError instanceof Error ? xrplError.message : 'Unknown error'}`,
+          })
+          .eq('id', transaction.id);
 
-      // Update transaction
+        return {
+          success: false,
+          message: xrplError instanceof Error ? xrplError.message : 'Failed to submit withdrawal to XRPL',
+          error: 'XRPL submission failed',
+        };
+      }
+
+      // Update transaction to completed only after successful XRPL submission
       await adminClient
         .from('transactions')
         .update({
