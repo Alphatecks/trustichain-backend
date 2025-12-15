@@ -724,6 +724,9 @@ export class WalletService {
     };
     error?: string;
   }> {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:713',message:'withdrawWallet: Entry',data:{userId,amount:request.amount,currency:request.currency,destinationAddress:request.destinationAddress},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     try {
       const adminClient = supabaseAdmin || supabase;
 
@@ -735,6 +738,9 @@ export class WalletService {
         .single();
 
       if (!wallet) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:737',message:'withdrawWallet: Wallet not found',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         return {
           success: false,
           message: 'Wallet not found',
@@ -758,7 +764,13 @@ export class WalletService {
 
       // Check balance
       const balance = await this.getBalance(userId);
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:760',message:'withdrawWallet: Balance check result',data:{userId,balanceSuccess:balance.success,balanceXrp:balance.data?.balance.xrp,amountXrp,hasEnoughBalance:balance.data?.balance.xrp >= amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       if (!balance.success || !balance.data) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:762',message:'withdrawWallet: Balance check failed',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         return {
           success: false,
           message: 'Failed to check balance',
@@ -767,6 +779,9 @@ export class WalletService {
       }
 
       if (balance.data.balance.xrp < amountXrp) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:769',message:'withdrawWallet: Insufficient balance',data:{userId,balanceXrp:balance.data.balance.xrp,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         return {
           success: false,
           message: 'Insufficient balance',
@@ -788,7 +803,13 @@ export class WalletService {
         .select()
         .single();
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:778',message:'withdrawWallet: Transaction created',data:{userId,transactionId:transaction?.id,status:transaction?.status,hasError:!!txError,error:txError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       if (txError || !transaction) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:791',message:'withdrawWallet: Transaction creation failed',data:{userId,txError:txError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         return {
           success: false,
           message: 'Failed to create transaction',
@@ -819,6 +840,9 @@ export class WalletService {
 
       // Create XRPL withdrawal transaction with wallet secret
       let xrplTxHash: string;
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:820',message:'withdrawWallet: About to submit to XRPL',data:{userId,transactionId:transaction.id,fromAddress:wallet.xrpl_address,toAddress:request.destinationAddress,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       try {
         xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
           wallet.xrpl_address,
@@ -826,9 +850,15 @@ export class WalletService {
           amountXrp,
           walletSecret
         );
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:829',message:'withdrawWallet: XRPL submission succeeded',data:{userId,transactionId:transaction.id,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
       } catch (xrplError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:830',message:'withdrawWallet: XRPL submission failed',data:{userId,transactionId:transaction.id,error:xrplError instanceof Error ? xrplError.message : String(xrplError)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         // Update transaction status to failed if XRPL submission fails
-        await adminClient
+        const updateResult = await adminClient
           .from('transactions')
           .update({
             status: 'failed',
@@ -836,6 +866,9 @@ export class WalletService {
             description: `Withdrawal failed: ${xrplError instanceof Error ? xrplError.message : 'Unknown error'}`,
           })
           .eq('id', transaction.id);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:838',message:'withdrawWallet: Updated transaction to failed',data:{userId,transactionId:transaction.id,updateError:updateResult.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
 
         return {
           success: false,
@@ -845,7 +878,10 @@ export class WalletService {
       }
 
       // Update transaction to completed only after successful XRPL submission
-      await adminClient
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:847',message:'withdrawWallet: About to update transaction to completed',data:{userId,transactionId:transaction.id,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      const updateResult = await adminClient
         .from('transactions')
         .update({
           xrpl_tx_hash: xrplTxHash,
@@ -853,6 +889,9 @@ export class WalletService {
           updated_at: new Date().toISOString(),
         })
         .eq('id', transaction.id);
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:854',message:'withdrawWallet: Updated transaction to completed',data:{userId,transactionId:transaction.id,updateError:updateResult.error,rowsUpdated:updateResult.data?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
 
       // Update wallet balance after withdrawal
       const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
@@ -866,6 +905,9 @@ export class WalletService {
         })
         .eq('id', wallet.id);
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:863',message:'withdrawWallet: Returning success response',data:{userId,transactionId:transaction.id,xrplTxHash,status:'completed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       return {
         success: true,
         message: 'Withdrawal completed successfully',
@@ -880,6 +922,9 @@ export class WalletService {
         },
       };
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:877',message:'withdrawWallet: Outer catch block',data:{userId,error:error instanceof Error ? error.message : String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       console.error('Error withdrawing from wallet:', error);
       return {
         success: false,
