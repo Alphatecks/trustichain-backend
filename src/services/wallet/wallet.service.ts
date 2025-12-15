@@ -725,6 +725,7 @@ export class WalletService {
     error?: string;
   }> {
     // #region agent log
+    console.log('[DEBUG] withdrawWallet: Entry', {userId,amount:request.amount,currency:request.currency,destinationAddress:request.destinationAddress});
     fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:713',message:'withdrawWallet: Entry',data:{userId,amount:request.amount,currency:request.currency,destinationAddress:request.destinationAddress},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
     // #endregion
     try {
@@ -841,6 +842,7 @@ export class WalletService {
       // Create XRPL withdrawal transaction with wallet secret
       let xrplTxHash: string;
       // #region agent log
+      console.log('[DEBUG] withdrawWallet: About to submit to XRPL', {userId,transactionId:transaction.id,fromAddress:wallet.xrpl_address,toAddress:request.destinationAddress,amountXrp});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:820',message:'withdrawWallet: About to submit to XRPL',data:{userId,transactionId:transaction.id,fromAddress:wallet.xrpl_address,toAddress:request.destinationAddress,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
       // #endregion
       try {
@@ -851,10 +853,12 @@ export class WalletService {
           walletSecret
         );
         // #region agent log
+        console.log('[DEBUG] withdrawWallet: XRPL submission succeeded', {userId,transactionId:transaction.id,xrplTxHash});
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:829',message:'withdrawWallet: XRPL submission succeeded',data:{userId,transactionId:transaction.id,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
       } catch (xrplError) {
         // #region agent log
+        console.log('[DEBUG] withdrawWallet: XRPL submission failed', {userId,transactionId:transaction.id,error:xrplError instanceof Error ? xrplError.message : String(xrplError)});
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:830',message:'withdrawWallet: XRPL submission failed',data:{userId,transactionId:transaction.id,error:xrplError instanceof Error ? xrplError.message : String(xrplError)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         // Update transaction status to failed if XRPL submission fails
@@ -879,6 +883,7 @@ export class WalletService {
 
       // Update transaction to completed only after successful XRPL submission
       // #region agent log
+      console.log('[DEBUG] withdrawWallet: About to update transaction to completed', {userId,transactionId:transaction.id,xrplTxHash});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:847',message:'withdrawWallet: About to update transaction to completed',data:{userId,transactionId:transaction.id,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
       const updateResult = await adminClient
@@ -890,6 +895,7 @@ export class WalletService {
         })
         .eq('id', transaction.id);
       // #region agent log
+      console.log('[DEBUG] withdrawWallet: Updated transaction to completed', {userId,transactionId:transaction.id,updateError:updateResult.error,rowsUpdated:updateResult.data?.length});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:854',message:'withdrawWallet: Updated transaction to completed',data:{userId,transactionId:transaction.id,updateError:updateResult.error,rowsUpdated:updateResult.data?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
 

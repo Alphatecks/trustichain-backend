@@ -409,6 +409,7 @@ export class XRPLWalletService {
       const signed = wallet.sign(prepared);
       
       // #region agent log
+      console.log('[DEBUG] createWithdrawalTransaction: Submitting to XRPL', {fromAddress,toAddress,amountXrp});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:402',message:'createWithdrawalTransaction: Submitting to XRPL',data:{fromAddress,toAddress,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
       // Submit transaction and wait for validation (with timeout)
@@ -420,6 +421,7 @@ export class XRPLWalletService {
       ]) as any;
 
       // #region agent log
+      console.log('[DEBUG] createWithdrawalTransaction: Got result from XRPL', {hasResult:!!result,hasHash:!!result?.result?.hash,txResult:result?.result?.meta?.TransactionResult});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:410',message:'createWithdrawalTransaction: Got result from XRPL',data:{hasResult:!!result,hasHash:!!result?.result?.hash,txResult:result?.result?.meta?.TransactionResult},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
 
