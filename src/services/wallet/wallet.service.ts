@@ -897,9 +897,8 @@ export class WalletService {
         })
         .eq('id', transaction.id);
       // #region agent log
-      const rowsUpdated = Array.isArray(updateResult.data) ? updateResult.data.length : (updateResult.data ? 1 : 0);
-      console.log('[DEBUG] withdrawWallet: Updated transaction to completed', {userId,transactionId:transaction.id,updateError:updateResult.error,rowsUpdated});
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:854',message:'withdrawWallet: Updated transaction to completed',data:{userId,transactionId:transaction.id,updateError:updateResult.error,rowsUpdated},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      console.log('[DEBUG] withdrawWallet: Updated transaction to completed', {userId,transactionId:transaction.id,updateError:updateResult.error,hasData:!!updateResult.data});
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:854',message:'withdrawWallet: Updated transaction to completed',data:{userId,transactionId:transaction.id,updateError:updateResult.error,hasData:!!updateResult.data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
 
       // Update wallet balance after withdrawal
