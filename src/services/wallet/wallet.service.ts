@@ -757,10 +757,14 @@ export class WalletService {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
         amountXrp = request.amount / usdRate;
+        // Round to 6 decimal places (XRPL maximum precision)
+        amountXrp = Math.round(amountXrp * 1000000) / 1000000;
       } else {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
         amountUsd = request.amount * usdRate;
+        // Round XRP amount to 6 decimal places (XRPL maximum precision)
+        amountXrp = Math.round(amountXrp * 1000000) / 1000000;
       }
 
       // Check balance
