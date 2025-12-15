@@ -78,3 +78,7 @@ After testing, report:
 3. What do the debug logs show? (especially the "Checking if transaction needs processing" entry)
 4. Did the balance update?
 
+
+
+
+

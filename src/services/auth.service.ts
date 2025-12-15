@@ -190,7 +190,7 @@ export class AuthService {
     try {
       const { email, password } = loginData;
 
-      // Attempt to sign in
+      // Attempt to sign in (primary network call)
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email.toLowerCase(),
         password: password,
@@ -222,30 +222,25 @@ export class AuthService {
         };
       }
 
-      // Get user profile from database
-      const { data: profileData, error: profileError } = await supabase
-        .from('users')
-        .select('id, email, full_name, country')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (profileError || !profileData) {
-        return {
-          success: false,
-          message: 'User profile not found',
-          error: 'Profile error',
-        };
-      }
+      // Build user profile directly from Supabase Auth user + metadata
+      // to avoid an extra database round-trip on every login.
+      const user = authData.user;
+      const fullName =
+        (user.user_metadata as any)?.full_name ||
+        (user.user_metadata as any)?.name ||
+        user.email?.split('@')[0] ||
+        'User';
+      const country = (user.user_metadata as any)?.country || null;
 
       return {
         success: true,
         message: 'Login successful',
         data: {
           user: {
-            id: profileData.id,
-            email: profileData.email,
-            fullName: profileData.full_name,
-            country: profileData.country,
+            id: user.id,
+            email: user.email || email.toLowerCase(),
+            fullName,
+            country,
           },
           accessToken: authData.session?.access_token,
           refreshToken: authData.session?.refresh_token,
