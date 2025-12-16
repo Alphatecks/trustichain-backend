@@ -173,6 +173,55 @@ export class XRPLEscrowService {
   }
 
   /**
+   * Prepare an unsigned EscrowCreate transaction for user signing
+   * Returns transaction object that can be sent to XUMM/MetaMask for signing
+   */
+  async prepareEscrowCreateTransaction(params: {
+    fromAddress: string;
+    toAddress: string;
+    amountXrp: number;
+    finishAfter?: number;
+    cancelAfter?: number;
+    condition?: string;
+  }): Promise<{
+    transaction: any;
+    transactionBlob: string;
+    instructions: string;
+  }> {
+    try {
+      const escrowCreate: any = {
+        TransactionType: 'EscrowCreate',
+        Account: params.fromAddress,
+        Destination: params.toAddress,
+        Amount: xrpToDrops(params.amountXrp.toString()),
+      };
+
+      if (params.finishAfter) {
+        escrowCreate.FinishAfter = params.finishAfter;
+      }
+      if (params.cancelAfter) {
+        escrowCreate.CancelAfter = params.cancelAfter;
+      }
+      if (params.condition) {
+        escrowCreate.Condition = params.condition;
+      }
+
+      // Serialize to transaction blob (unsigned)
+      // Note: User's wallet (Xaman/Xumm) will autofill Account, Sequence, Fee, etc.
+      const txBlob = JSON.stringify(escrowCreate);
+
+      return {
+        transaction: escrowCreate,
+        transactionBlob: txBlob,
+        instructions: `Please sign this EscrowCreate transaction in your XRPL wallet to create escrow for ${params.amountXrp} XRP to ${params.toAddress}`,
+      };
+    } catch (error) {
+      console.error('Error preparing EscrowCreate transaction:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Prepare an unsigned EscrowFinish transaction for user signing
    * Returns transaction object that can be sent to XUMM/MetaMask for signing
    */
@@ -282,8 +331,49 @@ export class XRPLEscrowService {
         if (!txResponse || !txResponse.result) {
           console.error('[XRPL] Transaction not found:', txHash);
           // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:266',message:'getEscrowDetailsByTxHash: Transaction not found - returning null',data:{txHash,network:this.XRPL_NETWORK,reason:'txResponse or result is null'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:266',message:'getEscrowDetailsByTxHash: Transaction not found - trying fallback',data:{txHash,network:this.XRPL_NETWORK,reason:'txResponse or result is null'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
           // #endregion
+          
+          // Fallback: Try to find escrow by querying account_objects directly
+          // This handles cases where escrow was created with placeholder hash
+          console.log('[XRPL] Transaction not found, attempting fallback: querying account_objects for escrows');
+          try {
+            const accountObjectsResponse = await client.request({
+              command: 'account_objects',
+              account: ownerAddress,
+              type: 'escrow',
+            });
+
+            const escrowObjects = accountObjectsResponse.result.account_objects || [];
+            console.log(`[XRPL] Found ${escrowObjects.length} escrow objects for account ${ownerAddress}`);
+            
+            // Return the first active escrow (if any)
+            // Note: This is a best-effort fallback - ideally escrow should be identified by other means
+            if (escrowObjects.length > 0) {
+              const escrowObject = escrowObjects[0] as any;
+              const escrowAmount = (escrowObject as any).Amount;
+              const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
+              const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
+              
+              console.log('[XRPL] Using fallback escrow object:', {
+                sequence: (escrowObject as any).Sequence,
+                amount,
+                destination: (escrowObject as any).Destination,
+              });
+
+              return {
+                sequence: (escrowObject as any).Sequence as number,
+                amount,
+                destination: (escrowObject as any).Destination || '',
+                finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
+                cancelAfter: (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined,
+                condition: (escrowObject as any).Condition || undefined,
+              };
+            }
+          } catch (fallbackError) {
+            console.error('[XRPL] Fallback query also failed:', fallbackError);
+          }
+          
           return null;
         }
 

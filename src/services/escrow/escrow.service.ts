@@ -891,15 +891,92 @@ export class EscrowService {
           ownerAddress: wallet.xrpl_address,
         });
 
-        const escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
+        let escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
           escrow.xrpl_escrow_id,
           wallet.xrpl_address
         );
 
+        // If transaction hash lookup failed, try fallback: query account_objects directly
+        // This handles escrows created with placeholder hashes
+        if (!escrowDetails) {
+          console.log('[Escrow Release] Transaction hash lookup failed, trying fallback: querying account_objects');
+          
+          // Get counterparty wallet address to match destination
+          let counterpartyWalletAddress: string | null = null;
+          if (escrow.counterparty_id) {
+            const { data: counterpartyWallet } = await adminClient
+              .from('wallets')
+              .select('xrpl_address')
+              .eq('user_id', escrow.counterparty_id)
+              .single();
+            counterpartyWalletAddress = counterpartyWallet?.xrpl_address || null;
+          }
+
+          // Try to find escrow by querying account_objects and matching by destination and amount
+          // Use the XRPL service's method to query account_objects
+          try {
+            const { Client } = await import('xrpl');
+            const { xrpToDrops, dropsToXrp } = await import('xrpl');
+            
+            const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+            const xrplServer = xrplNetwork === 'mainnet'
+              ? 'wss://xrplcluster.com'
+              : 'wss://s.altnet.rippletest.net:51233';
+            
+            const client = new Client(xrplServer);
+            await client.connect();
+
+            try {
+              const accountObjectsResponse = await client.request({
+                command: 'account_objects',
+                account: wallet.xrpl_address,
+                type: 'escrow',
+              });
+
+              const escrowObjects = accountObjectsResponse.result.account_objects || [];
+              
+              // Find escrow matching destination and approximate amount
+              const targetAmountDrops = xrpToDrops(escrow.amount_xrp.toString());
+              const escrowObject = escrowObjects.find((obj: any) => {
+                const matchesDestination = !counterpartyWalletAddress || 
+                  (obj as any).Destination === counterpartyWalletAddress;
+                const objAmount = (obj as any).Amount;
+                const matchesAmount = objAmount && Math.abs(parseInt(String(objAmount)) - parseInt(String(targetAmountDrops))) < 1000; // Allow small difference for fees
+                return matchesDestination && matchesAmount;
+              }) as any;
+
+              if (escrowObject) {
+                const escrowAmount = (escrowObject as any).Amount;
+                const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
+                const amount = parseFloat(dropsToXrp(amountDropsStr) as any);
+
+                escrowDetails = {
+                  sequence: (escrowObject as any).Sequence as number,
+                  amount,
+                  destination: (escrowObject as any).Destination || '',
+                  finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
+                  cancelAfter: (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined,
+                  condition: (escrowObject as any).Condition || undefined,
+                };
+
+                console.log('[Escrow Release] Found escrow via fallback method:', {
+                  sequence: escrowDetails.sequence,
+                  amount: escrowDetails.amount,
+                  destination: escrowDetails.destination,
+                });
+              }
+            } finally {
+              await client.disconnect();
+            }
+          } catch (fallbackError) {
+            console.error('[Escrow Release] Fallback query failed:', fallbackError);
+          }
+        }
+
         if (!escrowDetails) {
           return {
             success: false,
-            message: 'Cannot release escrow: Escrow not found on XRPL. It may have already been finished or cancelled.',
+            message: 'Cannot release escrow: Escrow not found on XRPL. The escrow may have been created with a placeholder transaction hash, or it may have already been finished or cancelled. Please ensure the escrow was created with a real XRPL transaction.',
             error: 'Escrow not found on XRPL',
           };
         }
