@@ -22,6 +22,7 @@ export class WalletService {
         xrp: number;
         usdt: number;
         usdc: number;
+        usd: number;
       };
       xrplAddress: string;
     };
