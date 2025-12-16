@@ -423,17 +423,49 @@ export class XRPLWalletService {
       const prepared = await client.autofill(payment);
       const signed = wallet.sign(prepared);
       
+      // Validate that destination is different from source
+      if (fromAddress === toAddress) {
+        throw new Error('Cannot withdraw to the same address. Please provide a different destination address.');
+      }
+
       // #region agent log
       console.log('[DEBUG] createWithdrawalTransaction: Submitting to XRPL', {fromAddress,toAddress,amountXrp});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:402',message:'createWithdrawalTransaction: Submitting to XRPL',data:{fromAddress,toAddress,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
       // Submit transaction and wait for validation (with timeout)
-      const result = await Promise.race([
-        client.submitAndWait(signed.tx_blob),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Transaction submission timeout after 30 seconds')), 30000)
-        )
-      ]) as any;
+      let result: any;
+      try {
+        result = await Promise.race([
+          client.submitAndWait(signed.tx_blob),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Transaction submission timeout after 30 seconds')), 30000)
+          )
+        ]) as any;
+      } catch (submitError) {
+        // #region agent log
+        const errorDetails = submitError instanceof Error ? {message:submitError.message,stack:submitError.stack} : {error:String(submitError)};
+        const errorObj = submitError as any;
+        const fullErrorDetails = {
+          ...errorDetails,
+          hasData: !!errorObj?.data,
+          dataError: errorObj?.data?.error,
+          dataErrorCode: errorObj?.data?.error_code,
+          dataErrorMessage: errorObj?.data?.error_message,
+          dataResult: errorObj?.result,
+          dataResultCode: errorObj?.result?.engine_result_code,
+          dataResultMessage: errorObj?.result?.engine_result_message,
+        };
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:430',message:'createWithdrawalTransaction: submitAndWait error',data:{fromAddress,toAddress,amountXrp,fullErrorDetails},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        console.error('[ERROR] createWithdrawalTransaction: submitAndWait failed', {
+          fromAddress,
+          toAddress,
+          amountXrp,
+          error: submitError instanceof Error ? submitError.message : String(submitError),
+          errorDetails: fullErrorDetails,
+        });
+        throw submitError;
+      }
 
       // #region agent log
       console.log('[DEBUG] createWithdrawalTransaction: Got result from XRPL', {hasResult:!!result,hasHash:!!result?.result?.hash,txResult:result?.result?.meta?.TransactionResult});
@@ -447,9 +479,24 @@ export class XRPLWalletService {
       
       if (txResult !== 'tesSUCCESS') {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:415',message:'createWithdrawalTransaction: Transaction failed on XRPL',data:{txResult},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:415',message:'createWithdrawalTransaction: Transaction failed on XRPL',data:{txResult,fromAddress,toAddress,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
-        throw new Error(`Transaction failed on XRPL: ${txResult || 'unknown'}`);
+        
+        // Provide user-friendly error messages for common XRPL errors
+        let errorMessage = `Transaction failed on XRPL: ${txResult}`;
+        if (txResult === 'tecUNFUNDED_PAYMENT') {
+          errorMessage = `Insufficient funds. Your account must maintain a 1 XRP reserve, plus transaction fees. The withdrawal amount exceeds your available balance.`;
+        } else if (txResult === 'tecNO_DST') {
+          errorMessage = `Destination account does not exist. Please check the destination address.`;
+        } else if (txResult === 'tecDST_TAG_NEEDED') {
+          errorMessage = `Destination tag required for this address. Please include a destination tag.`;
+        } else if (txResult === 'tecPATH_DRY') {
+          errorMessage = `No payment path found. Unable to process this payment.`;
+        } else if (txResult === 'tecPATH_PARTIAL') {
+          errorMessage = `Partial payment path found. Unable to complete the full payment amount.`;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       // #region agent log

@@ -767,6 +767,15 @@ export class WalletService {
         amountXrp = Math.round(amountXrp * 1000000) / 1000000;
       }
 
+      // Validate destination address is different from source
+      if (wallet.xrpl_address === request.destinationAddress) {
+        return {
+          success: false,
+          message: 'Cannot withdraw to the same address. Please provide a different destination address.',
+          error: 'Invalid destination address',
+        };
+      }
+
       // Check balance
       const balance = await this.getBalance(userId);
       // #region agent log
@@ -785,14 +794,25 @@ export class WalletService {
         };
       }
 
-      if (balance.data.balance.xrp < amountXrp) {
+      // XRPL reserve requirements (as of Dec 2024: base reserve = 1 XRP)
+      // Account must maintain minimum reserve + transaction fee
+      const BASE_RESERVE = 1.0; // XRPL base reserve (reduced from 10 to 1 XRP in Dec 2024)
+      const ESTIMATED_FEE = 0.000015; // Estimated transaction fee (slightly higher than typical 0.000012 for safety)
+      const minimumRequired = BASE_RESERVE + ESTIMATED_FEE;
+      const availableBalance = Math.max(0, balance.data.balance.xrp - minimumRequired);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:797',message:'withdrawWallet: Balance check with reserves',data:{userId,totalBalance:balance.data.balance.xrp,minimumRequired,availableBalance,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      
+      if (availableBalance < amountXrp) {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:769',message:'withdrawWallet: Insufficient balance',data:{userId,balanceXrp:balance.data.balance.xrp,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:803',message:'withdrawWallet: Insufficient available balance',data:{userId,totalBalance:balance.data.balance.xrp,availableBalance,amountXrp,minimumRequired},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
         // #endregion
         return {
           success: false,
-          message: 'Insufficient balance',
-          error: 'Insufficient balance',
+          message: `Insufficient available balance. You have ${balance.data.balance.xrp.toFixed(6)} XRP total, but must maintain ${BASE_RESERVE} XRP reserve. Available: ${availableBalance.toFixed(6)} XRP. Requested: ${amountXrp.toFixed(6)} XRP.`,
+          error: 'Insufficient available balance (reserve requirement)',
         };
       }
 
