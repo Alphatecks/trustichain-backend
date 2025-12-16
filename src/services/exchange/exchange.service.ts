@@ -234,15 +234,33 @@ export class ExchangeService {
         // #endregion
 
         if (!response.ok) {
-          console.log('[DEBUG] fetchFromBinance: Response not OK', { currency, status: response.status, statusText: response.statusText });
+          let errorBody = '';
+          try {
+            errorBody = await response.text();
+            console.log('[DEBUG] fetchFromBinance: Response not OK', { 
+              currency, 
+              status: response.status, 
+              statusText: response.statusText,
+              errorBody 
+            });
+          } catch (e) {
+            console.log('[DEBUG] fetchFromBinance: Response not OK (could not read body)', { 
+              currency, 
+              status: response.status, 
+              statusText: response.statusText 
+            });
+          }
           return null;
         }
 
         const data = await response.json() as { symbol: string; price: string };
+        console.log('[DEBUG] fetchFromBinance: Parsed response data', { currency, data, dataType: typeof data, hasPrice: 'price' in data });
+        
         const rate = parseFloat(data.price);
+        console.log('[DEBUG] fetchFromBinance: Parsed rate', { currency, priceString: data.price, rate, isNaN: isNaN(rate) });
         
         if (isNaN(rate) || rate <= 0) {
-          console.warn('[WARNING] fetchFromBinance: Invalid rate returned', { currency, rate, data });
+          console.warn('[WARNING] fetchFromBinance: Invalid rate returned', { currency, rate, data, isNaN: isNaN(rate), isPositive: rate > 0 });
           return null;
         }
 
