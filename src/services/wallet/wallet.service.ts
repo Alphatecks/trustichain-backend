@@ -143,50 +143,75 @@ export class WalletService {
 
       // Calculate USD equivalent: (XRP * XRP/USD rate) + USDT + USDC
       let totalUsd = balances.usdt + balances.usdc; // USDT and USDC are already in USD
+      console.log('[DEBUG] wallet.service.getBalance: Starting USD calculation', {
+        userId,
+        initialTotalUsd: totalUsd,
+        balances: {
+          xrp: balances.xrp,
+          usdt: balances.usdt,
+          usdc: balances.usdc,
+        },
+      });
+      
       try {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
-        console.log('[DEBUG] wallet.service.getBalance: USD calculation', {
+        console.log('[DEBUG] wallet.service.getBalance: Exchange rates response', {
           userId,
-          xrpBalance: balances.xrp,
-          usdtBalance: balances.usdt,
-          usdcBalance: balances.usdc,
           exchangeRatesSuccess: exchangeRates.success,
-          xrpUsdRate,
+          hasData: !!exchangeRates.data,
+          ratesCount: exchangeRates.data?.rates?.length || 0,
           allRates: exchangeRates.data?.rates,
         });
+        
+        const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
+        console.log('[DEBUG] wallet.service.getBalance: USD rate extraction', {
+          userId,
+          xrpUsdRate,
+          ratesArray: exchangeRates.data?.rates,
+          foundRate: exchangeRates.data?.rates?.find(r => r.currency === 'USD'),
+        });
+        
         if (xrpUsdRate && xrpUsdRate > 0 && xrpUsdRate < 100) {
           // Validate rate is reasonable (between 0 and 100 USD per XRP)
-          totalUsd += balances.xrp * xrpUsdRate;
-          console.log('[DEBUG] wallet.service.getBalance: Using exchange rate', {
+          const xrpValueUsd = balances.xrp * xrpUsdRate;
+          totalUsd += xrpValueUsd;
+          console.log('[DEBUG] wallet.service.getBalance: USD calculation successful', {
+            userId,
             xrpBalance: balances.xrp,
-            rate: xrpUsdRate,
-            xrpValueUsd: balances.xrp * xrpUsdRate,
+            xrpUsdRate,
+            xrpValueUsd,
+            totalUsdBeforeXRP: totalUsd - xrpValueUsd,
             totalUsd,
           });
         } else {
           // If exchange rate is not available, only count USDT + USDC in USD total
           console.warn('[WARNING] XRP/USD exchange rate not available, USD total will only include USDT + USDC', {
+            userId,
             exchangeRatesSuccess: exchangeRates.success,
+            hasData: !!exchangeRates.data,
             rates: exchangeRates.data?.rates,
+            xrpUsdRate,
             xrpBalance: balances.xrp,
+            totalUsd,
           });
         }
       } catch (rateError) {
-        console.error('[ERROR] Failed to fetch exchange rate for USD calculation:', {
-          error: rateError instanceof Error ? rateError.message : String(rateError),
+        console.error('[ERROR] Failed to fetch exchange rate for USD calculation', {
           userId,
+          error: rateError instanceof Error ? rateError.message : String(rateError),
+          errorStack: rateError instanceof Error ? rateError.stack : undefined,
         });
         // If exchange rate fetch fails, only count USDT + USDC in USD total
       }
       
-      console.log('[DEBUG] wallet.service.getBalance: Final USD calculation', {
+      console.log('[DEBUG] wallet.service.getBalance: Final USD calculation result', {
         userId,
         totalUsd,
-        balanceBreakdown: {
+        willReturn: {
           xrp: balances.xrp,
           usdt: balances.usdt,
           usdc: balances.usdc,
+          usd: parseFloat(totalUsd.toFixed(2)),
         },
       });
 
