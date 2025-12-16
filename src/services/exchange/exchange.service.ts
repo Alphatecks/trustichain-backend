@@ -89,18 +89,19 @@ export class ExchangeService {
             });
             console.log('[DEBUG] getLiveExchangeRates using fetched rate:', { currency, rate });
           } else {
-            // Fallback to cached data even if expired, or use default
-            const fallbackRate = cached?.rate || this.getDefaultRate(currency);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:83',message:'getLiveExchangeRates: Using fallback',data:{currency,fallbackRate,hasCached:!!cached},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-            // #endregion
-            console.log('[DEBUG] getLiveExchangeRates using fallback:', { currency, fallbackRate, hasCached: !!cached });
-            rates.push({
-              currency,
-              rate: fallbackRate,
-              change: 0,
-              changePercent: 0,
-            });
+            // If rate fetch fails, use cached rate if available (even if expired)
+            // Otherwise, skip this currency - no fallback rates
+            if (cached) {
+              console.log('[DEBUG] getLiveExchangeRates: Rate fetch failed, using expired cached rate', { currency, cachedRate: cached.rate });
+              rates.push({
+                currency,
+                rate: cached.rate,
+                change: 0,
+                changePercent: 0,
+              });
+            } else {
+              console.warn(`[WARNING] getLiveExchangeRates: Failed to fetch rate for ${currency} and no cached rate available, skipping`);
+            }
           }
         }
       }
@@ -168,7 +169,7 @@ export class ExchangeService {
         } catch (e) {
           console.log('[DEBUG] fetchExchangeRate could not read error body:', { currency, status: response.status });
         }
-        // Don't throw - return null instead to allow fallback
+        // Return null if API fails
         return null;
       }
 
@@ -194,26 +195,11 @@ export class ExchangeService {
         errorName: error instanceof Error ? error.name : undefined,
         errorStack: error instanceof Error ? error.stack : undefined,
       });
-      // Return null to allow fallback to cached/default rates
+      // Return null if fetch fails
       return null;
     }
   }
 
-  /**
-   * Get default/fallback exchange rate
-   * Updated Dec 2024: Using more current approximate rates
-   * Note: This is only used as a last resort fallback if API fails
-   */
-  private getDefaultRate(currency: string): number {
-    const defaults: Record<string, number> = {
-      USD: 1.85, // Updated to approximate current XRP/USD rate (Dec 2024)
-      EUR: 1.68,
-      GBP: 1.47,
-      JPY: 275.0,
-    };
-    console.warn(`[WARNING] Using fallback exchange rate for ${currency}: ${defaults[currency] || 1.0}`);
-    return defaults[currency] || 1.0;
-  }
 
   /**
    * Clear cache (useful for testing or forced refresh)

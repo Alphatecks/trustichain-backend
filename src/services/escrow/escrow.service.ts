@@ -326,11 +326,39 @@ export class EscrowService {
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
         amountXrp = escrowAmount / usdRate;
       } else {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
         amountUsd = escrowAmount * usdRate;
       }
 
@@ -397,7 +425,21 @@ export class EscrowService {
       // Create milestones if this is a milestone-based escrow
       if (request.releaseType === 'Milestones' && request.milestones && request.milestones.length > 0) {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for milestone currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available for milestones',
+            error: 'Exchange rate not available',
+          };
+        }
 
         const milestonesToInsert = request.milestones.map((milestone, index) => {
           let milestoneAmountXrp = milestone.milestoneAmount;

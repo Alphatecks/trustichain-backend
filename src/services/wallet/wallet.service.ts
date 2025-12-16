@@ -98,19 +98,21 @@ export class WalletService {
           xrplAddress: wallet.xrpl_address,
           error: balanceError instanceof Error ? balanceError.message : String(balanceError),
         });
-        // Return database balances as fallback if XRPL query fails
+        // Return database balances if XRPL query fails
         // Calculate USD equivalent from database balances
         let totalUsd = (wallet.balance_usdt || 0) + (wallet.balance_usdc || 0);
         try {
           const exchangeRates = await exchangeService.getLiveExchangeRates();
           const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
-          if (xrpUsdRate && xrpUsdRate > 0) {
+          if (xrpUsdRate && xrpUsdRate > 0 && xrpUsdRate < 100) {
             totalUsd += (wallet.balance_xrp || 0) * xrpUsdRate;
           } else {
-            totalUsd += (wallet.balance_xrp || 0) * 1.0; // Conservative fallback
+            // If exchange rate is not available, only count USDT + USDC in USD total
+            console.warn('[WARNING] XRP/USD exchange rate not available for database balance, USD total will only include USDT + USDC');
           }
         } catch (rateError) {
-          totalUsd += (wallet.balance_xrp || 0) * 1.0; // Conservative fallback
+          // If exchange rate fetch fails, only count USDT + USDC in USD total
+          console.error('[ERROR] Failed to fetch exchange rate for database balance USD calculation:', rateError);
         }
         
         return {
@@ -155,7 +157,6 @@ export class WalletService {
         });
         if (xrpUsdRate && xrpUsdRate > 0 && xrpUsdRate < 100) {
           // Validate rate is reasonable (between 0 and 100 USD per XRP)
-          // Rates outside this range likely indicate an error
           totalUsd += balances.xrp * xrpUsdRate;
           console.log('[DEBUG] wallet.service.getBalance: Using exchange rate', {
             xrpBalance: balances.xrp,
@@ -164,20 +165,19 @@ export class WalletService {
             totalUsd,
           });
         } else {
-          // Fallback: use a conservative default rate if exchange rate fetch fails
-          console.warn('[WARNING] Failed to get XRP/USD rate, using fallback for USD calculation', {
+          // If exchange rate is not available, only count USDT + USDC in USD total
+          console.warn('[WARNING] XRP/USD exchange rate not available, USD total will only include USDT + USDC', {
             exchangeRatesSuccess: exchangeRates.success,
             rates: exchangeRates.data?.rates,
+            xrpBalance: balances.xrp,
           });
-          totalUsd += balances.xrp * 1.0; // Conservative fallback
         }
       } catch (rateError) {
         console.error('[ERROR] Failed to fetch exchange rate for USD calculation:', {
           error: rateError instanceof Error ? rateError.message : String(rateError),
           userId,
         });
-        // Still calculate with fallback
-        totalUsd += balances.xrp * 1.0; // Conservative fallback
+        // If exchange rate fetch fails, only count USDT + USDC in USD total
       }
       
       console.log('[DEBUG] wallet.service.getBalance: Final USD calculation', {
@@ -265,18 +265,36 @@ export class WalletService {
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          throw new Error('Failed to fetch exchange rates for currency conversion');
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          throw new Error('XRP/USD exchange rate not available');
+        }
         amountXrp = request.amount / usdRate;
       } else if (request.currency === 'XRP') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          throw new Error('Failed to fetch exchange rates for currency conversion');
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          throw new Error('XRP/USD exchange rate not available');
+        }
         amountUsd = request.amount * usdRate;
       } else if (request.currency === 'USDT' || request.currency === 'USDC') {
         // For USDT/USDC, amount is already in USD value
         amountUsd = request.amount;
         amountToken = request.amount;
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          throw new Error('Failed to fetch exchange rates for currency conversion');
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          throw new Error('XRP/USD exchange rate not available');
+        }
         amountXrp = request.amount / usdRate; // For display purposes
       }
 
@@ -823,13 +841,41 @@ export class WalletService {
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
         amountXrp = request.amount / usdRate;
         // Round to 6 decimal places (XRPL maximum precision)
         amountXrp = Math.round(amountXrp * 1000000) / 1000000;
       } else {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate || 0.5430;
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
         amountUsd = request.amount * usdRate;
         // Round XRP amount to 6 decimal places (XRPL maximum precision)
         amountXrp = Math.round(amountXrp * 1000000) / 1000000;
