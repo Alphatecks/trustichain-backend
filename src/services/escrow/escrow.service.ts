@@ -6,6 +6,7 @@
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { CreateEscrowRequest, Escrow, GetEscrowListRequest, TransactionType, ReleaseType, Milestone } from '../../types/api/escrow.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
+import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
 
 export class EscrowService {
@@ -916,6 +917,45 @@ export class EscrowService {
           escrow_id: updatedEscrow.id,
           description: notes || `Escrow released: ${updatedEscrow.description || 'No description'}`,
         });
+
+      // Update receiver's wallet balance after escrow release
+      // The funds have been released on XRPL, so update the receiver's database balance
+      if (updatedEscrow.counterparty_id && finishTxHash) {
+        try {
+          // Get receiver's wallet address
+          const { data: receiverWallet } = await adminClient
+            .from('wallets')
+            .select('xrpl_address')
+            .eq('user_id', updatedEscrow.counterparty_id)
+            .single();
+
+          if (receiverWallet) {
+            // Fetch current balances from XRPL (funds are now in their account)
+            const balances = await xrplWalletService.getAllBalances(receiverWallet.xrpl_address);
+            
+            // Update receiver's wallet balance in database
+            await adminClient
+              .from('wallets')
+              .update({
+                balance_xrp: balances.xrp,
+                balance_usdt: balances.usdt,
+                balance_usdc: balances.usdc,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', updatedEscrow.counterparty_id);
+
+            console.log('[Escrow Release] Updated receiver wallet balance:', {
+              receiverId: updatedEscrow.counterparty_id,
+              xrp: balances.xrp,
+              usdt: balances.usdt,
+              usdc: balances.usdc,
+            });
+          }
+        } catch (balanceUpdateError) {
+          // Log error but don't fail the escrow release
+          console.error('Error updating receiver wallet balance after escrow release:', balanceUpdateError);
+        }
+      }
 
       // Get party names and format response
       const userIds = [updatedEscrow.user_id];
