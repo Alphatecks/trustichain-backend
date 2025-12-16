@@ -488,6 +488,8 @@ export class XRPLWalletService {
           errorMessage = `Insufficient funds. Your account must maintain a 1 XRP reserve, plus transaction fees. The withdrawal amount exceeds your available balance.`;
         } else if (txResult === 'tecNO_DST') {
           errorMessage = `Destination account does not exist. Please check the destination address.`;
+        } else if (txResult === 'tecNO_DST_INSUF_XRP') {
+          errorMessage = `Transaction failed: Destination account would have insufficient XRP. The destination account must have at least 1 XRP after receiving the payment (XRPL base reserve requirement). To send ${amountXrp} XRP to a new account, you need to send at least 1.0 XRP. If sending to an existing account, ensure it has sufficient balance to meet the reserve after receiving this payment.`;
         } else if (txResult === 'tecDST_TAG_NEEDED') {
           errorMessage = `Destination tag required for this address. Please include a destination tag.`;
         } else if (txResult === 'tecPATH_DRY') {

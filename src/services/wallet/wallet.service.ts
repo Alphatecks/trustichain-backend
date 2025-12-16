@@ -915,6 +915,52 @@ export class WalletService {
         };
       }
 
+      // Validate destination account reserve requirement (pre-flight check)
+      // XRPL requires destination accounts to have at least 1 XRP (base reserve) after receiving payment
+      const DESTINATION_RESERVE = 1.0; // XRPL base reserve requirement
+      try {
+        const destinationBalance = await xrplWalletService.getBalance(request.destinationAddress);
+        const destinationBalanceAfterPayment = destinationBalance + amountXrp;
+        
+        // If destination account exists but would have less than reserve after payment, reject early
+        if (destinationBalance > 0 && destinationBalanceAfterPayment < DESTINATION_RESERVE) {
+          return {
+            success: false,
+            message: `Transaction would leave destination account with insufficient XRP. Destination currently has ${destinationBalance.toFixed(6)} XRP. After receiving ${amountXrp.toFixed(6)} XRP, it would have ${destinationBalanceAfterPayment.toFixed(6)} XRP, which is less than the required ${DESTINATION_RESERVE} XRP reserve. Please send a larger amount so the destination has at least ${DESTINATION_RESERVE} XRP after the transaction.`,
+            error: 'Destination account reserve requirement not met',
+          };
+        }
+        // If destination account doesn't exist (balance is 0 or account not found), amount must be at least reserve
+        if (destinationBalance === 0 && amountXrp < DESTINATION_RESERVE) {
+          return {
+            success: false,
+            message: `Cannot send ${amountXrp.toFixed(6)} XRP to a new account. The destination account doesn't exist yet, and creating it requires at least ${DESTINATION_RESERVE} XRP (XRPL base reserve requirement). Please send at least ${DESTINATION_RESERVE} XRP to create a new account.`,
+            error: 'Insufficient amount for new account creation',
+          };
+        }
+      } catch (destError) {
+        // If account doesn't exist (error getting balance), treat as new account
+        // Account not found means it's a new account, so amount must be >= reserve
+        const isAccountNotFound = (destError instanceof Error && (destError.message.includes('actNotFound') || destError.message.includes('Account not found'))) || 
+          (destError as any)?.data?.error === 'actNotFound' || 
+          ((destError as any)?.data?.error_message === 'accountNotFound' || (destError as any)?.data?.error_message === 'Account not found.') ||
+          (destError as any)?.data?.error_code === 19;
+        
+        if (isAccountNotFound && amountXrp < DESTINATION_RESERVE) {
+          return {
+            success: false,
+            message: `Cannot send ${amountXrp.toFixed(6)} XRP to a new account. The destination account doesn't exist yet, and creating it requires at least ${DESTINATION_RESERVE} XRP (XRPL base reserve requirement). Please send at least ${DESTINATION_RESERVE} XRP to create a new account.`,
+            error: 'Insufficient amount for new account creation',
+          };
+        }
+        // If it's a different error (network issue, etc.), log but continue
+        // The transaction will fail on XRPL with tecNO_DST_INSUF_XRP if this validation was needed
+        console.warn('[WARNING] Failed to pre-validate destination account, proceeding with transaction:', {
+          destinationAddress: request.destinationAddress,
+          error: destError instanceof Error ? destError.message : String(destError),
+        });
+      }
+
       // Check balance
       const balance = await this.getBalance(userId);
       // #region agent log
