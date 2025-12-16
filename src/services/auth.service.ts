@@ -189,12 +189,23 @@ export class AuthService {
   async login(loginData: LoginRequest): Promise<LoginResponse> {
     try {
       const { email, password } = loginData;
+      const normalizedEmail = email.toLowerCase();
 
-      // Attempt to sign in (primary network call)
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.toLowerCase(),
+      // Attempt to sign in with timeout to fail fast if Supabase is slow
+      const LOGIN_TIMEOUT_MS = 8000; // 8 second timeout
+      const loginPromise = supabase.auth.signInWithPassword({
+        email: normalizedEmail,
         password: password,
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Login request timed out. Please try again.')), LOGIN_TIMEOUT_MS);
+      });
+
+      const { data: authData, error: authError } = await Promise.race([
+        loginPromise,
+        timeoutPromise,
+      ]);
 
       if (authError) {
         return {
@@ -204,7 +215,7 @@ export class AuthService {
         };
       }
 
-      if (!authData.user) {
+      if (!authData?.user) {
         return {
           success: false,
           message: 'Failed to authenticate user',
@@ -225,12 +236,10 @@ export class AuthService {
       // Build user profile directly from Supabase Auth user + metadata
       // to avoid an extra database round-trip on every login.
       const user = authData.user;
-      const fullName =
-        (user.user_metadata as any)?.full_name ||
-        (user.user_metadata as any)?.name ||
-        user.email?.split('@')[0] ||
-        'User';
-      const country = (user.user_metadata as any)?.country || null;
+      const userMetadata = user.user_metadata as any;
+      const fullName = userMetadata?.full_name || userMetadata?.name || user.email?.split('@')[0] || 'User';
+      const country = userMetadata?.country || null;
+      const userEmail = user.email || normalizedEmail;
 
       return {
         success: true,
@@ -238,7 +247,7 @@ export class AuthService {
         data: {
           user: {
             id: user.id,
-            email: user.email || email.toLowerCase(),
+            email: userEmail,
             fullName,
             country,
           },
