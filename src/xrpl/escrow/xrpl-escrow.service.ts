@@ -25,12 +25,18 @@ export class XRPLEscrowService {
     walletSecret?: string; // Wallet secret for signing
   }): Promise<string> {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:27',message:'createEscrow: Entry',data:{fromAddress:params.fromAddress,toAddress:params.toAddress,amountXrp:params.amountXrp,hasWalletSecret:!!params.walletSecret,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       if (!params.walletSecret) {
         // In production, retrieve wallet secret securely
         console.log(`[XRPL] Escrow creation placeholder: ${params.amountXrp} XRP from ${params.fromAddress} to ${params.toAddress}`);
         const txHash = Array.from({ length: 64 }, () => 
           Math.floor(Math.random() * 16).toString(16)
         ).join('');
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:34',message:'createEscrow: Returning placeholder hash',data:{txHash,isPlaceholder:true,reason:'No walletSecret provided'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
         return txHash;
       }
 
@@ -63,7 +69,11 @@ export class XRPLEscrowService {
 
         await client.disconnect();
 
-        return result.result.hash;
+        const realTxHash = result.result.hash;
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:66',message:'createEscrow: Real XRPL transaction submitted',data:{txHash:realTxHash,isPlaceholder:false,network:this.XRPL_NETWORK,sequence:result.result.Sequence},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        return realTxHash;
       } catch (error) {
         await client.disconnect();
         throw error;
@@ -251,6 +261,9 @@ export class XRPLEscrowService {
     condition?: string;
   } | null> {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:253',message:'getEscrowDetailsByTxHash: Entry',data:{txHash,txHashLength:txHash.length,ownerAddress,network:this.XRPL_NETWORK,isValidFormat:/^[a-f0-9]{64}$/i.test(txHash)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       const client = new Client(this.XRPL_SERVER);
       await client.connect();
 
@@ -261,8 +274,15 @@ export class XRPLEscrowService {
           transaction: txHash,
         });
 
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:264',message:'getEscrowDetailsByTxHash: XRPL tx query response',data:{txHash,hasResult:!!txResponse?.result,error:txResponse?.result?.error,errorCode:txResponse?.result?.error_code,errorMessage:txResponse?.result?.error_message,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+
         if (!txResponse || !txResponse.result) {
           console.error('[XRPL] Transaction not found:', txHash);
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:266',message:'getEscrowDetailsByTxHash: Transaction not found - returning null',data:{txHash,network:this.XRPL_NETWORK,reason:'txResponse or result is null'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
           return null;
         }
 

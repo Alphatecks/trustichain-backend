@@ -365,11 +365,17 @@ export class EscrowService {
       }
 
       // Create escrow on XRPL
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'escrow.service.ts:367',message:'createEscrow: About to call xrplEscrowService.createEscrow',data:{fromAddress:payerWallet.xrpl_address,toAddress:counterpartyWalletAddress,amountXrp,hasWalletSecret:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       const xrplTxHash = await xrplEscrowService.createEscrow({
         fromAddress: payerWallet.xrpl_address,
         toAddress: counterpartyWalletAddress,
         amountXrp,
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'escrow.service.ts:373',message:'createEscrow: Received xrplTxHash from createEscrow',data:{xrplTxHash,xrplTxHashLength:xrplTxHash.length,isValidFormat:/^[a-f0-9]{64}$/i.test(xrplTxHash)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       // Get sequence number for the current year
       const currentYear = new Date().getFullYear();
