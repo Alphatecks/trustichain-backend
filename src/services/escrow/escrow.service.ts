@@ -870,7 +870,6 @@ export class EscrowService {
 
       // Finish escrow on XRPL
       // First, retrieve the escrow sequence number from XRPL using the transaction hash
-      let finishTxHash: string | undefined;
       if (!escrow.xrpl_escrow_id) {
         return {
           success: false,
@@ -1021,86 +1020,348 @@ export class EscrowService {
           error: 'XRPL transaction failed',
         };
       }
-        // Update sender's (initiator's) wallet balance
-        try {
-          // Get sender's wallet address (the userId who is releasing)
-          const { data: senderWallet } = await adminClient
-            .from('wallets')
-            .select('xrpl_address')
-            .eq('user_id', updatedEscrow.user_id)
-            .single();
-
-          if (senderWallet) {
-            // Fetch current balances from XRPL (sender was already debited when escrow was created)
-            const senderBalances = await xrplWalletService.getAllBalances(senderWallet.xrpl_address);
-            
-            // Update sender's wallet balance in database
-            await adminClient
-              .from('wallets')
-              .update({
-                balance_xrp: senderBalances.xrp,
-                balance_usdt: senderBalances.usdt,
-                balance_usdc: senderBalances.usdc,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('user_id', updatedEscrow.user_id);
-
-            console.log('[Escrow Release] Updated sender wallet balance:', {
-              senderId: updatedEscrow.user_id,
-              xrp: senderBalances.xrp,
-              usdt: senderBalances.usdt,
-              usdc: senderBalances.usdc,
-            });
-          }
-        } catch (senderBalanceError) {
-          // Log error but don't fail the escrow release
-          console.error('Error updating sender wallet balance after escrow release:', senderBalanceError);
-        }
-
-        // Update receiver's (counterparty's) wallet balance
-        if (updatedEscrow.counterparty_id) {
-          try {
-            // Get receiver's wallet address
-            const { data: receiverWallet } = await adminClient
-              .from('wallets')
-              .select('xrpl_address')
-              .eq('user_id', updatedEscrow.counterparty_id)
-              .single();
-
-            if (receiverWallet) {
-              // Fetch current balances from XRPL (funds are now in their account)
-              const receiverBalances = await xrplWalletService.getAllBalances(receiverWallet.xrpl_address);
-              
-              // Update receiver's wallet balance in database
-              await adminClient
-                .from('wallets')
-                .update({
-                  balance_xrp: receiverBalances.xrp,
-                  balance_usdt: receiverBalances.usdt,
-                  balance_usdc: receiverBalances.usdc,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('user_id', updatedEscrow.counterparty_id);
-
-              console.log('[Escrow Release] Updated receiver wallet balance:', {
-                receiverId: updatedEscrow.counterparty_id,
-                xrp: receiverBalances.xrp,
-                usdt: receiverBalances.usdt,
-                usdc: receiverBalances.usdc,
-              });
-            }
-          } catch (receiverBalanceError) {
-            // Log error but don't fail the escrow release
-            console.error('Error updating receiver wallet balance after escrow release:', receiverBalanceError);
-          }
-        }
-      }
     } catch (error) {
       console.error('Error releasing escrow:', error);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to release escrow',
         error: error instanceof Error ? error.message : 'Failed to release escrow',
+      };
+    }
+  }
+
+  /**
+   * Get XUMM payload status for escrow release and complete the release if signed
+   * Similar to getXUMMPayloadStatus for deposits
+   */
+  async getEscrowReleaseXUMMStatus(
+    userId: string,
+    escrowId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      signed: boolean;
+      signedTxBlob: string | null;
+      cancelled: boolean;
+      expired: boolean;
+      xrplTxHash: string | null;
+      escrow?: Escrow;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get escrow and verify user has permission
+      const { data: escrow, error: fetchError } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', escrowId)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+        .single();
+
+      if (fetchError || !escrow) {
+        return {
+          success: false,
+          message: 'Escrow not found or access denied',
+          error: 'Escrow not found or access denied',
+        };
+      }
+
+      // Find the pending escrow_release transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('escrow_id', escrowId)
+        .eq('type', 'escrow_release')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'No pending escrow release transaction found',
+          error: 'No pending transaction',
+        };
+      }
+
+      // Extract XUMM UUID from description
+      const uuidMatch = transaction.description?.match(/XUMM_UUID:([a-f0-9-]+)/i);
+      if (!uuidMatch) {
+        return {
+          success: false,
+          message: 'XUMM UUID not found for this escrow release',
+          error: 'XUMM UUID not found',
+        };
+      }
+
+      const xummUuid = uuidMatch[1];
+
+      // Get payload status from XUMM
+      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
+
+      // Check if transaction is signed and needs processing
+      if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
+        // Case 1: Transaction signed but not yet submitted to XRPL
+        console.log('[Escrow Release XUMM] Submitting signed transaction to XRPL');
+
+        const submitResult = await xrplWalletService.submitSignedTransaction(
+          payloadStatus.response.hex
+        );
+
+        if (submitResult.status !== 'tesSUCCESS') {
+          return {
+            success: false,
+            message: `Escrow release transaction failed on XRPL: ${submitResult.status}`,
+            error: 'XRPL transaction failed',
+            data: {
+              signed: true,
+              signedTxBlob: payloadStatus.response.hex,
+              cancelled: payloadStatus.meta.cancelled,
+              expired: payloadStatus.meta.expired,
+              xrplTxHash: submitResult.hash,
+            },
+          };
+        }
+
+        const finishTxHash = submitResult.hash;
+
+        // Update transaction record
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: finishTxHash,
+            status: 'completed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transaction.id);
+
+        // Update escrow status to completed
+        const { data: updatedEscrow } = await adminClient
+          .from('escrows')
+          .update({
+            status: 'completed',
+            progress: 100,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', escrowId)
+          .select()
+          .single();
+
+        // Update wallet balances
+        if (updatedEscrow) {
+          // Update sender's wallet balance
+          try {
+            const { data: senderWallet } = await adminClient
+              .from('wallets')
+              .select('xrpl_address')
+              .eq('user_id', updatedEscrow.user_id)
+              .single();
+
+            if (senderWallet) {
+              const senderBalances = await xrplWalletService.getAllBalances(senderWallet.xrpl_address);
+              await adminClient
+                .from('wallets')
+                .update({
+                  balance_xrp: senderBalances.xrp,
+                  balance_usdt: senderBalances.usdt,
+                  balance_usdc: senderBalances.usdc,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', updatedEscrow.user_id);
+            }
+          } catch (error) {
+            console.error('Error updating sender wallet balance:', error);
+          }
+
+          // Update receiver's wallet balance
+          if (updatedEscrow.counterparty_id) {
+            try {
+              const { data: receiverWallet } = await adminClient
+                .from('wallets')
+                .select('xrpl_address')
+                .eq('user_id', updatedEscrow.counterparty_id)
+                .single();
+
+              if (receiverWallet) {
+                const receiverBalances = await xrplWalletService.getAllBalances(receiverWallet.xrpl_address);
+                await adminClient
+                  .from('wallets')
+                  .update({
+                    balance_xrp: receiverBalances.xrp,
+                    balance_usdt: receiverBalances.usdt,
+                    balance_usdc: receiverBalances.usdc,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('user_id', updatedEscrow.counterparty_id);
+              }
+            } catch (error) {
+              console.error('Error updating receiver wallet balance:', error);
+            }
+          }
+        }
+
+        // Format and return escrow
+        const userIds = [updatedEscrow.user_id];
+        if (updatedEscrow.counterparty_id) userIds.push(updatedEscrow.counterparty_id);
+        const partyNames = await this.getPartyNames(userIds);
+        const milestones = await this.getMilestones(updatedEscrow.id);
+        const year = new Date(updatedEscrow.created_at).getFullYear();
+        const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
+
+        const formattedEscrow: Escrow = {
+          id: updatedEscrow.id,
+          escrowId: formattedEscrowId,
+          userId: updatedEscrow.user_id,
+          counterpartyId: updatedEscrow.counterparty_id || '',
+          initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
+          counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
+          amount: {
+            usd: parseFloat(updatedEscrow.amount_usd),
+            xrp: parseFloat(updatedEscrow.amount_xrp),
+          },
+          status: updatedEscrow.status,
+          transactionType: updatedEscrow.transaction_type as TransactionType,
+          industry: updatedEscrow.industry || null,
+          progress: 100,
+          description: updatedEscrow.description || undefined,
+          xrplEscrowId: updatedEscrow.xrpl_escrow_id || undefined,
+          createdAt: updatedEscrow.created_at,
+          updatedAt: updatedEscrow.updated_at,
+          completedAt: updatedEscrow.completed_at || undefined,
+          payerEmail: updatedEscrow.payer_email || undefined,
+          payerName: updatedEscrow.payer_name || undefined,
+          payerPhone: updatedEscrow.payer_phone || undefined,
+          counterpartyEmail: updatedEscrow.counterparty_email || undefined,
+          counterpartyPhone: updatedEscrow.counterparty_phone || undefined,
+          releaseType: updatedEscrow.release_type as ReleaseType | undefined,
+          expectedCompletionDate: updatedEscrow.expected_completion_date || undefined,
+          expectedReleaseDate: updatedEscrow.expected_release_date || undefined,
+          disputeResolutionPeriod: updatedEscrow.dispute_resolution_period || undefined,
+          releaseConditions: updatedEscrow.release_conditions || undefined,
+          milestones: milestones.length > 0 ? milestones : undefined,
+        };
+
+        return {
+          success: true,
+          message: 'Escrow released successfully',
+          data: {
+            signed: true,
+            signedTxBlob: payloadStatus.response.hex,
+            cancelled: false,
+            expired: false,
+            xrplTxHash: finishTxHash,
+            escrow: formattedEscrow,
+          },
+        };
+      }
+
+      // Case 2: XUMM auto-submitted the transaction (already on XRPL)
+      if (payloadStatus.meta.signed && payloadStatus.response?.txid && payloadStatus.meta.submit) {
+        const finishTxHash = payloadStatus.response.txid;
+
+        // Update transaction record
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: finishTxHash,
+            status: 'completed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transaction.id);
+
+        // Update escrow status
+        const { data: updatedEscrow } = await adminClient
+          .from('escrows')
+          .update({
+            status: 'completed',
+            progress: 100,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', escrowId)
+          .select()
+          .single();
+
+        // Format escrow (similar to above)
+        if (updatedEscrow) {
+          const userIds = [updatedEscrow.user_id];
+          if (updatedEscrow.counterparty_id) userIds.push(updatedEscrow.counterparty_id);
+          const partyNames = await this.getPartyNames(userIds);
+          const milestones = await this.getMilestones(updatedEscrow.id);
+          const year = new Date(updatedEscrow.created_at).getFullYear();
+          const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
+
+          const formattedEscrow: Escrow = {
+            id: updatedEscrow.id,
+            escrowId: formattedEscrowId,
+            userId: updatedEscrow.user_id,
+            counterpartyId: updatedEscrow.counterparty_id || '',
+            initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
+            counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
+            amount: {
+              usd: parseFloat(updatedEscrow.amount_usd),
+              xrp: parseFloat(updatedEscrow.amount_xrp),
+            },
+            status: updatedEscrow.status,
+            transactionType: updatedEscrow.transaction_type as TransactionType,
+            industry: updatedEscrow.industry || null,
+            progress: 100,
+            description: updatedEscrow.description || undefined,
+            xrplEscrowId: updatedEscrow.xrpl_escrow_id || undefined,
+            createdAt: updatedEscrow.created_at,
+            updatedAt: updatedEscrow.updated_at,
+            completedAt: updatedEscrow.completed_at || undefined,
+            payerEmail: updatedEscrow.payer_email || undefined,
+            payerName: updatedEscrow.payer_name || undefined,
+            payerPhone: updatedEscrow.payer_phone || undefined,
+            counterpartyEmail: updatedEscrow.counterparty_email || undefined,
+            counterpartyPhone: updatedEscrow.counterparty_phone || undefined,
+            releaseType: updatedEscrow.release_type as ReleaseType | undefined,
+            expectedCompletionDate: updatedEscrow.expected_completion_date || undefined,
+            expectedReleaseDate: updatedEscrow.expected_release_date || undefined,
+            disputeResolutionPeriod: updatedEscrow.dispute_resolution_period || undefined,
+            releaseConditions: updatedEscrow.release_conditions || undefined,
+            milestones: milestones.length > 0 ? milestones : undefined,
+          };
+
+          return {
+            success: true,
+            message: 'Escrow released successfully (auto-submitted by XUMM)',
+            data: {
+              signed: true,
+              signedTxBlob: null,
+              cancelled: false,
+              expired: false,
+              xrplTxHash: finishTxHash,
+              escrow: formattedEscrow,
+            },
+          };
+        }
+      }
+
+      // Transaction not yet signed
+      return {
+        success: true,
+        message: 'Transaction status retrieved',
+        data: {
+          signed: payloadStatus.meta.signed,
+          signedTxBlob: payloadStatus.response?.hex || null,
+          cancelled: payloadStatus.meta.cancelled,
+          expired: payloadStatus.meta.expired,
+          xrplTxHash: payloadStatus.response?.txid || null,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting escrow release XUMM status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get XUMM status',
+        error: error instanceof Error ? error.message : 'Failed to get XUMM status',
       };
     }
   }

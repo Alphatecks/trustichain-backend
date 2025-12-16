@@ -136,7 +136,7 @@ export class XRPLEscrowService {
         await client.disconnect();
 
         const txHash = result.result.hash;
-        const txResult = result.result.meta?.TransactionResult;
+        const txResult = (result.result.meta as any)?.TransactionResult;
 
         console.log('[XRPL] EscrowFinish transaction submitted:', {
           txHash,
@@ -266,8 +266,8 @@ export class XRPLEscrowService {
           return null;
         }
 
-        const txResult = txResponse.result;
-        const escrowSequence = txResult.Sequence;
+        const txResult = txResponse.result as any;
+        const escrowSequence = txResult.Sequence as number;
 
         if (!escrowSequence) {
           console.error('[XRPL] No sequence found in transaction:', txHash);
@@ -290,34 +290,39 @@ export class XRPLEscrowService {
         // Find the escrow object matching this sequence
         const escrowObjects = accountObjectsResponse.result.account_objects || [];
         const escrowObject = escrowObjects.find(
-          (obj: any) => obj.PreviousTxnID === txHash || obj.Sequence === escrowSequence
-        );
+          (obj: any) => (obj as any).PreviousTxnID === txHash || (obj as any).Sequence === escrowSequence
+        ) as any;
 
         if (!escrowObject) {
           console.warn('[XRPL] Escrow object not found, but transaction exists. Escrow may have been finished or cancelled.');
           // Return details from transaction even if escrow object not found
           // (escrow might have been finished/cancelled but we can still get sequence)
+          const txAmount = (txResult as any).Amount;
+          // dropsToXrp expects a string, ensure it's always a string
+          const txAmountDropsStr: string = txAmount ? String(txAmount) : '0';
           return {
             sequence: escrowSequence,
-            amount: parseFloat(dropsToXrp(txResult.Amount || '0')),
-            destination: txResult.Destination || '',
-            finishAfter: txResult.FinishAfter ? (txResult.FinishAfter as number) : undefined,
-            cancelAfter: txResult.CancelAfter ? (txResult.CancelAfter as number) : undefined,
-            condition: txResult.Condition || undefined,
+            amount: parseFloat((dropsToXrp as any)(txAmountDropsStr)),
+            destination: (txResult as any).Destination || '',
+            finishAfter: (txResult as any).FinishAfter ? ((txResult as any).FinishAfter as number) : undefined,
+            cancelAfter: (txResult as any).CancelAfter ? ((txResult as any).CancelAfter as number) : undefined,
+            condition: (txResult as any).Condition || undefined,
           };
         }
 
         // Extract amount from escrow object (it's in drops)
-        const amountDrops = escrowObject.Amount || '0';
-        const amount = parseFloat(dropsToXrp(amountDrops));
+        const escrowAmount = (escrowObject as any).Amount;
+        // dropsToXrp expects a string, ensure it's always a string
+        const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
+        const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
 
         return {
           sequence: escrowSequence,
           amount,
-          destination: escrowObject.Destination || '',
-          finishAfter: escrowObject.FinishAfter ? (escrowObject.FinishAfter as number) : undefined,
-          cancelAfter: escrowObject.CancelAfter ? (escrowObject.CancelAfter as number) : undefined,
-          condition: escrowObject.Condition || undefined,
+          destination: (escrowObject as any).Destination || '',
+          finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
+          cancelAfter: (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined,
+          condition: (escrowObject as any).Condition || undefined,
         };
       } catch (error) {
         console.error('[XRPL] Error querying escrow details:', error);
@@ -355,22 +360,24 @@ export class XRPLEscrowService {
 
         const escrowObjects = response.result.account_objects || [];
         const escrowObject = escrowObjects.find(
-          (obj: any) => obj.Sequence === escrowSequence
-        );
+          (obj: any) => (obj as any).Sequence === escrowSequence
+        ) as any;
 
         if (!escrowObject) {
           return null;
         }
 
-        const amountDrops = escrowObject.Amount || '0';
-        const amount = parseFloat(dropsToXrp(amountDrops));
+        const escrowAmount = (escrowObject as any).Amount;
+        // dropsToXrp expects a string, ensure it's always a string  
+        const amountDrops: string = escrowAmount != null ? String(escrowAmount) : '0';
+        const amount = parseFloat((dropsToXrp as any)(amountDrops));
 
         return {
           amount,
-          destination: escrowObject.Destination || '',
-          finishAfter: escrowObject.FinishAfter ? (escrowObject.FinishAfter as number) : undefined,
-          cancelAfter: escrowObject.CancelAfter ? (escrowObject.CancelAfter as number) : undefined,
-          condition: escrowObject.Condition || undefined,
+          destination: (escrowObject as any).Destination || '',
+          finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
+          cancelAfter: (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined,
+          condition: (escrowObject as any).Condition || undefined,
         };
       } catch (error) {
         console.error('[XRPL] Error querying escrow details:', error);
