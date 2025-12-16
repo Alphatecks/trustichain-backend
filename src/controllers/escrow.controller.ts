@@ -203,6 +203,32 @@ export class EscrowController {
   }
 
   /**
+   * Get XUMM payload status for escrow release
+   * GET /api/escrow/:id/release/status
+   */
+  async getEscrowReleaseXUMMStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const escrowId = req.params.id as string;
+
+      const result = await escrowService.getEscrowReleaseXUMMStatus(userId, escrowId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Cancel an escrow
    * POST /api/escrow/:id/cancel
    */

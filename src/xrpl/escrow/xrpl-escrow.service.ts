@@ -3,7 +3,7 @@
  * Handles XRPL escrow operations (EscrowCreate, EscrowFinish, EscrowCancel)
  */
 
-import { Client, Wallet, xrpToDrops } from 'xrpl';
+import { Client, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
 
 export class XRPLEscrowService {
   private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
@@ -76,33 +76,132 @@ export class XRPLEscrowService {
 
   /**
    * Finish (release) an escrow
+   * Note: This requires wallet secret for signing. In production, handle securely.
+   * For user-signed transactions, use prepareEscrowFinishTransaction instead.
    */
   async finishEscrow(params: {
     ownerAddress: string;
     escrowSequence: number;
     condition?: string;
     fulfillment?: string;
+    walletSecret?: string;
   }): Promise<string> {
     try {
-      // In production, use xrpl.js EscrowFinish transaction
-      // const escrowFinish = {
-      //   TransactionType: 'EscrowFinish',
-      //   Account: params.ownerAddress,
-      //   Owner: params.ownerAddress,
-      //   OfferSequence: params.escrowSequence,
-      //   Condition: params.condition,
-      //   Fulfillment: params.fulfillment,
-      // };
+      if (!params.walletSecret) {
+        throw new Error(
+          'Wallet secret required to finish escrow. ' +
+          'For user-signed transactions, use prepareEscrowFinishTransaction instead.'
+        );
+      }
 
-      // Placeholder
-      const txHash = Array.from({ length: 64 }, () => 
-        Math.floor(Math.random() * 16).toString(16)
-      ).join('');
-      
-      console.log(`[XRPL] Finishing escrow: sequence ${params.escrowSequence}`);
-      return txHash;
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      try {
+        const wallet = Wallet.fromSeed(params.walletSecret);
+
+        // Verify wallet address matches owner
+        if (wallet.address !== params.ownerAddress) {
+          throw new Error(
+            `Wallet address ${wallet.address} does not match owner address ${params.ownerAddress}`
+          );
+        }
+
+        const escrowFinish: any = {
+          TransactionType: 'EscrowFinish',
+          Account: params.ownerAddress,
+          Owner: params.ownerAddress,
+          OfferSequence: params.escrowSequence,
+        };
+
+        // Add condition and fulfillment if provided
+        if (params.condition) {
+          escrowFinish.Condition = params.condition;
+        }
+        if (params.fulfillment) {
+          escrowFinish.Fulfillment = params.fulfillment;
+        }
+
+        console.log('[XRPL] Preparing EscrowFinish transaction:', {
+          ownerAddress: params.ownerAddress,
+          escrowSequence: params.escrowSequence,
+          hasCondition: !!params.condition,
+          hasFulfillment: !!params.fulfillment,
+        });
+
+        const prepared = await client.autofill(escrowFinish);
+        const signed = wallet.sign(prepared);
+        const result = await client.submitAndWait(signed.tx_blob);
+
+        await client.disconnect();
+
+        const txHash = result.result.hash;
+        const txResult = result.result.meta?.TransactionResult;
+
+        console.log('[XRPL] EscrowFinish transaction submitted:', {
+          txHash,
+          txResult,
+          escrowSequence: params.escrowSequence,
+        });
+
+        if (txResult !== 'tesSUCCESS') {
+          throw new Error(
+            `EscrowFinish transaction failed with result: ${txResult}. ` +
+            `Transaction hash: ${txHash}`
+          );
+        }
+
+        return txHash;
+      } catch (error) {
+        await client.disconnect();
+        throw error;
+      }
     } catch (error) {
-      console.error('Error finishing XRPL escrow:', error);
+      console.error('[XRPL] Error finishing escrow:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare an unsigned EscrowFinish transaction for user signing
+   * Returns transaction object that can be sent to XUMM/MetaMask for signing
+   */
+  async prepareEscrowFinishTransaction(params: {
+    ownerAddress: string;
+    escrowSequence: number;
+    condition?: string;
+    fulfillment?: string;
+  }): Promise<{
+    transaction: any;
+    transactionBlob: string;
+    instructions: string;
+  }> {
+    try {
+      const escrowFinish: any = {
+        TransactionType: 'EscrowFinish',
+        Account: params.ownerAddress,
+        Owner: params.ownerAddress,
+        OfferSequence: params.escrowSequence,
+      };
+
+      if (params.condition) {
+        escrowFinish.Condition = params.condition;
+      }
+      if (params.fulfillment) {
+        escrowFinish.Fulfillment = params.fulfillment;
+      }
+
+      // Serialize to transaction blob (unsigned)
+      // Note: User's wallet (Xaman/Xumm) will autofill Account, Sequence, Fee, etc.
+      const txBlob = JSON.stringify(escrowFinish);
+
+      return {
+        transaction: escrowFinish,
+        transactionBlob: txBlob,
+        instructions: `Please sign this EscrowFinish transaction in your XRPL wallet to release escrow sequence ${params.escrowSequence}`,
+      };
+    } catch (error) {
+      console.error('Error preparing EscrowFinish transaction:', error);
       throw error;
     }
   }
@@ -137,9 +236,14 @@ export class XRPLEscrowService {
   }
 
   /**
-   * Get escrow details from XRPL
+   * Get escrow details from XRPL by transaction hash
+   * Returns escrow sequence number and details needed for EscrowFinish
    */
-  async getEscrowDetails(_escrowSequence: number, _ownerAddress: string): Promise<{
+  async getEscrowDetailsByTxHash(
+    txHash: string,
+    ownerAddress: string
+  ): Promise<{
+    sequence: number;
     amount: number;
     destination: string;
     finishAfter?: number;
@@ -147,19 +251,133 @@ export class XRPLEscrowService {
     condition?: string;
   } | null> {
     try {
-      // In production, use account_objects API to get escrow details
-      // const client = new Client(this.XRPL_SERVER);
-      // await client.connect();
-      // const response = await client.request({
-      //   command: 'account_objects',
-      //   account: ownerAddress,
-      //   type: 'escrow',
-      // });
-      // await client.disconnect();
-      // Find escrow by sequence number and return details
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
 
-      // Placeholder
-      return null;
+      try {
+        // First, get the transaction details to find the sequence number
+        const txResponse = await client.request({
+          command: 'tx',
+          transaction: txHash,
+        });
+
+        if (!txResponse || !txResponse.result) {
+          console.error('[XRPL] Transaction not found:', txHash);
+          return null;
+        }
+
+        const txResult = txResponse.result;
+        const escrowSequence = txResult.Sequence;
+
+        if (!escrowSequence) {
+          console.error('[XRPL] No sequence found in transaction:', txHash);
+          return null;
+        }
+
+        // Verify this is an EscrowCreate transaction
+        if (txResult.TransactionType !== 'EscrowCreate') {
+          console.error('[XRPL] Transaction is not EscrowCreate:', txResult.TransactionType);
+          return null;
+        }
+
+        // Get escrow details from account_objects to verify it still exists
+        const accountObjectsResponse = await client.request({
+          command: 'account_objects',
+          account: ownerAddress,
+          type: 'escrow',
+        });
+
+        // Find the escrow object matching this sequence
+        const escrowObjects = accountObjectsResponse.result.account_objects || [];
+        const escrowObject = escrowObjects.find(
+          (obj: any) => obj.PreviousTxnID === txHash || obj.Sequence === escrowSequence
+        );
+
+        if (!escrowObject) {
+          console.warn('[XRPL] Escrow object not found, but transaction exists. Escrow may have been finished or cancelled.');
+          // Return details from transaction even if escrow object not found
+          // (escrow might have been finished/cancelled but we can still get sequence)
+          return {
+            sequence: escrowSequence,
+            amount: parseFloat(dropsToXrp(txResult.Amount || '0')),
+            destination: txResult.Destination || '',
+            finishAfter: txResult.FinishAfter ? (txResult.FinishAfter as number) : undefined,
+            cancelAfter: txResult.CancelAfter ? (txResult.CancelAfter as number) : undefined,
+            condition: txResult.Condition || undefined,
+          };
+        }
+
+        // Extract amount from escrow object (it's in drops)
+        const amountDrops = escrowObject.Amount || '0';
+        const amount = parseFloat(dropsToXrp(amountDrops));
+
+        return {
+          sequence: escrowSequence,
+          amount,
+          destination: escrowObject.Destination || '',
+          finishAfter: escrowObject.FinishAfter ? (escrowObject.FinishAfter as number) : undefined,
+          cancelAfter: escrowObject.CancelAfter ? (escrowObject.CancelAfter as number) : undefined,
+          condition: escrowObject.Condition || undefined,
+        };
+      } catch (error) {
+        console.error('[XRPL] Error querying escrow details:', error);
+        throw error;
+      } finally {
+        await client.disconnect();
+      }
+    } catch (error) {
+      console.error('Error getting escrow details:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get escrow details from XRPL by sequence number
+   * Legacy method - prefer getEscrowDetailsByTxHash
+   */
+  async getEscrowDetails(escrowSequence: number, ownerAddress: string): Promise<{
+    amount: number;
+    destination: string;
+    finishAfter?: number;
+    cancelAfter?: number;
+    condition?: string;
+  } | null> {
+    try {
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      try {
+        const response = await client.request({
+          command: 'account_objects',
+          account: ownerAddress,
+          type: 'escrow',
+        });
+
+        const escrowObjects = response.result.account_objects || [];
+        const escrowObject = escrowObjects.find(
+          (obj: any) => obj.Sequence === escrowSequence
+        );
+
+        if (!escrowObject) {
+          return null;
+        }
+
+        const amountDrops = escrowObject.Amount || '0';
+        const amount = parseFloat(dropsToXrp(amountDrops));
+
+        return {
+          amount,
+          destination: escrowObject.Destination || '',
+          finishAfter: escrowObject.FinishAfter ? (escrowObject.FinishAfter as number) : undefined,
+          cancelAfter: escrowObject.CancelAfter ? (escrowObject.CancelAfter as number) : undefined,
+          condition: escrowObject.Condition || undefined,
+        };
+      } catch (error) {
+        console.error('[XRPL] Error querying escrow details:', error);
+        throw error;
+      } finally {
+        await client.disconnect();
+      }
     } catch (error) {
       console.error('Error getting escrow details:', error);
       return null;

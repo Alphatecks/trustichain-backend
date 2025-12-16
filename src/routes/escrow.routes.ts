@@ -73,12 +73,21 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   POST /api/escrow/:id/release
- * @desc    Release (finish) an escrow
+ * @desc    Release (finish) an escrow - creates XUMM payload for user signing
  * @access  Private
  * @body    { notes?: string }
  */
 router.post('/:id/release', authenticate, asyncHandler(async (req, res) => {
   await escrowController.releaseEscrow(req, res);
+}));
+
+/**
+ * @route   GET /api/escrow/:id/release/status
+ * @desc    Get XUMM payload status for escrow release and complete if signed
+ * @access  Private
+ */
+router.get('/:id/release/status', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowReleaseXUMMStatus(req, res);
 }));
 
 /**
