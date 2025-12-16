@@ -98,6 +98,20 @@ export class WalletService {
           error: balanceError instanceof Error ? balanceError.message : String(balanceError),
         });
         // Return database balances as fallback if XRPL query fails
+        // Calculate USD equivalent from database balances
+        let totalUsd = (wallet.balance_usdt || 0) + (wallet.balance_usdc || 0);
+        try {
+          const exchangeRates = await exchangeService.getLiveExchangeRates();
+          const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
+          if (xrpUsdRate && xrpUsdRate > 0) {
+            totalUsd += (wallet.balance_xrp || 0) * xrpUsdRate;
+          } else {
+            totalUsd += (wallet.balance_xrp || 0) * 1.0; // Conservative fallback
+          }
+        } catch (rateError) {
+          totalUsd += (wallet.balance_xrp || 0) * 1.0; // Conservative fallback
+        }
+        
         return {
           success: true,
           message: 'Wallet balance retrieved from database (XRPL query failed)',
@@ -106,6 +120,7 @@ export class WalletService {
               xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
               usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
               usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
+              usd: parseFloat(totalUsd.toFixed(2)), // USD equivalent
             },
             xrplAddress: wallet.xrpl_address,
           },
@@ -123,6 +138,24 @@ export class WalletService {
         })
         .eq('id', wallet.id);
 
+      // Calculate USD equivalent: (XRP * XRP/USD rate) + USDT + USDC
+      let totalUsd = balances.usdt + balances.usdc; // USDT and USDC are already in USD
+      try {
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
+        if (xrpUsdRate && xrpUsdRate > 0) {
+          totalUsd += balances.xrp * xrpUsdRate;
+        } else {
+          // Fallback: use a conservative default rate if exchange rate fetch fails
+          console.warn('[WARNING] Failed to get XRP/USD rate, using fallback for USD calculation');
+          totalUsd += balances.xrp * 1.0; // Conservative fallback
+        }
+      } catch (rateError) {
+        console.error('[ERROR] Failed to fetch exchange rate for USD calculation:', rateError);
+        // Still calculate with fallback
+        totalUsd += balances.xrp * 1.0; // Conservative fallback
+      }
+
       return {
         success: true,
         message: 'Wallet balance retrieved successfully',
@@ -131,6 +164,7 @@ export class WalletService {
             xrp: parseFloat(balances.xrp.toFixed(6)),
             usdt: parseFloat(balances.usdt.toFixed(6)),
             usdc: parseFloat(balances.usdc.toFixed(6)),
+            usd: parseFloat(totalUsd.toFixed(2)), // USD equivalent
           },
           xrplAddress: wallet.xrpl_address,
         },

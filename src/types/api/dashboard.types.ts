@@ -5,22 +5,23 @@
 export interface DashboardSummaryResponse {
   success: boolean;
   message: string;
-  data?: {
-    balance: {
-      xrp: number;
-      usdt: number;
-      usdc: number;
-    };
-    activeEscrows: {
-      count: number;
-      lockedAmount: number;
-    };
-    trustiscore: {
-      score: number;
-      level: string;
-    };
-    totalEscrowed: number;
-  };
+      data?: {
+        balance: {
+          xrp: number;
+          usdt: number;
+          usdc: number;
+          usd: number; // Total USD equivalent (XRP converted + USDT + USDC)
+        };
+        activeEscrows: {
+          count: number;
+          lockedAmount: number;
+        };
+        trustiscore: {
+          score: number;
+          level: string;
+        };
+        totalEscrowed: number;
+      };
   error?: string;
 }
 
@@ -32,6 +33,7 @@ export interface WalletBalanceResponse {
       xrp: number;
       usdt: number;
       usdc: number;
+      usd: number; // Total USD equivalent (XRP converted + USDT + USDC)
     };
     xrplAddress: string;
   };

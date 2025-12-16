@@ -10,6 +10,7 @@ export interface WalletBalanceResponse {
       xrp: number;
       usdt: number;
       usdc: number;
+      usd: number; // Total USD equivalent (XRP converted + USDT + USDC)
     };
     xrplAddress: string;
   };
