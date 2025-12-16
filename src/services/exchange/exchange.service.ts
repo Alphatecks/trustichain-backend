@@ -184,9 +184,11 @@ export class ExchangeService {
   }
 
   /**
-   * Fetch exchange rate from Binance API (primary) or XRPL price oracles (backup)
-   * Primary: Binance API for XRP/USDT (used as USD equivalent)
-   * Backup: XRPL price oracles for USD
+   * Fetch exchange rate from multiple sources (in order of preference)
+   * 1. Binance API (primary) - may be geo-blocked in some regions
+   * 2. CoinGecko API (alternative) - more widely available
+   * 3. CryptoCompare API (alternative) - backup option
+   * 4. XRPL price oracles (when configured) - for USD only
    */
   private async fetchExchangeRate(currency: string): Promise<number | null> {
     // Try Binance API first (primary)
@@ -195,7 +197,19 @@ export class ExchangeService {
       return binanceRate;
     }
 
-    // If Binance fails and currency is USD, try XRPL price oracles (backup)
+    // If Binance fails, try CoinGecko (alternative source, not a fallback rate)
+    const coinGeckoRate = await this.fetchFromCoinGecko(currency);
+    if (coinGeckoRate !== null) {
+      return coinGeckoRate;
+    }
+
+    // If CoinGecko fails, try CryptoCompare (another alternative source)
+    const cryptoCompareRate = await this.fetchFromCryptoCompare(currency);
+    if (cryptoCompareRate !== null) {
+      return cryptoCompareRate;
+    }
+
+    // If all APIs fail and currency is USD, try XRPL price oracles (backup)
     if (currency === 'USD') {
       const xrplRate = await this.fetchFromXRPLOracle('USD');
       if (xrplRate !== null) {
@@ -343,6 +357,96 @@ export class ExchangeService {
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromXRPLOracle',message:'fetchFromXRPLOracle: Error',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
       // #endregion
       console.log('[DEBUG] fetchFromXRPLOracle: Error', {
+        currency,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Fetch XRP rate from CoinGecko API (alternative source when Binance is blocked)
+   */
+  private async fetchFromCoinGecko(currency: string): Promise<number | null> {
+    try {
+      console.log('[DEBUG] fetchFromCoinGecko: Attempting to fetch from CoinGecko', { currency });
+      
+      const url = `https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=${currency.toLowerCase()}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.log('[DEBUG] fetchFromCoinGecko: Response not OK', { 
+          currency, 
+          status: response.status, 
+          statusText: response.statusText 
+        });
+        return null;
+      }
+
+      const data = await response.json() as { ripple?: Record<string, number> };
+      const rate = data.ripple?.[currency.toLowerCase()] || null;
+      
+      if (rate !== null && rate > 0) {
+        console.log('[DEBUG] fetchFromCoinGecko: Success', { currency, rate });
+        return rate;
+      }
+
+      console.log('[DEBUG] fetchFromCoinGecko: Invalid or missing rate', { currency, data, rate });
+      return null;
+    } catch (error) {
+      console.log('[DEBUG] fetchFromCoinGecko: Error', {
+        currency,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Fetch XRP rate from CryptoCompare API (another alternative source)
+   */
+  private async fetchFromCryptoCompare(currency: string): Promise<number | null> {
+    try {
+      console.log('[DEBUG] fetchFromCryptoCompare: Attempting to fetch from CryptoCompare', { currency });
+      
+      // CryptoCompare free tier: https://min-api.cryptocompare.com/
+      // Note: For production, you might want to use an API key for higher rate limits
+      const url = `https://min-api.cryptocompare.com/data/price?fsym=XRP&tsyms=${currency}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.log('[DEBUG] fetchFromCryptoCompare: Response not OK', { 
+          currency, 
+          status: response.status, 
+          statusText: response.statusText 
+        });
+        return null;
+      }
+
+      const data = await response.json() as Record<string, number>;
+      const rate = data[currency];
+      
+      if (rate && rate > 0) {
+        console.log('[DEBUG] fetchFromCryptoCompare: Success', { currency, rate });
+        return rate;
+      }
+
+      console.log('[DEBUG] fetchFromCryptoCompare: Invalid or missing rate', { currency, data, rate });
+      return null;
+    } catch (error) {
+      console.log('[DEBUG] fetchFromCryptoCompare: Error', {
         currency,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
