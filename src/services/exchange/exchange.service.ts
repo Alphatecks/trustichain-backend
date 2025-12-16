@@ -1,6 +1,8 @@
 /**
  * Exchange Rate Service
  * Fetches live exchange rates for XRP against major currencies
+ * Primary: Binance API (XRP/USDT ≈ USD)
+ * Backup: XRPL Price Oracles (placeholder for future implementation)
  */
 
 interface CachedRate {
@@ -19,6 +21,11 @@ interface ExchangeRate {
 export class ExchangeService {
   private cache: Map<string, CachedRate> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  // XRPL server config for future XRPL price oracle implementation
+  // private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
+  // private readonly XRPL_SERVER = this.XRPL_NETWORK === 'mainnet'
+  //   ? 'wss://xrplcluster.com'
+  //   : 'wss://s.altnet.rippletest.net:51233';
 
   /**
    * Get live exchange rates for XRP against USD, EUR, GBP, JPY
@@ -39,7 +46,50 @@ export class ExchangeService {
       const currencies = ['USD', 'EUR', 'GBP', 'JPY'];
       const rates: ExchangeRate[] = [];
 
-      for (const currency of currencies) {
+      // Fetch USD first (required for other currency conversions)
+      const usdCurrency = 'USD';
+      const usdCached = this.cache.get(usdCurrency);
+      
+      let usdRate: number | null = null;
+      if (usdCached && (now - usdCached.timestamp) < this.CACHE_TTL) {
+        usdRate = usdCached.rate;
+        rates.push({
+          currency: usdCurrency,
+          rate: usdCached.rate,
+          change: usdCached.rate - usdCached.previousRate,
+          changePercent: usdCached.previousRate > 0 
+            ? ((usdCached.rate - usdCached.previousRate) / usdCached.previousRate) * 100 
+            : 0,
+        });
+      } else {
+        usdRate = await this.fetchExchangeRate(usdCurrency);
+        if (usdRate !== null) {
+          const previousRate = usdCached?.rate || usdRate;
+          this.cache.set(usdCurrency, {
+            rate: usdRate,
+            previousRate,
+            timestamp: now,
+          });
+          rates.push({
+            currency: usdCurrency,
+            rate: usdRate,
+            change: usdRate - previousRate,
+            changePercent: previousRate > 0 ? ((usdRate - previousRate) / previousRate) * 100 : 0,
+          });
+        } else if (usdCached) {
+          // Use expired cache if fetch fails
+          usdRate = usdCached.rate;
+          rates.push({
+            currency: usdCurrency,
+            rate: usdCached.rate,
+            change: 0,
+            changePercent: 0,
+          });
+        }
+      }
+
+      // Process other currencies (EUR, GBP, JPY) which depend on USD
+      for (const currency of currencies.filter(c => c !== 'USD')) {
         const cached = this.cache.get(currency);
         
         // Use cache if it's still valid
@@ -56,43 +106,11 @@ export class ExchangeService {
             changePercent: parseFloat(changePercent.toFixed(2)),
           });
         } else {
-          // Fetch fresh rate
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:58',message:'getLiveExchangeRates: Fetching rate',data:{currency,hasCached:!!cached,cachedRate:cached?.rate},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
-          console.log('[DEBUG] getLiveExchangeRates fetching rate:', { currency, hasCached: !!cached, cachedRate: cached?.rate });
-          const rate = await this.fetchExchangeRate(currency);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:61',message:'getLiveExchangeRates: Rate fetched',data:{currency,rate,isNull:rate===null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
-          console.log('[DEBUG] getLiveExchangeRates rate fetched:', { currency, rate, isNull: rate === null });
-          
-          if (rate !== null) {
-            const previousRate = cached?.rate || rate;
-            const change = rate - previousRate;
-            const changePercent = previousRate > 0 
-              ? (change / previousRate) * 100 
-              : 0;
-
-            // Update cache
-            this.cache.set(currency, {
-              rate,
-              previousRate,
-              timestamp: now,
-            });
-
-            rates.push({
-              currency,
-              rate,
-              change,
-              changePercent: parseFloat(changePercent.toFixed(2)),
-            });
-            console.log('[DEBUG] getLiveExchangeRates using fetched rate:', { currency, rate });
-          } else {
-            // If rate fetch fails, use cached rate if available (even if expired)
-            // Otherwise, skip this currency - no fallback rates
+          // Convert from USD using fiat exchange rates
+          if (!usdRate) {
+            // If USD rate is not available, can't convert other currencies
             if (cached) {
-              console.log('[DEBUG] getLiveExchangeRates: Rate fetch failed, using expired cached rate', { currency, cachedRate: cached.rate });
+              console.log('[DEBUG] getLiveExchangeRates: USD rate not available, using expired cached rate', { currency, cachedRate: cached.rate });
               rates.push({
                 currency,
                 rate: cached.rate,
@@ -100,7 +118,44 @@ export class ExchangeService {
                 changePercent: 0,
               });
             } else {
-              console.warn(`[WARNING] getLiveExchangeRates: Failed to fetch rate for ${currency} and no cached rate available, skipping`);
+              console.warn(`[WARNING] getLiveExchangeRates: USD rate not available, cannot convert ${currency}, skipping`);
+            }
+          } else {
+            // Fetch fiat exchange rate (USD to target currency)
+            const fiatRate = await this.fetchFiatExchangeRate(currency);
+            if (fiatRate !== null && fiatRate > 0) {
+              const rate = usdRate * fiatRate;
+              const previousRate = cached?.rate || rate;
+              const change = rate - previousRate;
+              const changePercent = previousRate > 0 
+                ? (change / previousRate) * 100 
+                : 0;
+
+              // Update cache
+              this.cache.set(currency, {
+                rate,
+                previousRate,
+                timestamp: now,
+              });
+
+              rates.push({
+                currency,
+                rate,
+                change,
+                changePercent: parseFloat(changePercent.toFixed(2)),
+              });
+              console.log('[DEBUG] getLiveExchangeRates: Converted rate from USD', { currency, usdRate, fiatRate, rate });
+            } else if (cached) {
+              // Use expired cache if fiat rate fetch fails
+              console.log('[DEBUG] getLiveExchangeRates: Fiat rate fetch failed, using expired cached rate', { currency, cachedRate: cached.rate });
+              rates.push({
+                currency,
+                rate: cached.rate,
+                change: 0,
+                changePercent: 0,
+              });
+            } else {
+              console.warn(`[WARNING] getLiveExchangeRates: Failed to fetch fiat rate for ${currency} and no cached rate available, skipping`);
             }
           }
         }
@@ -129,73 +184,183 @@ export class ExchangeService {
   }
 
   /**
-   * Fetch exchange rate from external API
-   * In production, use a real exchange rate API like CoinGecko, CoinMarketCap, or XRPL's own rates
+   * Fetch exchange rate from Binance API (primary) or XRPL price oracles (backup)
+   * Primary: Binance API for XRP/USDT (used as USD equivalent)
+   * Backup: XRPL price oracles for USD
    */
   private async fetchExchangeRate(currency: string): Promise<number | null> {
+    // Try Binance API first (primary)
+    const binanceRate = await this.fetchFromBinance(currency);
+    if (binanceRate !== null) {
+      return binanceRate;
+    }
+
+    // If Binance fails and currency is USD, try XRPL price oracles (backup)
+    if (currency === 'USD') {
+      const xrplRate = await this.fetchFromXRPLOracle('USD');
+      if (xrplRate !== null) {
+        return xrplRate;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Fetch XRP/USDT rate from Binance API (primary source)
+   * USDT is treated as USD equivalent (1:1)
+   */
+  private async fetchFromBinance(currency: string): Promise<number | null> {
     try {
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:116',message:'fetchExchangeRate: Entry',data:{currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromBinance',message:'fetchFromBinance: Entry',data:{currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
       // #endregion
-      // Using CoinGecko API as an example
-      // In production, you might want to use XRPL's native rates or a more reliable source
-      const url = `https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=${currency.toLowerCase()}`;
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:121',message:'fetchExchangeRate: Before fetch',data:{currency,url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      const response = await fetch(url);
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:124',message:'fetchExchangeRate: After fetch',data:{currency,status:response.status,statusText:response.statusText,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      // Log for Render debugging
-      console.log('[DEBUG] fetchExchangeRate response:', {
-        currency,
-        url,
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries()),
-      });
+      
+      // Binance provides XRP/USDT, which we use as USD equivalent
+      // For other currencies, we'll need to convert from USD
+      if (currency === 'USD') {
+        const url = 'https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT';
+        console.log('[DEBUG] fetchFromBinance: Fetching XRP/USDT from Binance', { currency, url });
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
 
-      if (!response.ok) {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:127',message:'fetchExchangeRate: Response not OK',data:{currency,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromBinance',message:'fetchFromBinance: Response received',data:{currency,status:response.status,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
-        // Log error response body for debugging
-        let errorBody = '';
-        try {
-          errorBody = await response.text();
-          console.log('[DEBUG] fetchExchangeRate error response body:', { currency, status: response.status, body: errorBody });
-        } catch (e) {
-          console.log('[DEBUG] fetchExchangeRate could not read error body:', { currency, status: response.status });
+
+        if (!response.ok) {
+          console.log('[DEBUG] fetchFromBinance: Response not OK', { currency, status: response.status, statusText: response.statusText });
+          return null;
         }
-        // Return null if API fails
+
+        const data = await response.json() as { symbol: string; price: string };
+        const rate = parseFloat(data.price);
+        
+        if (isNaN(rate) || rate <= 0) {
+          console.warn('[WARNING] fetchFromBinance: Invalid rate returned', { currency, rate, data });
+          return null;
+        }
+
+        console.log('[DEBUG] fetchFromBinance: Success', { currency, rate, symbol: data.symbol });
+        return rate;
+      } else {
+        // For non-USD currencies, we'll convert from USD using fiat exchange rates
+        // This method will be called after USD is fetched
         return null;
       }
-
-      const data = await response.json() as { ripple?: Record<string, number> };
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:132',message:'fetchExchangeRate: Parsed response',data:{currency,hasRipple:!!data.ripple,rate:data.ripple?.[currency.toLowerCase()]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      const rate = data.ripple?.[currency.toLowerCase()] || null;
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:135',message:'fetchExchangeRate: Returning rate',data:{currency,rate},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      console.log('[DEBUG] fetchExchangeRate success:', { currency, rate, data });
-      return rate;
     } catch (error) {
       // #region agent log
       const errorData = error instanceof Error ? {message:error.message,stack:error.stack,name:error.name} : {error:String(error)};
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:137',message:'fetchExchangeRate: Catch block',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromBinance',message:'fetchFromBinance: Error',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
       // #endregion
-      // Log error details for Render debugging
-      console.log('[DEBUG] fetchExchangeRate catch:', {
+      console.log('[DEBUG] fetchFromBinance: Error', {
         currency,
         errorMessage: error instanceof Error ? error.message : String(error),
-        errorName: error instanceof Error ? error.name : undefined,
-        errorStack: error instanceof Error ? error.stack : undefined,
       });
-      // Return null if fetch fails
+      return null;
+    }
+  }
+
+  /**
+   * Fetch XRP/USD rate from XRPL price oracles (backup for USD)
+   */
+  private async fetchFromXRPLOracle(currency: string): Promise<number | null> {
+    // Only use XRPL oracles for USD
+    if (currency !== 'USD') {
+      return null;
+    }
+
+    try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromXRPLOracle',message:'fetchFromXRPLOracle: Entry',data:{currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      
+      console.log('[DEBUG] fetchFromXRPLOracle: Attempting to fetch from XRPL price oracles', { currency });
+      
+      // Note: XRPL price oracles require oracle account addresses and document IDs
+      // This is a simplified implementation - in production, you'd need to maintain
+      // a list of trusted oracle accounts
+      // For now, we'll skip XRPL oracles as they require setup
+      // TODO: Implement XRPL price oracle support when oracle accounts are configured
+      
+      console.log('[DEBUG] fetchFromXRPLOracle: XRPL oracles not yet configured, skipping');
+      return null;
+      
+      /* Future implementation:
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+      
+      try {
+        // You'll need to provide oracle account addresses and document IDs
+        const request = {
+          command: 'get_aggregate_price',
+          base_asset: 'XRP',
+          quote_asset: 'USD',
+          oracles: [
+            // Add trusted oracle accounts here
+          ],
+        };
+        
+        const response = await client.request(request);
+        await client.disconnect();
+        
+        // Extract mean price from aggregate response
+        const meanPrice = response.result?.mean;
+        if (meanPrice && meanPrice > 0) {
+          return parseFloat(meanPrice);
+        }
+      } catch (oracleError) {
+        await client.disconnect();
+        throw oracleError;
+      }
+      */
+    } catch (error) {
+      // #region agent log
+      const errorData = error instanceof Error ? {message:error.message,stack:error.stack,name:error.name} : {error:String(error)};
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromXRPLOracle',message:'fetchFromXRPLOracle: Error',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      console.log('[DEBUG] fetchFromXRPLOracle: Error', {
+        currency,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Fetch fiat currency exchange rate (EUR, GBP, JPY) relative to USD
+   * Used to convert XRP/USD to XRP/EUR, XRP/GBP, XRP/JPY
+   */
+  private async fetchFiatExchangeRate(currency: string): Promise<number | null> {
+    try {
+      // Using exchangerate-api.com free tier (no API key needed for basic usage)
+      // Alternatively, you could use fixer.io, exchangeratesapi.io, or similar
+      const url = `https://api.exchangerate-api.com/v4/latest/USD`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json() as { rates: Record<string, number> };
+      const rate = data.rates[currency];
+      
+      if (!rate || rate <= 0) {
+        return null;
+      }
+
+      return rate;
+    } catch (error) {
+      console.log('[DEBUG] fetchFiatExchangeRate: Error', {
+        currency,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
