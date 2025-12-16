@@ -275,7 +275,8 @@ export class XRPLEscrowService {
         });
 
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:264',message:'getEscrowDetailsByTxHash: XRPL tx query response',data:{txHash,hasResult:!!txResponse?.result,error:txResponse?.result?.error,errorCode:txResponse?.result?.error_code,errorMessage:txResponse?.result?.error_message,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        const txResponseAny = txResponse as any;
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:264',message:'getEscrowDetailsByTxHash: XRPL tx query response',data:{txHash,hasResult:!!txResponseAny?.result,error:txResponseAny?.result?.error,errorCode:txResponseAny?.result?.error_code,errorMessage:txResponseAny?.result?.error_message,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
 
         if (!txResponse || !txResponse.result) {
