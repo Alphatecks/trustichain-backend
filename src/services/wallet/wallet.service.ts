@@ -144,18 +144,49 @@ export class WalletService {
       try {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
+        console.log('[DEBUG] wallet.service.getBalance: USD calculation', {
+          userId,
+          xrpBalance: balances.xrp,
+          usdtBalance: balances.usdt,
+          usdcBalance: balances.usdc,
+          exchangeRatesSuccess: exchangeRates.success,
+          xrpUsdRate,
+          allRates: exchangeRates.data?.rates,
+        });
         if (xrpUsdRate && xrpUsdRate > 0) {
           totalUsd += balances.xrp * xrpUsdRate;
+          console.log('[DEBUG] wallet.service.getBalance: Using exchange rate', {
+            xrpBalance: balances.xrp,
+            rate: xrpUsdRate,
+            xrpValueUsd: balances.xrp * xrpUsdRate,
+            totalUsd,
+          });
         } else {
           // Fallback: use a conservative default rate if exchange rate fetch fails
-          console.warn('[WARNING] Failed to get XRP/USD rate, using fallback for USD calculation');
+          console.warn('[WARNING] Failed to get XRP/USD rate, using fallback for USD calculation', {
+            exchangeRatesSuccess: exchangeRates.success,
+            rates: exchangeRates.data?.rates,
+          });
           totalUsd += balances.xrp * 1.0; // Conservative fallback
         }
       } catch (rateError) {
-        console.error('[ERROR] Failed to fetch exchange rate for USD calculation:', rateError);
+        console.error('[ERROR] Failed to fetch exchange rate for USD calculation:', {
+          error: rateError instanceof Error ? rateError.message : String(rateError),
+          userId,
+        });
         // Still calculate with fallback
         totalUsd += balances.xrp * 1.0; // Conservative fallback
       }
+      
+      console.log('[DEBUG] wallet.service.getBalance: Final USD calculation', {
+        userId,
+        totalUsd,
+        balanceBreakdown: {
+          xrp: balances.xrp,
+          usdt: balances.usdt,
+          usdc: balances.usdc,
+        },
+      });
 
       return {
         success: true,
