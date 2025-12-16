@@ -201,15 +201,18 @@ export class ExchangeService {
 
   /**
    * Get default/fallback exchange rate
+   * Updated Dec 2024: Using more current approximate rates
+   * Note: This is only used as a last resort fallback if API fails
    */
   private getDefaultRate(currency: string): number {
     const defaults: Record<string, number> = {
-      USD: 0.5430,
-      EUR: 0.4920,
-      GBP: 0.4310,
-      JPY: 81.20,
+      USD: 1.85, // Updated to approximate current XRP/USD rate (Dec 2024)
+      EUR: 1.68,
+      GBP: 1.47,
+      JPY: 275.0,
     };
-    return defaults[currency] || 0.5;
+    console.warn(`[WARNING] Using fallback exchange rate for ${currency}: ${defaults[currency] || 1.0}`);
+    return defaults[currency] || 1.0;
   }
 
   /**

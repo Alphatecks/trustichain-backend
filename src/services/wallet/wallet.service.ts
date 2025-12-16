@@ -153,7 +153,9 @@ export class WalletService {
           xrpUsdRate,
           allRates: exchangeRates.data?.rates,
         });
-        if (xrpUsdRate && xrpUsdRate > 0) {
+        if (xrpUsdRate && xrpUsdRate > 0 && xrpUsdRate < 100) {
+          // Validate rate is reasonable (between 0 and 100 USD per XRP)
+          // Rates outside this range likely indicate an error
           totalUsd += balances.xrp * xrpUsdRate;
           console.log('[DEBUG] wallet.service.getBalance: Using exchange rate', {
             xrpBalance: balances.xrp,
