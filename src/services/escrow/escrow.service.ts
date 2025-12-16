@@ -918,42 +918,82 @@ export class EscrowService {
           description: notes || `Escrow released: ${updatedEscrow.description || 'No description'}`,
         });
 
-      // Update receiver's wallet balance after escrow release
-      // The funds have been released on XRPL, so update the receiver's database balance
-      if (updatedEscrow.counterparty_id && finishTxHash) {
+      // Update both sender and receiver wallet balances after escrow release
+      // On XRPL: sender was debited when escrow was created, receiver is credited on release
+      // We sync both balances from XRPL to ensure database reflects actual balances
+      if (finishTxHash) {
+        // Update sender's (initiator's) wallet balance
         try {
-          // Get receiver's wallet address
-          const { data: receiverWallet } = await adminClient
+          // Get sender's wallet address (the userId who is releasing)
+          const { data: senderWallet } = await adminClient
             .from('wallets')
             .select('xrpl_address')
-            .eq('user_id', updatedEscrow.counterparty_id)
+            .eq('user_id', updatedEscrow.user_id)
             .single();
 
-          if (receiverWallet) {
-            // Fetch current balances from XRPL (funds are now in their account)
-            const balances = await xrplWalletService.getAllBalances(receiverWallet.xrpl_address);
+          if (senderWallet) {
+            // Fetch current balances from XRPL (sender was already debited when escrow was created)
+            const senderBalances = await xrplWalletService.getAllBalances(senderWallet.xrpl_address);
             
-            // Update receiver's wallet balance in database
+            // Update sender's wallet balance in database
             await adminClient
               .from('wallets')
               .update({
-                balance_xrp: balances.xrp,
-                balance_usdt: balances.usdt,
-                balance_usdc: balances.usdc,
+                balance_xrp: senderBalances.xrp,
+                balance_usdt: senderBalances.usdt,
+                balance_usdc: senderBalances.usdc,
                 updated_at: new Date().toISOString(),
               })
-              .eq('user_id', updatedEscrow.counterparty_id);
+              .eq('user_id', updatedEscrow.user_id);
 
-            console.log('[Escrow Release] Updated receiver wallet balance:', {
-              receiverId: updatedEscrow.counterparty_id,
-              xrp: balances.xrp,
-              usdt: balances.usdt,
-              usdc: balances.usdc,
+            console.log('[Escrow Release] Updated sender wallet balance:', {
+              senderId: updatedEscrow.user_id,
+              xrp: senderBalances.xrp,
+              usdt: senderBalances.usdt,
+              usdc: senderBalances.usdc,
             });
           }
-        } catch (balanceUpdateError) {
+        } catch (senderBalanceError) {
           // Log error but don't fail the escrow release
-          console.error('Error updating receiver wallet balance after escrow release:', balanceUpdateError);
+          console.error('Error updating sender wallet balance after escrow release:', senderBalanceError);
+        }
+
+        // Update receiver's (counterparty's) wallet balance
+        if (updatedEscrow.counterparty_id) {
+          try {
+            // Get receiver's wallet address
+            const { data: receiverWallet } = await adminClient
+              .from('wallets')
+              .select('xrpl_address')
+              .eq('user_id', updatedEscrow.counterparty_id)
+              .single();
+
+            if (receiverWallet) {
+              // Fetch current balances from XRPL (funds are now in their account)
+              const receiverBalances = await xrplWalletService.getAllBalances(receiverWallet.xrpl_address);
+              
+              // Update receiver's wallet balance in database
+              await adminClient
+                .from('wallets')
+                .update({
+                  balance_xrp: receiverBalances.xrp,
+                  balance_usdt: receiverBalances.usdt,
+                  balance_usdc: receiverBalances.usdc,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', updatedEscrow.counterparty_id);
+
+              console.log('[Escrow Release] Updated receiver wallet balance:', {
+                receiverId: updatedEscrow.counterparty_id,
+                xrp: receiverBalances.xrp,
+                usdt: receiverBalances.usdt,
+                usdc: receiverBalances.usdc,
+              });
+            }
+          } catch (receiverBalanceError) {
+            // Log error but don't fail the escrow release
+            console.error('Error updating receiver wallet balance after escrow release:', receiverBalanceError);
+          }
         }
       }
 
