@@ -364,18 +364,35 @@ export class EscrowService {
         amountUsd = escrowAmount * usdRate;
       }
 
-      // Create escrow on XRPL
+      // Prepare EscrowCreate transaction for user signing via XUMM
+      // Note: We no longer create placeholder escrows; all escrows must be real XRPL EscrowCreate transactions.
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'escrow.service.ts:367',message:'createEscrow: About to call xrplEscrowService.createEscrow',data:{fromAddress:payerWallet.xrpl_address,toAddress:counterpartyWalletAddress,amountXrp,hasWalletSecret:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'escrow.service.ts:367',message:'createEscrow: About to prepare XRPL EscrowCreate transaction for XUMM',data:{fromAddress:payerWallet.xrpl_address,toAddress:counterpartyWalletAddress,amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
-      const xrplTxHash = await xrplEscrowService.createEscrow({
+
+      const preparedTx = await xrplEscrowService.prepareEscrowCreateTransaction({
         fromAddress: payerWallet.xrpl_address,
         toAddress: counterpartyWalletAddress,
         amountXrp,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'escrow.service.ts:373',message:'createEscrow: Received xrplTxHash from createEscrow',data:{xrplTxHash,xrplTxHashLength:xrplTxHash.length,isValidFormat:/^[a-f0-9]{64}$/i.test(xrplTxHash)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
+
+      // Create XUMM payload for user signing
+      let xummPayload: any = null;
+      let xummError: string | null = null;
+
+      try {
+        xummPayload = await xummService.createPayload(preparedTx.transaction);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'escrow.service.ts:376',message:'createEscrow: XUMM payload created for EscrowCreate',data:{uuid:xummPayload.uuid,url:xummPayload.next.always},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+      } catch (error) {
+        xummError = error instanceof Error ? error.message : 'XUMM not configured';
+        console.error('[Escrow Create] XUMM payload creation failed:', xummError);
+        throw new Error(
+          `Failed to create XUMM payload for escrow creation: ${xummError}. ` +
+          'Please ensure XUMM_API_KEY and XUMM_API_SECRET are configured.'
+        );
+      }
 
       // Get sequence number for the current year
       const currentYear = new Date().getFullYear();
@@ -389,6 +406,9 @@ export class EscrowService {
 
       const nextSequence = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
 
+      // Prepare XUMM metadata for description
+      const xummDescription = `Escrow create | XUMM_UUID:${xummPayload.uuid}`;
+
       // Create escrow record in database with contact information and terms
       const { data: escrow, error: escrowError } = await adminClient
         .from('escrows')
@@ -398,8 +418,10 @@ export class EscrowService {
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
           status: 'pending',
-          xrpl_escrow_id: xrplTxHash,
-          description: request.description,
+          // xrpl_escrow_id will be set after XUMM signs and XRPL confirms the EscrowCreate transaction
+          description: request.description
+            ? `${request.description} | ${xummDescription}`
+            : xummDescription,
           transaction_type: request.transactionType || 'custom',
           industry: request.industry || null,
           progress: 0,
@@ -481,7 +503,7 @@ export class EscrowService {
         }
       }
 
-      // Create transaction record
+      // Create pending transaction record for escrow creation
       await adminClient
         .from('transactions')
         .insert({
@@ -489,23 +511,28 @@ export class EscrowService {
           type: 'escrow_create',
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
-          xrpl_tx_hash: xrplTxHash,
-          status: 'completed',
+          xrpl_tx_hash: null,
+          status: 'pending',
           escrow_id: escrow.id,
-          description: `Escrow created: ${request.description || 'No description'}`,
+          description: `Escrow create: ${request.description || 'No description'} | ${xummDescription}`,
         });
 
       return {
         success: true,
-        message: 'Escrow created successfully',
+          message: 'Escrow creation transaction prepared. Please sign in Xaman app.',
         data: {
-          escrowId: escrow.id,
+            escrowId: escrow.id,
           amount: {
             usd: parseFloat(amountUsd.toFixed(2)),
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
           status: escrow.status,
-          xrplEscrowId: xrplTxHash,
+            xrplEscrowId: null,
+            // Attach XUMM info for signing
+            xummUrl: xummPayload.next.always,
+            xummUuid: xummPayload.uuid,
+            transaction: preparedTx.transaction,
+            transactionBlob: preparedTx.transactionBlob,
         },
       };
     } catch (error) {
@@ -1445,6 +1472,226 @@ export class EscrowService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get XUMM status',
         error: error instanceof Error ? error.message : 'Failed to get XUMM status',
+      };
+    }
+  }
+
+  /**
+   * Get XUMM payload status for escrow creation and finalize on XRPL when signed
+   * Mirrors wallet.getXUMMPayloadStatus but for EscrowCreate + escrow records
+   */
+  async getEscrowCreateXUMMStatus(
+    userId: string,
+    escrowId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      signed: boolean;
+      signedTxBlob: string | null;
+      cancelled: boolean;
+      expired: boolean;
+      xrplTxHash: string | null;
+      escrow?: Escrow;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get escrow and verify user has permission
+      const { data: escrow, error: fetchError } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', escrowId)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+        .single();
+
+      if (fetchError || !escrow) {
+        return {
+          success: false,
+          message: 'Escrow not found or access denied',
+          error: 'Escrow not found or access denied',
+        };
+      }
+
+      // Find the pending escrow_create transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('escrow_id', escrowId)
+        .eq('type', 'escrow_create')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'No pending escrow create transaction found',
+          error: 'No pending transaction',
+        };
+      }
+
+      // Extract XUMM UUID from description
+      const uuidMatch = transaction.description?.match(/XUMM_UUID:([a-f0-9-]+)/i);
+      if (!uuidMatch) {
+        return {
+          success: false,
+          message: 'XUMM UUID not found for this escrow creation',
+          error: 'XUMM UUID not found',
+        };
+      }
+
+      const xummUuid = uuidMatch[1];
+
+      // Get payload status from XUMM
+      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
+
+      // If not yet resolved, return current status
+      if (!payloadStatus.meta.resolved) {
+        return {
+          success: true,
+          message: 'Escrow creation pending user action in XUMM',
+          data: {
+            signed: payloadStatus.meta.signed,
+            signedTxBlob: payloadStatus.response?.hex || null,
+            cancelled: payloadStatus.meta.cancelled,
+            expired: payloadStatus.meta.expired,
+            xrplTxHash: payloadStatus.response?.txid || null,
+            escrow: escrow as any,
+          },
+        };
+      }
+
+      // Handle cancelled or expired
+      if (payloadStatus.meta.cancelled || payloadStatus.meta.expired) {
+        // Mark transaction as cancelled
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'cancelled',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transaction.id);
+
+        return {
+          success: true,
+          message: payloadStatus.meta.cancelled
+            ? 'Escrow creation cancelled in XUMM'
+            : 'Escrow creation payload expired in XUMM',
+          data: {
+            signed: false,
+            signedTxBlob: null,
+            cancelled: payloadStatus.meta.cancelled,
+            expired: payloadStatus.meta.expired,
+            xrplTxHash: null,
+            escrow: escrow as any,
+          },
+        };
+      }
+
+      // At this point, payload is resolved and signed or auto-submitted
+      let xrplTxHash: string | null = null;
+
+      // Case 1: Signed transaction blob needs submission
+      if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
+        const submitResult = await xrplWalletService.submitSignedTransaction(
+          payloadStatus.response.hex
+        );
+
+        if (submitResult.status !== 'tesSUCCESS') {
+          return {
+            success: false,
+            message: `Escrow create transaction failed on XRPL: ${submitResult.status}`,
+            error: 'XRPL transaction failed',
+            data: {
+              signed: true,
+              signedTxBlob: payloadStatus.response.hex,
+              cancelled: false,
+              expired: false,
+              xrplTxHash: submitResult.hash || null,
+              escrow: escrow as any,
+            },
+          };
+        }
+
+        xrplTxHash = submitResult.hash;
+      } else if (
+        payloadStatus.meta.signed &&
+        payloadStatus.meta.submit &&
+        payloadStatus.response?.txid
+      ) {
+        // Case 2: XUMM auto-submitted the transaction (already on XRPL)
+        xrplTxHash = payloadStatus.response.txid;
+      } else {
+        // Signed = false but resolved (e.g. user declined)
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'cancelled',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transaction.id);
+
+        return {
+          success: true,
+          message: 'Escrow creation not signed by user in XUMM',
+          data: {
+            signed: false,
+            signedTxBlob: null,
+            cancelled: true,
+            expired: false,
+            xrplTxHash: null,
+            escrow: escrow as any,
+          },
+        };
+      }
+
+      // Finalize escrow in database: store real XRPL tx hash and mark active
+      await adminClient
+        .from('escrows')
+        .update({
+          xrpl_escrow_id: xrplTxHash,
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', escrowId);
+
+      await adminClient
+        .from('transactions')
+        .update({
+          status: 'completed',
+          xrpl_tx_hash: xrplTxHash,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transaction.id);
+
+      const { data: updatedEscrow } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', escrowId)
+        .single();
+
+      return {
+        success: true,
+        message: 'Escrow created successfully on XRPL',
+        data: {
+          signed: true,
+          signedTxBlob: payloadStatus.response?.hex || null,
+          cancelled: false,
+          expired: false,
+          xrplTxHash,
+          escrow: updatedEscrow as any,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting escrow create XUMM status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get escrow create XUMM status',
+        error: error instanceof Error ? error.message : 'Failed to get escrow create XUMM status',
       };
     }
   }

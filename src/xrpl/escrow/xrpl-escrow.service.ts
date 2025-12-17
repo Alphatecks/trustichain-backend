@@ -29,15 +29,12 @@ export class XRPLEscrowService {
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:27',message:'createEscrow: Entry',data:{fromAddress:params.fromAddress,toAddress:params.toAddress,amountXrp:params.amountXrp,hasWalletSecret:!!params.walletSecret,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
       if (!params.walletSecret) {
-        // In production, retrieve wallet secret securely
-        console.log(`[XRPL] Escrow creation placeholder: ${params.amountXrp} XRP from ${params.fromAddress} to ${params.toAddress}`);
-        const txHash = Array.from({ length: 64 }, () => 
-          Math.floor(Math.random() * 16).toString(16)
-        ).join('');
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:34',message:'createEscrow: Returning placeholder hash',data:{txHash,isPlaceholder:true,reason:'No walletSecret provided'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        return txHash;
+        // In all environments, a real wallet secret is required.
+        // User-facing escrows should use the XUMM-based user-signed EscrowCreate flow instead.
+        throw new Error(
+          'Wallet secret required for XRPL EscrowCreate. ' +
+          'For user escrows, use prepareEscrowCreateTransaction + XUMM instead of createEscrow().'
+        );
       }
 
       const client = new Client(this.XRPL_SERVER);
