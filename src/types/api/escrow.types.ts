@@ -63,6 +63,11 @@ export interface CreateEscrowResponse {
     };
     status: string;
     xrplEscrowId?: string;
+    // XUMM-related fields for user-signed escrow creation
+    xummUrl?: string;
+    xummUuid?: string;
+    transaction?: any;
+    transactionBlob?: string;
   };
   error?: string;
 }

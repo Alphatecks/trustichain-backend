@@ -4,7 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import { CreateEscrowRequest, Escrow, GetEscrowListRequest, TransactionType, ReleaseType, Milestone } from '../../types/api/escrow.types';
+import { CreateEscrowRequest, CreateEscrowResponse, Escrow, GetEscrowListRequest, TransactionType, Milestone, ReleaseType } from '../../types/api/escrow.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
@@ -163,20 +163,7 @@ export class EscrowService {
   /**
    * Create a new escrow
    */
-  async createEscrow(userId: string, request: CreateEscrowRequest): Promise<{
-    success: boolean;
-    message: string;
-    data?: {
-      escrowId: string;
-      amount: {
-        usd: number;
-        xrp: number;
-      };
-      status: string;
-      xrplEscrowId?: string;
-    };
-    error?: string;
-  }> {
+  async createEscrow(userId: string, request: CreateEscrowRequest): Promise<CreateEscrowResponse> {
     try {
       const adminClient = supabaseAdmin || supabase;
 
@@ -519,20 +506,23 @@ export class EscrowService {
 
       return {
         success: true,
-          message: 'Escrow creation transaction prepared. Please sign in Xaman app.',
+        message: 'Escrow creation transaction prepared. Please sign in Xaman app.',
         data: {
-            escrowId: escrow.id,
+          escrowId: escrow.id,
           amount: {
             usd: parseFloat(amountUsd.toFixed(2)),
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
           status: escrow.status,
-            xrplEscrowId: null,
-            // Attach XUMM info for signing
-            xummUrl: xummPayload.next.always,
-            xummUuid: xummPayload.uuid,
-            transaction: preparedTx.transaction,
-            transactionBlob: preparedTx.transactionBlob,
+          // xrplEscrowId will be populated after XUMM signing + XRPL confirmation
+          // via getEscrowCreateXUMMStatus; do not return a null here
+          // to satisfy the Escrow response type (string | undefined).
+          xrplEscrowId: undefined,
+          // Attach XUMM info for signing
+          xummUrl: xummPayload.next.always,
+          xummUuid: xummPayload.uuid,
+          transaction: preparedTx.transaction,
+          transactionBlob: preparedTx.transactionBlob,
         },
       };
     } catch (error) {
