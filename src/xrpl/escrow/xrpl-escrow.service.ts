@@ -317,11 +317,31 @@ export class XRPLEscrowService {
       await client.connect();
 
       try {
-        // First, get the transaction details to find the sequence number
-        const txResponse = await client.request({
-          command: 'tx',
-          transaction: txHash,
-        });
+        // First, try to get the transaction details to find the sequence number
+        let txResponse: any;
+        try {
+          txResponse = await client.request({
+            command: 'tx',
+            transaction: txHash,
+          });
+        } catch (requestError: any) {
+          const errorData = requestError?.data;
+          const errorCode = errorData?.error;
+
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:txCatch',message:'getEscrowDetailsByTxHash: tx query threw error',data:{txHash,error:errorCode,errorData,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+
+          // Handle common "txnNotFound" error gracefully by letting caller
+          // fall back to alternative lookup strategies (e.g., account_objects).
+          if (errorCode === 'txnNotFound') {
+            console.error('[XRPL] Transaction not found (txnNotFound):', txHash);
+            return null;
+          }
+
+          // For other errors, rethrow so callers can handle appropriately
+          throw requestError;
+        }
 
         // #region agent log
         const txResponseAny = txResponse as any;
