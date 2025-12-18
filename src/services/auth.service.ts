@@ -191,8 +191,25 @@ export class AuthService {
       const { email, password } = loginData;
       const normalizedEmail = email.toLowerCase();
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H1',
+          location: 'src/services/auth.service.ts:195',
+          message: 'login_start',
+          data: { email: normalizedEmail },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       // Attempt to sign in with timeout to fail fast if Supabase is slow
       const LOGIN_TIMEOUT_MS = 8000; // 8 second timeout
+      const loginStartTime = Date.now();
       const loginPromise = supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password: password,
@@ -207,7 +224,48 @@ export class AuthService {
         timeoutPromise,
       ]);
 
+      const loginDurationMs = Date.now() - loginStartTime;
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H1',
+          location: 'src/services/auth.service.ts:207',
+          message: 'login_supabase_completed',
+          data: {
+            email: normalizedEmail,
+            durationMs: loginDurationMs,
+            hasUser: !!authData?.user,
+            hasError: !!authError,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       if (authError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'debug-session',
+            runId: 'pre-fix',
+            hypothesisId: 'H2',
+            location: 'src/services/auth.service.ts:210',
+            message: 'login_auth_error',
+            data: {
+              email: normalizedEmail,
+              errorMessage: authError.message,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         return {
           success: false,
           message: authError.message || 'Invalid email or password',
@@ -240,6 +298,25 @@ export class AuthService {
       const fullName = userMetadata?.full_name || userMetadata?.name || user.email?.split('@')[0] || 'User';
       const country = userMetadata?.country || null;
       const userEmail = user.email || normalizedEmail;
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H3',
+          location: 'src/services/auth.service.ts:244',
+          message: 'login_success',
+          data: {
+            email: userEmail,
+            fullName,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       return {
         success: true,

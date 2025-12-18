@@ -33,8 +33,49 @@ export class AuthController {
    */
   async login(req: Request<{}, LoginResponse, LoginRequest>, res: Response<LoginResponse>): Promise<void> {
     try {
+      const controllerStartTime = Date.now();
       const loginData: LoginRequest = req.body;
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H4',
+          location: 'src/controllers/auth.controller.ts:36',
+          message: 'login_controller_start',
+          data: { email: loginData.email?.toLowerCase?.() },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       const result = await authService.login(loginData);
+
+      const controllerDurationMs = Date.now() - controllerStartTime;
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H4',
+          location: 'src/controllers/auth.controller.ts:42',
+          message: 'login_controller_end',
+          data: {
+            email: loginData.email?.toLowerCase?.(),
+            durationMs: controllerDurationMs,
+            success: result.success,
+            emailVerificationRequired: result.emailVerificationRequired ?? false,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       if (result.success) {
         res.status(200).json(result);
