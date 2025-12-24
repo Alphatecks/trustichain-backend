@@ -1086,10 +1086,6 @@ export class WalletService {
             success: false,
             message: `Cannot process withdrawal: Your wallet address (${wallet.xrpl_address}) has ${oldBalance} XRP, but the wallet secret is not available. This wallet was created before automated withdrawals were enabled. Please contact support to recover your funds or manually transfer them to a new wallet.`,
             error: 'Wallet secret not available and old address has funds',
-            data: {
-              oldAddress: wallet.xrpl_address,
-              oldBalance,
-            },
           };
         }
         
