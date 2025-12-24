@@ -1054,10 +1054,10 @@ export class WalletService {
 
       // Get and decrypt wallet secret for signing withdrawal
       // If wallet doesn't have a secret (old wallet created before encrypted_wallet_secret feature),
-      // generate a new wallet and update the record
+      // we cannot migrate if the old address has funds (we can't access them without the secret)
       if (!wallet.encrypted_wallet_secret) {
         // #region agent log
-        const logNoSecret = {location:'wallet.service.ts:1056',message:'withdrawWallet: Wallet secret not available - generating new wallet',data:{userId,walletId:wallet.id,oldWalletAddress:wallet.xrpl_address,walletCreatedAt:wallet.created_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+        const logNoSecret = {location:'wallet.service.ts:1056',message:'withdrawWallet: Wallet secret not available - checking old address balance',data:{userId,walletId:wallet.id,oldWalletAddress:wallet.xrpl_address,walletCreatedAt:wallet.created_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
         console.log('[DEBUG]', JSON.stringify(logNoSecret));
         try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logNoSecret) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logNoSecret)}).catch(()=>{});
@@ -1068,9 +1068,32 @@ export class WalletService {
         try {
           oldBalance = await xrplWalletService.getBalance(wallet.xrpl_address);
         } catch (error) {
-          console.warn('[Withdrawal] Could not check old wallet balance:', error);
+          // If account not found, balance is 0
+          oldBalance = 0;
         }
         
+        // If old address has funds, we cannot migrate (funds would become inaccessible)
+        // Return error explaining the situation
+        if (oldBalance > 0) {
+          // #region agent log
+          const logCannotMigrate = {location:'wallet.service.ts:1070',message:'withdrawWallet: Cannot migrate wallet - old address has funds',data:{userId,walletId:wallet.id,oldAddress:wallet.xrpl_address,oldBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+          console.error('[DEBUG ERROR]', JSON.stringify(logCannotMigrate));
+          try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logCannotMigrate) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logCannotMigrate)}).catch(()=>{});
+          // #endregion
+          
+          return {
+            success: false,
+            message: `Cannot process withdrawal: Your wallet address (${wallet.xrpl_address}) has ${oldBalance} XRP, but the wallet secret is not available. This wallet was created before automated withdrawals were enabled. Please contact support to recover your funds or manually transfer them to a new wallet.`,
+            error: 'Wallet secret not available and old address has funds',
+            data: {
+              oldAddress: wallet.xrpl_address,
+              oldBalance,
+            },
+          };
+        }
+        
+        // Old address has no funds, safe to migrate to new address
         // Generate new wallet with secret
         const { address: newXrplAddress, secret: newWalletSecret } = await xrplWalletService.generateWallet();
         const encryptedSecret = encryptionService.encrypt(newWalletSecret);
@@ -1089,7 +1112,7 @@ export class WalletService {
         
         if (updateError || !updatedWallet) {
           // #region agent log
-          const logUpdateFailed = {location:'wallet.service.ts:1080',message:'withdrawWallet: Failed to update wallet with new secret',data:{userId,walletId:wallet.id,error:updateError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+          const logUpdateFailed = {location:'wallet.service.ts:1095',message:'withdrawWallet: Failed to update wallet with new secret',data:{userId,walletId:wallet.id,error:updateError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
           console.error('[DEBUG ERROR]', JSON.stringify(logUpdateFailed));
           try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logUpdateFailed) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
           fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logUpdateFailed)}).catch(()=>{});
@@ -1102,7 +1125,7 @@ export class WalletService {
         }
         
         // #region agent log
-        const logWalletMigrated = {location:'wallet.service.ts:1093',message:'withdrawWallet: Wallet migrated to new address with secret',data:{userId,walletId:wallet.id,oldAddress:wallet.xrpl_address,newAddress:newXrplAddress,oldBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+        const logWalletMigrated = {location:'wallet.service.ts:1108',message:'withdrawWallet: Wallet migrated to new address with secret',data:{userId,walletId:wallet.id,oldAddress:wallet.xrpl_address,newAddress:newXrplAddress},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
         console.log('[DEBUG]', JSON.stringify(logWalletMigrated));
         try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logWalletMigrated) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logWalletMigrated)}).catch(()=>{});
@@ -1111,41 +1134,8 @@ export class WalletService {
         // Update wallet reference to use the new wallet
         wallet = updatedWallet;
         
-        // Warn if old address had balance (funds are now inaccessible)
-        if (oldBalance > 0) {
-          console.warn(`[WARNING] Wallet ${wallet.id} was migrated from old address to ${newXrplAddress}, but old address had ${oldBalance} XRP. Funds on old address are now inaccessible.`);
-        }
-        
-        // Check if new address exists on XRPL (needs to be funded to activate)
-        let newAddressExists = false;
-        try {
-          const newBalance = await xrplWalletService.getBalance(newXrplAddress);
-          newAddressExists = newBalance > 0;
-        } catch (error) {
-          // Account not found means it doesn't exist yet
-          newAddressExists = false;
-        }
-        
-        // If new address doesn't exist on XRPL, return error with instructions
-        if (!newAddressExists) {
-          // #region agent log
-          const logNewAddressNotActivated = {location:'wallet.service.ts:1118',message:'withdrawWallet: New wallet address not activated on XRPL',data:{userId,walletId:wallet.id,newAddress:newXrplAddress,oldAddress:wallet.xrpl_address,oldBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
-          console.error('[DEBUG ERROR]', JSON.stringify(logNewAddressNotActivated));
-          try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logNewAddressNotActivated) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logNewAddressNotActivated)}).catch(()=>{});
-          // #endregion
-          
-          return {
-            success: false,
-            message: `Your wallet has been migrated to a new address (${newXrplAddress}). Please fund this new address with at least 1 XRP to activate it before making withdrawals. ${oldBalance > 0 ? `Note: Your old address (${wallet.xrpl_address}) had ${oldBalance} XRP, but those funds are now inaccessible.` : ''}`,
-            error: 'New wallet address not activated',
-            data: {
-              newAddress: newXrplAddress,
-              oldAddress: wallet.xrpl_address,
-              oldBalance,
-            },
-          };
-        }
+        // Note: New address needs to be funded to activate, but since old address had no funds,
+        // user will need to fund the new address separately
       }
 
       let walletSecret: string;
