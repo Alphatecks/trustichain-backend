@@ -1115,6 +1115,37 @@ export class WalletService {
         if (oldBalance > 0) {
           console.warn(`[WARNING] Wallet ${wallet.id} was migrated from old address to ${newXrplAddress}, but old address had ${oldBalance} XRP. Funds on old address are now inaccessible.`);
         }
+        
+        // Check if new address exists on XRPL (needs to be funded to activate)
+        let newAddressExists = false;
+        try {
+          const newBalance = await xrplWalletService.getBalance(newXrplAddress);
+          newAddressExists = newBalance > 0;
+        } catch (error) {
+          // Account not found means it doesn't exist yet
+          newAddressExists = false;
+        }
+        
+        // If new address doesn't exist on XRPL, return error with instructions
+        if (!newAddressExists) {
+          // #region agent log
+          const logNewAddressNotActivated = {location:'wallet.service.ts:1118',message:'withdrawWallet: New wallet address not activated on XRPL',data:{userId,walletId:wallet.id,newAddress:newXrplAddress,oldAddress:wallet.xrpl_address,oldBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+          console.error('[DEBUG ERROR]', JSON.stringify(logNewAddressNotActivated));
+          try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logNewAddressNotActivated) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logNewAddressNotActivated)}).catch(()=>{});
+          // #endregion
+          
+          return {
+            success: false,
+            message: `Your wallet has been migrated to a new address (${newXrplAddress}). Please fund this new address with at least 1 XRP to activate it before making withdrawals. ${oldBalance > 0 ? `Note: Your old address (${wallet.xrpl_address}) had ${oldBalance} XRP, but those funds are now inaccessible.` : ''}`,
+            error: 'New wallet address not activated',
+            data: {
+              newAddress: newXrplAddress,
+              oldAddress: wallet.xrpl_address,
+              oldBalance,
+            },
+          };
+        }
       }
 
       let walletSecret: string;
