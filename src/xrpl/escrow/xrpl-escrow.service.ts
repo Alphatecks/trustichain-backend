@@ -44,6 +44,13 @@ export class XRPLEscrowService {
         // #region agent log
         const logDataC = {location:'xrpl-escrow.service.ts:43',message:'createEscrow: About to call Wallet.fromSeed',data:{secretLength:params.walletSecret?.length,secretFirst5:params.walletSecret?.substring(0,5),secretLast5:params.walletSecret?.substring(params.walletSecret.length-5),secretTrimmedLength:params.walletSecret?.trim().length,hasWhitespace:/\s/.test(params.walletSecret),secretCharCodes:params.walletSecret?.substring(0,10).split('').map(c=>c.charCodeAt(0))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'};
         console.log('[DEBUG]', JSON.stringify(logDataC));
+        console.error('[DEBUG]', JSON.stringify(logDataC)); // Also log to stderr
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const logPath = path.join(process.cwd(), 'debug.log');
+          fs.appendFileSync(logPath, JSON.stringify(logDataC) + '\n');
+        } catch (e) {}
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataC)}).catch(()=>{});
         // #endregion
         
@@ -55,12 +62,25 @@ export class XRPLEscrowService {
           // #region agent log
           const logSuccess = {location:'xrpl-escrow.service.ts:48',message:'createEscrow: Wallet.fromSeed succeeded',data:{walletAddress:wallet.address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'};
           console.log('[DEBUG]', JSON.stringify(logSuccess));
+          console.error('[DEBUG]', JSON.stringify(logSuccess)); // Also log to stderr
+          try {
+            const fs = require('fs');
+            const path = require('path');
+            const logPath = path.join(process.cwd(), 'debug.log');
+            fs.appendFileSync(logPath, JSON.stringify(logSuccess) + '\n');
+          } catch (e) {}
           fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSuccess)}).catch(()=>{});
           // #endregion
         } catch (seedError) {
           // #region agent log
           const logError = {location:'xrpl-escrow.service.ts:52',message:'createEscrow: Wallet.fromSeed failed',data:{errorMessage:seedError instanceof Error ? seedError.message : String(seedError),errorName:seedError instanceof Error ? seedError.name : 'Unknown',secretLength:params.walletSecret?.length,trimmedLength:trimmedSecret.length,secretFirst10:params.walletSecret?.substring(0,10),secretLast10:params.walletSecret?.substring(params.walletSecret.length-10),trimmedFirst10:trimmedSecret.substring(0,10),trimmedLast10:trimmedSecret.substring(trimmedSecret.length-10),secretCharCodes:params.walletSecret?.substring(0,15).split('').map(c=>c.charCodeAt(0))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'};
           console.error('[DEBUG ERROR]', JSON.stringify(logError));
+          try {
+            const fs = require('fs');
+            const path = require('path');
+            const logPath = path.join(process.cwd(), 'debug.log');
+            fs.appendFileSync(logPath, JSON.stringify(logError) + '\n');
+          } catch (e) {}
           fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logError)}).catch(()=>{});
           // #endregion
           throw seedError;

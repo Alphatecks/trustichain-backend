@@ -35,11 +35,27 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
   try {
     const fs = require('fs');
     const path = require('path');
-    const logPath = path.join(__dirname, '..', '.cursor', 'debug.log');
-    if (fs.existsSync(logPath)) {
+    // Try multiple possible log file locations
+    const possiblePaths = [
+      path.join(process.cwd(), 'debug.log'),
+      path.join(__dirname, '..', '.cursor', 'debug.log'),
+      path.join(process.cwd(), '.cursor', 'debug.log'),
+      path.join('/tmp', 'debug.log'),
+    ];
+    
+    let logPath: string | null = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        logPath = p;
+        break;
+      }
+    }
+    
+    if (logPath) {
       const logs = fs.readFileSync(logPath, 'utf-8');
       res.status(200).json({
         success: true,
+        logPath,
         logs: logs.split('\n').filter((line: string) => line.trim()).map((line: string) => {
           try {
             return JSON.parse(line);
@@ -52,6 +68,9 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
       res.status(404).json({
         success: false,
         message: 'Log file not found',
+        checkedPaths: possiblePaths,
+        cwd: process.cwd(),
+        __dirname,
       });
     }
   } catch (error) {
@@ -59,6 +78,7 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
       success: false,
       message: 'Error reading logs',
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
   }
 });

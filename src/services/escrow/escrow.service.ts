@@ -164,6 +164,19 @@ export class EscrowService {
    * Create a new escrow
    */
   async createEscrow(userId: string, request: CreateEscrowRequest): Promise<CreateEscrowResponse> {
+      // #region agent log
+      const logEntry = {location:'escrow.service.ts:166',message:'createEscrow: Function entry',data:{userId,hasRequest:!!request,amount:request.amount,currency:request.currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ENTRY'};
+      console.log('[DEBUG ENTRY]', JSON.stringify(logEntry));
+      console.error('[DEBUG ENTRY]', JSON.stringify(logEntry)); // Also log to stderr
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(process.cwd(), 'debug.log');
+        fs.appendFileSync(logPath, JSON.stringify(logEntry) + '\n');
+      } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logEntry)}).catch(()=>{});
+      // #endregion
+    
     try {
       const adminClient = supabaseAdmin || supabase;
 
@@ -358,6 +371,13 @@ export class EscrowService {
       // #region agent log
       const logDataA = {location:'escrow.service.ts:355',message:'createEscrow: Checking platform wallet env vars',data:{hasAddress:!!platformAddress,hasSecret:!!platformSecret,addressLength:platformAddress?.length,secretLength:platformSecret?.length,secretFirst3:platformSecret?.substring(0,3),secretLast3:platformSecret?.substring(platformSecret.length-3),hasNewlines:platformSecret?.includes('\n'),hasCarriageReturn:platformSecret?.includes('\r'),hasSpaces:platformSecret?.includes(' '),hasQuotes:platformSecret?.includes('"')||platformSecret?.includes("'")},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
       console.log('[DEBUG]', JSON.stringify(logDataA));
+      console.error('[DEBUG]', JSON.stringify(logDataA)); // Also log to stderr for better visibility
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(process.cwd(), 'debug.log');
+        fs.appendFileSync(logPath, JSON.stringify(logDataA) + '\n');
+      } catch (e) {}
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataA)}).catch(()=>{});
       // #endregion
 
@@ -372,6 +392,13 @@ export class EscrowService {
       // #region agent log
       const logDataB = {location:'escrow.service.ts:365',message:'createEscrow: Platform wallet env vars validated',data:{address:platformAddress,secretLength:platformSecret.length,secretTrimmedLength:platformSecret.trim().length,secretStartsWithS:platformSecret.startsWith('s'),secretMatchesBase58Pattern:/^[a-zA-Z0-9]+$/.test(platformSecret)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
       console.log('[DEBUG]', JSON.stringify(logDataB));
+      console.error('[DEBUG]', JSON.stringify(logDataB)); // Also log to stderr
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(process.cwd(), 'debug.log');
+        fs.appendFileSync(logPath, JSON.stringify(logDataB) + '\n');
+      } catch (e) {}
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataB)}).catch(()=>{});
       // #endregion
       
@@ -404,6 +431,17 @@ export class EscrowService {
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        // #region agent log
+        const logError = {location:'escrow.service.ts:393',message:'createEscrow: XRPL createEscrow call failed',data:{errorMessage,errorName:error instanceof Error ? error.name : 'Unknown',errorStack:error instanceof Error ? error.stack : undefined,platformAddress,secretLength:trimmedSecret?.length,secretFirst5:trimmedSecret?.substring(0,5)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ERROR'};
+        console.error('[DEBUG ERROR]', JSON.stringify(logError));
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const logPath = path.join(process.cwd(), 'debug.log');
+          fs.appendFileSync(logPath, JSON.stringify(logError) + '\n');
+        } catch (e) {}
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logError)}).catch(()=>{});
+        // #endregion
         console.error('[Escrow Create] Failed to create escrow on XRPL:', errorMessage);
         return {
           success: false,
@@ -545,6 +583,17 @@ export class EscrowService {
         },
       };
     } catch (error) {
+      // #region agent log
+      const logCatch = {location:'escrow.service.ts:catch',message:'createEscrow: Outer catch block',data:{errorMessage:error instanceof Error ? error.message : String(error),errorName:error instanceof Error ? error.name : 'Unknown',errorStack:error instanceof Error ? error.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CATCH'};
+      console.error('[DEBUG CATCH]', JSON.stringify(logCatch));
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(process.cwd(), 'debug.log');
+        fs.appendFileSync(logPath, JSON.stringify(logCatch) + '\n');
+      } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logCatch)}).catch(()=>{});
+      // #endregion
       console.error('Error creating escrow:', error);
       return {
         success: false,
