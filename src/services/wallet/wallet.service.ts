@@ -1109,6 +1109,12 @@ export class WalletService {
       console.log('[DEBUG] withdrawWallet: Updated transaction to completed', {userId,transactionId:transaction.id,updateError:updateResult.error,hasData:!!updateResult.data});
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:854',message:'withdrawWallet: Updated transaction to completed',data:{userId,transactionId:transaction.id,updateError:updateResult.error,hasData:!!updateResult.data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
+      
+      // Check if update succeeded
+      if (updateResult.error) {
+        console.error('[Withdrawal] Failed to update transaction status:', updateResult.error);
+        // Don't fail the withdrawal, but log the error
+      }
 
       // Update wallet balance after withdrawal
       const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
@@ -1187,6 +1193,42 @@ export class WalletService {
         message: error instanceof Error ? error.message : 'Failed to withdraw from wallet',
         error: error instanceof Error ? error.message : 'Failed to withdraw from wallet',
       };
+    }
+  }
+
+  /**
+   * Sync pending withdrawal transactions that have xrpl_tx_hash but are still marked as pending
+   * This fixes old transactions that were created before the status update fix
+   */
+  private async syncPendingWithdrawals(userId: string): Promise<void> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Find pending withdrawal transactions that have an xrpl_tx_hash
+      // These should be marked as completed since they have a transaction hash
+      const { data: pendingWithdrawals } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('type', 'withdrawal')
+        .eq('status', 'pending')
+        .not('xrpl_tx_hash', 'is', null);
+
+      if (!pendingWithdrawals || pendingWithdrawals.length === 0) return;
+
+      // Update all pending withdrawals with xrpl_tx_hash to completed
+      for (const withdrawal of pendingWithdrawals) {
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'completed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', withdrawal.id);
+      }
+    } catch (error) {
+      // Don't throw - this is a background sync
+      console.warn('[Sync] Error syncing pending withdrawals:', error);
     }
   }
 
@@ -1325,7 +1367,8 @@ export class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Sync pending deposits in the background (don't wait for it)
+      // Sync pending transactions in the background (don't wait for it)
+      this.syncPendingWithdrawals(userId).catch(() => {});
       this.syncPendingDeposits(userId).catch(() => {});
 
       // Get transactions
