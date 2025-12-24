@@ -1122,6 +1122,45 @@ export class WalletService {
         })
         .eq('id', wallet.id);
 
+      // Create transaction record for the receiver (if destination is a TrustiChain user)
+      try {
+        const { data: receiverWallet } = await adminClient
+          .from('wallets')
+          .select('user_id')
+          .eq('xrpl_address', request.destinationAddress)
+          .maybeSingle();
+
+        if (receiverWallet && receiverWallet.user_id !== userId) {
+          // Destination is a TrustiChain user - create deposit transaction for them
+          await adminClient
+            .from('transactions')
+            .insert({
+              user_id: receiverWallet.user_id,
+              type: 'deposit',
+              amount_xrp: amountXrp,
+              amount_usd: amountUsd,
+              xrpl_tx_hash: xrplTxHash,
+              status: 'completed',
+              description: `Deposit from ${wallet.xrpl_address}`,
+            });
+
+          // Update receiver's wallet balance
+          const receiverBalances = await xrplWalletService.getAllBalances(request.destinationAddress);
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: receiverBalances.xrp,
+              balance_usdt: receiverBalances.usdt,
+              balance_usdc: receiverBalances.usdc,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', receiverWallet.user_id);
+        }
+      } catch (receiverError) {
+        // Log but don't fail the withdrawal if receiver transaction creation fails
+        console.warn('[Withdrawal] Failed to create transaction for receiver:', receiverError);
+      }
+
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:863',message:'withdrawWallet: Returning success response',data:{userId,transactionId:transaction.id,xrplTxHash,status:'completed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
