@@ -444,8 +444,11 @@ export class XRPLEscrowService {
         const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
         const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
 
+        // Use the escrow object's Sequence for EscrowFinish (this is what OfferSequence should reference)
+        const escrowObjectSequence = (escrowObject as any).Sequence as number;
+
         return {
-          sequence: escrowSequence,
+          sequence: escrowObjectSequence || escrowSequence, // Prefer escrow object sequence, fallback to transaction sequence
           amount,
           destination: (escrowObject as any).Destination || '',
           finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
