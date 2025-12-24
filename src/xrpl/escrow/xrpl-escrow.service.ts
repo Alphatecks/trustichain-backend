@@ -41,7 +41,30 @@ export class XRPLEscrowService {
       await client.connect();
 
       try {
-        const wallet = Wallet.fromSeed(params.walletSecret);
+        // #region agent log
+        const logDataC = {location:'xrpl-escrow.service.ts:43',message:'createEscrow: About to call Wallet.fromSeed',data:{secretLength:params.walletSecret?.length,secretFirst5:params.walletSecret?.substring(0,5),secretLast5:params.walletSecret?.substring(params.walletSecret.length-5),secretTrimmedLength:params.walletSecret?.trim().length,hasWhitespace:/\s/.test(params.walletSecret),secretCharCodes:params.walletSecret?.substring(0,10).split('').map(c=>c.charCodeAt(0))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'};
+        console.log('[DEBUG]', JSON.stringify(logDataC));
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataC)}).catch(()=>{});
+        // #endregion
+        
+        // Trim secret before using it
+        const trimmedSecret = params.walletSecret.trim();
+        let wallet;
+        try {
+          wallet = Wallet.fromSeed(trimmedSecret);
+          // #region agent log
+          const logSuccess = {location:'xrpl-escrow.service.ts:48',message:'createEscrow: Wallet.fromSeed succeeded',data:{walletAddress:wallet.address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'};
+          console.log('[DEBUG]', JSON.stringify(logSuccess));
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSuccess)}).catch(()=>{});
+          // #endregion
+        } catch (seedError) {
+          // #region agent log
+          const logError = {location:'xrpl-escrow.service.ts:52',message:'createEscrow: Wallet.fromSeed failed',data:{errorMessage:seedError instanceof Error ? seedError.message : String(seedError),errorName:seedError instanceof Error ? seedError.name : 'Unknown',secretLength:params.walletSecret?.length,trimmedLength:trimmedSecret.length,secretFirst10:params.walletSecret?.substring(0,10),secretLast10:params.walletSecret?.substring(params.walletSecret.length-10),trimmedFirst10:trimmedSecret.substring(0,10),trimmedLast10:trimmedSecret.substring(trimmedSecret.length-10),secretCharCodes:params.walletSecret?.substring(0,15).split('').map(c=>c.charCodeAt(0))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'};
+          console.error('[DEBUG ERROR]', JSON.stringify(logError));
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logError)}).catch(()=>{});
+          // #endregion
+          throw seedError;
+        }
         
         const escrowCreate: any = {
           TransactionType: 'EscrowCreate',
@@ -61,7 +84,13 @@ export class XRPLEscrowService {
         }
 
         const prepared = await client.autofill(escrowCreate);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:63',message:'createEscrow: Transaction prepared, about to sign',data:{fromAddress:params.fromAddress,toAddress:params.toAddress,amountXrp:params.amountXrp},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         const signed = wallet.sign(prepared);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:66',message:'createEscrow: Transaction signed, about to submit',data:{txBlobLength:signed.tx_blob?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         const result = await client.submitAndWait(signed.tx_blob);
 
         await client.disconnect();

@@ -355,12 +355,30 @@ export class EscrowService {
       const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
       const platformSecret = process.env.XRPL_PLATFORM_SECRET;
 
+      // #region agent log
+      const logDataA = {location:'escrow.service.ts:355',message:'createEscrow: Checking platform wallet env vars',data:{hasAddress:!!platformAddress,hasSecret:!!platformSecret,addressLength:platformAddress?.length,secretLength:platformSecret?.length,secretFirst3:platformSecret?.substring(0,3),secretLast3:platformSecret?.substring(platformSecret.length-3),hasNewlines:platformSecret?.includes('\n'),hasCarriageReturn:platformSecret?.includes('\r'),hasSpaces:platformSecret?.includes(' '),hasQuotes:platformSecret?.includes('"')||platformSecret?.includes("'")},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
+      console.log('[DEBUG]', JSON.stringify(logDataA));
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataA)}).catch(()=>{});
+      // #endregion
+
       if (!platformAddress || !platformSecret) {
         return {
           success: false,
           message: 'Platform wallet not configured. XRPL_PLATFORM_ADDRESS and XRPL_PLATFORM_SECRET must be set.',
           error: 'Platform wallet not configured',
         };
+      }
+
+      // #region agent log
+      const logDataB = {location:'escrow.service.ts:365',message:'createEscrow: Platform wallet env vars validated',data:{address:platformAddress,secretLength:platformSecret.length,secretTrimmedLength:platformSecret.trim().length,secretStartsWithS:platformSecret.startsWith('s'),secretMatchesBase58Pattern:/^[a-zA-Z0-9]+$/.test(platformSecret)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
+      console.log('[DEBUG]', JSON.stringify(logDataB));
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataB)}).catch(()=>{});
+      // #endregion
+      
+      // Trim the secret to remove any whitespace issues
+      const trimmedSecret = platformSecret.trim();
+      if (trimmedSecret !== platformSecret) {
+        console.warn('[Escrow Create] Platform secret had whitespace, using trimmed version');
       }
 
       // Create escrow on XRPL using platform wallet (users have deposited funds to platform wallet)
@@ -377,7 +395,7 @@ export class EscrowService {
           fromAddress: platformAddress,
           toAddress: counterpartyWalletAddress,
           amountXrp,
-          walletSecret: platformSecret,
+          walletSecret: trimmedSecret, // Use trimmed secret
         });
         console.log('[Escrow Create] Escrow created on XRPL:', {
           txHash: xrplTxHash,

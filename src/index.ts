@@ -30,6 +30,39 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// Debug endpoint to retrieve logs (for debugging on Render)
+app.get('/debug/logs', (_req: Request, res: Response) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '..', '.cursor', 'debug.log');
+    if (fs.existsSync(logPath)) {
+      const logs = fs.readFileSync(logPath, 'utf-8');
+      res.status(200).json({
+        success: true,
+        logs: logs.split('\n').filter(line => line.trim()).map(line => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return line;
+          }
+        }),
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: 'Log file not found',
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error reading logs',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
