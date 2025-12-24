@@ -1094,7 +1094,10 @@ export class WalletService {
 
       // Update transaction to completed only after successful XRPL submission
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1095',message:'withdrawWallet: Before update - verifying transaction exists',data:{userId,transactionId:transaction.id,transactionStatus:transaction.status,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+      const logBefore = {location:'wallet.service.ts:1095',message:'withdrawWallet: Before update - verifying transaction exists',data:{userId,transactionId:transaction.id,transactionStatus:transaction.status,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'};
+      console.log('[DEBUG]', JSON.stringify(logBefore));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logBefore) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logBefore)}).catch(()=>{});
       // #endregion
       
       // Verify transaction exists before update
@@ -1105,11 +1108,17 @@ export class WalletService {
         .single();
       
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1103',message:'withdrawWallet: Transaction state before update',data:{userId,transactionId:transaction.id,found:!!txBeforeUpdate,currentStatus:txBeforeUpdate?.status,currentHash:txBeforeUpdate?.xrpl_tx_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+      const logBeforeState = {location:'wallet.service.ts:1103',message:'withdrawWallet: Transaction state before update',data:{userId,transactionId:transaction.id,found:!!txBeforeUpdate,currentStatus:txBeforeUpdate?.status,currentHash:txBeforeUpdate?.xrpl_tx_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'};
+      console.log('[DEBUG]', JSON.stringify(logBeforeState));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logBeforeState) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logBeforeState)}).catch(()=>{});
       // #endregion
       
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1107',message:'withdrawWallet: About to update transaction to completed',data:{userId,transactionId:transaction.id,xrplTxHash,updateFields:{xrpl_tx_hash:xrplTxHash,status:'completed'}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+      const logAboutToUpdate = {location:'wallet.service.ts:1107',message:'withdrawWallet: About to update transaction to completed',data:{userId,transactionId:transaction.id,xrplTxHash,updateFields:{xrpl_tx_hash:xrplTxHash,status:'completed'}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'};
+      console.log('[DEBUG]', JSON.stringify(logAboutToUpdate));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logAboutToUpdate) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logAboutToUpdate)}).catch(()=>{});
       // #endregion
       const updateResult = await adminClient
         .from('transactions')
@@ -1122,7 +1131,10 @@ export class WalletService {
         .select();
       
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1118',message:'withdrawWallet: Update result',data:{userId,transactionId:transaction.id,hasError:!!updateResult.error,error:updateResult.error,updatedCount:updateResult.data?.length,updatedStatus:updateResult.data?.[0]?.status,updatedHash:updateResult.data?.[0]?.xrpl_tx_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+      const logUpdateResult = {location:'wallet.service.ts:1118',message:'withdrawWallet: Update result',data:{userId,transactionId:transaction.id,hasError:!!updateResult.error,error:updateResult.error,updatedCount:updateResult.data?.length,updatedStatus:updateResult.data?.[0]?.status,updatedHash:updateResult.data?.[0]?.xrpl_tx_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'};
+      console.log('[DEBUG]', JSON.stringify(logUpdateResult));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logUpdateResult) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logUpdateResult)}).catch(()=>{});
       // #endregion
       
       // Verify update actually persisted
@@ -1133,14 +1145,20 @@ export class WalletService {
         .single();
       
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1128',message:'withdrawWallet: Transaction state after update',data:{userId,transactionId:transaction.id,found:!!txAfterUpdate,actualStatus:txAfterUpdate?.status,actualHash:txAfterUpdate?.xrpl_tx_hash,updatePersisted:txAfterUpdate?.status==='completed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+      const logAfterState = {location:'wallet.service.ts:1128',message:'withdrawWallet: Transaction state after update',data:{userId,transactionId:transaction.id,found:!!txAfterUpdate,actualStatus:txAfterUpdate?.status,actualHash:txAfterUpdate?.xrpl_tx_hash,updatePersisted:txAfterUpdate?.status==='completed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'};
+      console.log('[DEBUG]', JSON.stringify(logAfterState));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logAfterState) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logAfterState)}).catch(()=>{});
       // #endregion
       
       // Check if update succeeded
       if (updateResult.error) {
         console.error('[Withdrawal] Failed to update transaction status:', updateResult.error);
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1135',message:'withdrawWallet: Update failed with error',data:{userId,transactionId:transaction.id,error:updateResult.error,errorMessage:updateResult.error?.message,errorCode:updateResult.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+        const logUpdateError = {location:'wallet.service.ts:1135',message:'withdrawWallet: Update failed with error',data:{userId,transactionId:transaction.id,error:updateResult.error,errorMessage:updateResult.error?.message,errorCode:updateResult.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'};
+        console.error('[DEBUG ERROR]', JSON.stringify(logUpdateError));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logUpdateError) + '\n'); } catch (e) {}
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logUpdateError)}).catch(()=>{});
         // #endregion
       }
 
@@ -1233,7 +1251,10 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
 
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1203',message:'syncPendingWithdrawals: Entry',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+      const logSyncEntry = {location:'wallet.service.ts:1203',message:'syncPendingWithdrawals: Entry',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'};
+      console.log('[DEBUG]', JSON.stringify(logSyncEntry));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logSyncEntry) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSyncEntry)}).catch(()=>{});
       // #endregion
 
       // Find pending withdrawal transactions that have an xrpl_tx_hash
@@ -1247,12 +1268,18 @@ export class WalletService {
         .not('xrpl_tx_hash', 'is', null);
 
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1215',message:'syncPendingWithdrawals: Query result',data:{userId,foundCount:pendingWithdrawals?.length,hasError:!!queryError,error:queryError,transactionIds:pendingWithdrawals?.map(t=>t.id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+      const logSyncQuery = {location:'wallet.service.ts:1215',message:'syncPendingWithdrawals: Query result',data:{userId,foundCount:pendingWithdrawals?.length,hasError:!!queryError,error:queryError,transactionIds:pendingWithdrawals?.map(t=>t.id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'};
+      console.log('[DEBUG]', JSON.stringify(logSyncQuery));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logSyncQuery) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSyncQuery)}).catch(()=>{});
       // #endregion
 
       if (!pendingWithdrawals || pendingWithdrawals.length === 0) {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1219',message:'syncPendingWithdrawals: No pending withdrawals found',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+        const logSyncNone = {location:'wallet.service.ts:1219',message:'syncPendingWithdrawals: No pending withdrawals found',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'};
+        console.log('[DEBUG]', JSON.stringify(logSyncNone));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logSyncNone) + '\n'); } catch (e) {}
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSyncNone)}).catch(()=>{});
         // #endregion
         return;
       }
@@ -1260,7 +1287,10 @@ export class WalletService {
       // Update all pending withdrawals with xrpl_tx_hash to completed
       for (const withdrawal of pendingWithdrawals) {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1224',message:'syncPendingWithdrawals: About to update withdrawal',data:{userId,withdrawalId:withdrawal.id,currentStatus:withdrawal.status,xrplTxHash:withdrawal.xrpl_tx_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+        const logSyncUpdate = {location:'wallet.service.ts:1224',message:'syncPendingWithdrawals: About to update withdrawal',data:{userId,withdrawalId:withdrawal.id,currentStatus:withdrawal.status,xrplTxHash:withdrawal.xrpl_tx_hash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'};
+        console.log('[DEBUG]', JSON.stringify(logSyncUpdate));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logSyncUpdate) + '\n'); } catch (e) {}
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSyncUpdate)}).catch(()=>{});
         // #endregion
         
         const updateResult = await adminClient
@@ -1273,14 +1303,20 @@ export class WalletService {
           .select();
         
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1233',message:'syncPendingWithdrawals: Update result',data:{userId,withdrawalId:withdrawal.id,hasError:!!updateResult.error,error:updateResult.error,updatedCount:updateResult.data?.length,updatedStatus:updateResult.data?.[0]?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+        const logSyncResult = {location:'wallet.service.ts:1233',message:'syncPendingWithdrawals: Update result',data:{userId,withdrawalId:withdrawal.id,hasError:!!updateResult.error,error:updateResult.error,updatedCount:updateResult.data?.length,updatedStatus:updateResult.data?.[0]?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'};
+        console.log('[DEBUG]', JSON.stringify(logSyncResult));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logSyncResult) + '\n'); } catch (e) {}
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSyncResult)}).catch(()=>{});
         // #endregion
       }
     } catch (error) {
       // Don't throw - this is a background sync
       console.warn('[Sync] Error syncing pending withdrawals:', error);
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1240',message:'syncPendingWithdrawals: Exception caught',data:{userId,error:error instanceof Error ? error.message : String(error),errorStack:error instanceof Error ? error.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+      const logSyncError = {location:'wallet.service.ts:1240',message:'syncPendingWithdrawals: Exception caught',data:{userId,error:error instanceof Error ? error.message : String(error),errorStack:error instanceof Error ? error.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'};
+      console.error('[DEBUG ERROR]', JSON.stringify(logSyncError));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logSyncError) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logSyncError)}).catch(()=>{});
       // #endregion
     }
   }
@@ -1421,7 +1457,10 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
 
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:1340',message:'getTransactions: Entry - starting sync',data:{userId,limit,offset},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+      const logGetTxEntry = {location:'wallet.service.ts:1340',message:'getTransactions: Entry - starting sync',data:{userId,limit,offset},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'};
+      console.log('[DEBUG]', JSON.stringify(logGetTxEntry));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logGetTxEntry) + '\n'); } catch (e) {}
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logGetTxEntry)}).catch(()=>{});
       // #endregion
 
       // Sync pending transactions in the background (don't wait for it)
