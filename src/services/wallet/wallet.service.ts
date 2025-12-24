@@ -1096,7 +1096,7 @@ export class WalletService {
       // #region agent log
       const logBefore = {location:'wallet.service.ts:1095',message:'withdrawWallet: Before update - verifying transaction exists',data:{userId,transactionId:transaction.id,transactionStatus:transaction.status,xrplTxHash},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'};
       console.log('[DEBUG]', JSON.stringify(logBefore));
-      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logBefore) + '\n'); } catch (e) {}
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logBefore) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logBefore)}).catch(()=>{});
       // #endregion
       

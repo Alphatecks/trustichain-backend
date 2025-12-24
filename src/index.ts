@@ -30,18 +30,93 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// Debug endpoint to test log writing (for debugging on Render)
+app.get('/debug/test-write', (_req: Request, res: Response) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const testLogPath = path.join(process.cwd(), 'debug.log');
+    const testEntry = {
+      location: 'index.ts:debug/test-write',
+      message: 'Test log entry from debug endpoint',
+      data: {
+        timestamp: new Date().toISOString(),
+        cwd: process.cwd(),
+        __dirname,
+        testPath: testLogPath,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-test',
+      runId: 'test-write',
+    };
+    
+    try {
+      fs.appendFileSync(testLogPath, JSON.stringify(testEntry) + '\n');
+      res.status(200).json({
+        success: true,
+        message: 'Test log entry written successfully',
+        logPath: testLogPath,
+        testEntry,
+        fileExists: fs.existsSync(testLogPath),
+        canRead: (() => {
+          try {
+            fs.readFileSync(testLogPath, 'utf-8');
+            return true;
+          } catch {
+            return false;
+          }
+        })(),
+      });
+    } catch (writeError) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to write test log entry',
+        error: writeError instanceof Error ? writeError.message : String(writeError),
+        logPath: testLogPath,
+        cwd: process.cwd(),
+        __dirname,
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error in test write endpoint',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 // Debug endpoint to retrieve logs (for debugging on Render)
 app.get('/debug/logs', (_req: Request, res: Response) => {
   try {
     const fs = require('fs');
     const path = require('path');
-    // Try multiple possible log file locations
+    // Try multiple possible log file locations (prioritize process.cwd() for Render)
     const possiblePaths = [
-      path.join(process.cwd(), 'debug.log'),
+      path.join(process.cwd(), 'debug.log'), // Primary path for Render
+      path.join(__dirname, 'debug.log'), // If running from dist/
+      path.join(__dirname, '..', 'debug.log'), // Parent of dist/
       path.join(__dirname, '..', '.cursor', 'debug.log'),
       path.join(process.cwd(), '.cursor', 'debug.log'),
       path.join('/tmp', 'debug.log'),
     ];
+    
+    // Check which paths exist
+    const pathStatus = possiblePaths.map(p => ({
+      path: p,
+      exists: fs.existsSync(p),
+      readable: (() => {
+        try {
+          if (fs.existsSync(p)) {
+            fs.accessSync(p, fs.constants.R_OK);
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      })(),
+    }));
     
     let logPath: string | null = null;
     for (const p of possiblePaths) {
@@ -53,24 +128,31 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
     
     if (logPath) {
       const logs = fs.readFileSync(logPath, 'utf-8');
+      const logLines = logs.split('\n').filter((line: string) => line.trim());
       res.status(200).json({
         success: true,
         logPath,
-        logs: logs.split('\n').filter((line: string) => line.trim()).map((line: string) => {
+        logCount: logLines.length,
+        logs: logLines.map((line: string) => {
           try {
             return JSON.parse(line);
           } catch {
             return line;
           }
         }),
+        pathStatus, // Include path checking info for debugging
+        cwd: process.cwd(),
+        __dirname,
       });
     } else {
       res.status(404).json({
         success: false,
         message: 'Log file not found',
         checkedPaths: possiblePaths,
+        pathStatus,
         cwd: process.cwd(),
         __dirname,
+        hint: 'Try calling /debug/test-write first to create the log file',
       });
     }
   } catch (error) {
@@ -79,6 +161,8 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
       message: 'Error reading logs',
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
+      cwd: process.cwd(),
+      __dirname,
     });
   }
 });
