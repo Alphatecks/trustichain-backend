@@ -410,10 +410,22 @@ export class EscrowService {
 
       // Create escrow on XRPL using platform wallet (users have deposited funds to platform wallet)
       // The platform wallet signs the transaction directly, no XUMM needed
+      // XRPL requires either FinishAfter or CancelAfter to be specified
+      // Use expectedReleaseDate if provided, otherwise set a default (30 days from now)
+      let finishAfter: number | undefined;
+      if (request.expectedReleaseDate) {
+        finishAfter = Math.floor(new Date(request.expectedReleaseDate).getTime() / 1000);
+      } else {
+        // Default: 30 days from now (allows escrow to be released after this time)
+        // This satisfies XRPL's requirement while allowing reasonable release time
+        finishAfter = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
+      }
+
       console.log('[Escrow Create] Creating escrow on XRPL using platform wallet:', {
         platformAddress,
         toAddress: counterpartyWalletAddress,
         amountXrp,
+        finishAfter: new Date(finishAfter * 1000).toISOString(),
       });
 
       let xrplTxHash: string;
@@ -422,6 +434,7 @@ export class EscrowService {
           fromAddress: platformAddress,
           toAddress: counterpartyWalletAddress,
           amountXrp,
+          finishAfter, // XRPL requires either FinishAfter or CancelAfter
           walletSecret: trimmedSecret, // Use trimmed secret
         });
         console.log('[Escrow Create] Escrow created on XRPL:', {
