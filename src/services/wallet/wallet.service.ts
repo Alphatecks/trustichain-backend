@@ -849,7 +849,7 @@ export class WalletService {
       try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logWalletQueryStart) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
       fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logWalletQueryStart)}).catch(()=>{});
       // #endregion
-      const { data: wallet, error: walletQueryError } = await adminClient
+      let { data: wallet, error: walletQueryError } = await adminClient
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
