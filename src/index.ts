@@ -40,7 +40,7 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
       const logs = fs.readFileSync(logPath, 'utf-8');
       res.status(200).json({
         success: true,
-        logs: logs.split('\n').filter(line => line.trim()).map(line => {
+        logs: logs.split('\n').filter((line: string) => line.trim()).map((line: string) => {
           try {
             return JSON.parse(line);
           } catch {
