@@ -1053,18 +1053,68 @@ export class WalletService {
       // #endregion
 
       // Get and decrypt wallet secret for signing withdrawal
+      // If wallet doesn't have a secret (old wallet created before encrypted_wallet_secret feature),
+      // generate a new wallet and update the record
       if (!wallet.encrypted_wallet_secret) {
         // #region agent log
-        const logNoSecret = {location:'wallet.service.ts:1040',message:'withdrawWallet: Wallet secret not available',data:{userId,walletId:wallet.id,walletAddress:wallet.xrpl_address,walletCreatedAt:wallet.created_at,walletUpdatedAt:wallet.updated_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
-        console.error('[DEBUG ERROR]', JSON.stringify(logNoSecret));
+        const logNoSecret = {location:'wallet.service.ts:1056',message:'withdrawWallet: Wallet secret not available - generating new wallet',data:{userId,walletId:wallet.id,oldWalletAddress:wallet.xrpl_address,walletCreatedAt:wallet.created_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+        console.log('[DEBUG]', JSON.stringify(logNoSecret));
         try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logNoSecret) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
         fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logNoSecret)}).catch(()=>{});
         // #endregion
-        return {
-          success: false,
-          message: 'Wallet secret not available. Cannot process withdrawal.',
-          error: 'Wallet secret not available',
-        };
+        
+        // Check if old wallet address has balance
+        let oldBalance = 0;
+        try {
+          oldBalance = await xrplWalletService.getBalance(wallet.xrpl_address);
+        } catch (error) {
+          console.warn('[Withdrawal] Could not check old wallet balance:', error);
+        }
+        
+        // Generate new wallet with secret
+        const { address: newXrplAddress, secret: newWalletSecret } = await xrplWalletService.generateWallet();
+        const encryptedSecret = encryptionService.encrypt(newWalletSecret);
+        
+        // Update wallet with new address and secret
+        const { data: updatedWallet, error: updateError } = await adminClient
+          .from('wallets')
+          .update({
+            xrpl_address: newXrplAddress,
+            encrypted_wallet_secret: encryptedSecret,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', wallet.id)
+          .select()
+          .single();
+        
+        if (updateError || !updatedWallet) {
+          // #region agent log
+          const logUpdateFailed = {location:'wallet.service.ts:1080',message:'withdrawWallet: Failed to update wallet with new secret',data:{userId,walletId:wallet.id,error:updateError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+          console.error('[DEBUG ERROR]', JSON.stringify(logUpdateFailed));
+          try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logUpdateFailed) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logUpdateFailed)}).catch(()=>{});
+          // #endregion
+          return {
+            success: false,
+            message: 'Failed to migrate wallet. Please contact support.',
+            error: 'Wallet migration failed',
+          };
+        }
+        
+        // #region agent log
+        const logWalletMigrated = {location:'wallet.service.ts:1093',message:'withdrawWallet: Wallet migrated to new address with secret',data:{userId,walletId:wallet.id,oldAddress:wallet.xrpl_address,newAddress:newXrplAddress,oldBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+        console.log('[DEBUG]', JSON.stringify(logWalletMigrated));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logWalletMigrated) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logWalletMigrated)}).catch(()=>{});
+        // #endregion
+        
+        // Update wallet reference to use the new wallet
+        wallet = updatedWallet;
+        
+        // Warn if old address had balance (funds are now inaccessible)
+        if (oldBalance > 0) {
+          console.warn(`[WARNING] Wallet ${wallet.id} was migrated from old address to ${newXrplAddress}, but old address had ${oldBalance} XRP. Funds on old address are now inaccessible.`);
+        }
       }
 
       let walletSecret: string;
