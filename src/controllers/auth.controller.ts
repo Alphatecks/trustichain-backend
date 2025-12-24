@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, LogoutResponse } from '../types/api/auth.types';
 
 export class AuthController {
   /**
@@ -574,6 +574,42 @@ export class AuthController {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.status(500).send(this.getErrorPage('Error', errorMessage));
+    }
+  }
+
+  /**
+   * Logout a user
+   * POST /api/auth/logout
+   */
+  async logout(req: Request<{}, LogoutResponse>, res: Response<LogoutResponse>): Promise<void> {
+    try {
+      // Get token from Authorization header
+      const authHeader = req.headers.authorization;
+      
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({
+          success: false,
+          message: 'Authorization token required',
+          error: 'Unauthorized',
+        });
+        return;
+      }
+
+      const accessToken = authHeader.substring(7); // Remove 'Bearer ' prefix
+      const result = await authService.logout(accessToken);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
     }
   }
 }

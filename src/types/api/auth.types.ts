@@ -79,4 +79,10 @@ export interface GoogleOAuthCallbackResponse {
   error?: string;
 }
 
+export interface LogoutResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 

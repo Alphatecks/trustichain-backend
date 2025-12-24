@@ -1,5 +1,5 @@
 import { supabase, supabaseAdmin } from '../config/supabase';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse } from '../types/api/auth.types';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse, LogoutResponse } from '../types/api/auth.types';
 import { emailService } from './email.service';
 import crypto from 'crypto';
 
@@ -566,6 +566,59 @@ export class AuthService {
           accessToken: sessionData.session.access_token,
           refreshToken: sessionData.session.refresh_token,
         },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return {
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  /**
+   * Logout a user
+   * @param accessToken - User's access token from Authorization header
+   * @returns Logout response
+   */
+  async logout(accessToken: string): Promise<LogoutResponse> {
+    try {
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        return {
+          success: false,
+          message: 'Server configuration error',
+          error: 'Missing Supabase configuration',
+        };
+      }
+
+      // Create a Supabase client with the user's token to sign them out
+      const { createClient } = await import('@supabase/supabase-js');
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+      });
+
+      // Sign out the user session
+      const { error } = await userClient.auth.signOut();
+
+      if (error) {
+        return {
+          success: false,
+          message: 'Failed to logout',
+          error: error.message,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Logged out successfully',
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';

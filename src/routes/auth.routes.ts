@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { validateRegister, validateLogin } from '../middleware/validation';
 import { asyncHandler } from '../utils/asyncHandler';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
@@ -100,6 +101,16 @@ router.get('/google/callback', async (req, res) => {
     });
   }
 });
+
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Logout a user (invalidates session)
+ * @access  Private (requires authentication)
+ * @header  Authorization: Bearer <access_token>
+ */
+router.post('/logout', authenticate, asyncHandler(async (req, res) => {
+  await authController.logout(req, res);
+}));
 
 export default router;
 
