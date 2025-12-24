@@ -843,15 +843,31 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
 
       // Get wallet
-      const { data: wallet } = await adminClient
+      // #region agent log
+      const logWalletQueryStart = {location:'wallet.service.ts:846',message:'withdrawWallet: Querying wallet from database',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W2'};
+      console.log('[DEBUG]', JSON.stringify(logWalletQueryStart));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logWalletQueryStart) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logWalletQueryStart)}).catch(()=>{});
+      // #endregion
+      const { data: wallet, error: walletQueryError } = await adminClient
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
         .single();
+      
+      // #region agent log
+      const logWalletQueryResult = {location:'wallet.service.ts:857',message:'withdrawWallet: Wallet query result',data:{userId,found:!!wallet,hasError:!!walletQueryError,error:walletQueryError?.message,walletId:wallet?.id,walletAddress:wallet?.xrpl_address,hasEncryptedSecret:!!wallet?.encrypted_wallet_secret,encryptedSecretLength:wallet?.encrypted_wallet_secret?.length,walletFields:wallet ? Object.keys(wallet) : []},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W2'};
+      console.log('[DEBUG]', JSON.stringify(logWalletQueryResult));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logWalletQueryResult) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logWalletQueryResult)}).catch(()=>{});
+      // #endregion
 
       if (!wallet) {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:737',message:'withdrawWallet: Wallet not found',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        const logNoWallet = {location:'wallet.service.ts:866',message:'withdrawWallet: Wallet not found',data:{userId,error:walletQueryError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W2'};
+        console.error('[DEBUG ERROR]', JSON.stringify(logNoWallet));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logNoWallet) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logNoWallet)}).catch(()=>{});
         // #endregion
         return {
           success: false,
@@ -1029,8 +1045,21 @@ export class WalletService {
         };
       }
 
+      // #region agent log
+      const logWalletCheck = {location:'wallet.service.ts:1032',message:'withdrawWallet: Checking wallet secret availability',data:{userId,walletId:wallet.id,walletAddress:wallet.xrpl_address,hasEncryptedSecret:!!wallet.encrypted_wallet_secret,encryptedSecretLength:wallet.encrypted_wallet_secret?.length,walletFields:Object.keys(wallet)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+      console.log('[DEBUG]', JSON.stringify(logWalletCheck));
+      try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logWalletCheck) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logWalletCheck)}).catch(()=>{});
+      // #endregion
+
       // Get and decrypt wallet secret for signing withdrawal
       if (!wallet.encrypted_wallet_secret) {
+        // #region agent log
+        const logNoSecret = {location:'wallet.service.ts:1040',message:'withdrawWallet: Wallet secret not available',data:{userId,walletId:wallet.id,walletAddress:wallet.xrpl_address,walletCreatedAt:wallet.created_at,walletUpdatedAt:wallet.updated_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W1'};
+        console.error('[DEBUG ERROR]', JSON.stringify(logNoSecret));
+        try { const fs = require('fs'); const path = require('path'); const logPath = path.join(process.cwd(), 'debug.log'); fs.appendFileSync(logPath, JSON.stringify(logNoSecret) + '\n'); } catch (e) { console.error('[DEBUG] Failed to write log to file:', e); }
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logNoSecret)}).catch(()=>{});
+        // #endregion
         return {
           success: false,
           message: 'Wallet secret not available. Cannot process withdrawal.',
