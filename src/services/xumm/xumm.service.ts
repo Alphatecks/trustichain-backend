@@ -71,7 +71,7 @@ export class XUMMService {
     this.API_SECRET = process.env.XUMM_API_SECRET || '';
 
     if (!this.API_KEY || !this.API_SECRET) {
-      console.warn('XUMM API credentials not configured. Wallet signing will not work.');
+      console.warn('XUMM API credentials not configured. Wallet signing will not work as expected.');
     }
   }
 

@@ -1,0 +1,110 @@
+import { Request, Response } from 'express';
+import {
+  GetDisputeSummaryResponse,
+  GetDisputesResponse,
+  GetDisputeDetailResponse,
+  DisputeStatus,
+} from '../types/api/dispute.types';
+import { disputeService } from '../services/dispute/dispute.service';
+
+export class DisputeController {
+  /**
+   * Get dispute summary metrics for dashboard
+   * GET /api/disputes/summary
+   */
+  async getSummary(req: Request, res: Response<GetDisputeSummaryResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const month = (req.query.month as string | undefined) || undefined; // "YYYY-MM"
+
+      const result = await disputeService.getSummary(userId, month);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get list of disputes for table
+   * GET /api/disputes
+   */
+  async getDisputes(req: Request, res: Response<GetDisputesResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const statusParam = (req.query.status as string | undefined) || 'all';
+      const month = (req.query.month as string | undefined) || undefined; // "YYYY-MM"
+      const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : 10;
+
+      const status =
+        statusParam === 'all'
+          ? 'all'
+          : (statusParam as DisputeStatus | 'all');
+
+      const result = await disputeService.getDisputes({
+        userId,
+        status,
+        month,
+        page,
+        pageSize,
+      });
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get dispute detail by ID
+   * GET /api/disputes/:id
+   */
+  async getDisputeById(
+    req: Request<{ id: string }>,
+    res: Response<GetDisputeDetailResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.id;
+
+      const result = await disputeService.getDisputeById(userId, disputeId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' ? 404 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+}
+
+export const disputeController = new DisputeController();
+
+
