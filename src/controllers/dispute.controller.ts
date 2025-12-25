@@ -79,7 +79,7 @@ export class DisputeController {
    * GET /api/disputes/:id
    */
   async getDisputeById(
-    req: Request<{ id: string }>,
+    req: Request,
     res: Response<GetDisputeDetailResponse>
   ): Promise<void> {
     try {

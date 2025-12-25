@@ -116,8 +116,6 @@ export class DisputeService {
         };
       }
 
-      const now = new Date();
-
       const computeMetrics = (rows: any[]) => {
         const total = rows.length;
         const active = rows.filter(d => d.status === 'pending' || d.status === 'active').length;
@@ -209,17 +207,19 @@ export class DisputeService {
 
       const { data: disputes, error: listError } = await query;
 
-      const { count } = await adminClient
+      // Build count query separately (no .modify in Supabase client)
+      let countQuery = adminClient
         .from('disputes')
         .select('*', { count: 'exact', head: true })
         .or(`initiator_user_id.eq.${userId},respondent_user_id.eq.${userId}`)
         .gte('opened_at', start.toISOString())
-        .lte('opened_at', end.toISOString())
-        .modify(q => {
-          if (status !== 'all') {
-            q.eq('status', status);
-          }
-        });
+        .lte('opened_at', end.toISOString());
+
+      if (status !== 'all') {
+        countQuery = countQuery.eq('status', status);
+      }
+
+      const { count } = await countQuery;
 
       if (listError) {
         return {
