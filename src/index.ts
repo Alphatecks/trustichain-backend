@@ -11,6 +11,7 @@ import exchangeRoutes from './routes/exchange.routes';
 import userRoutes from './routes/user.routes';
 import transactionsRoutes from './routes/transactions.routes';
 import disputeRoutes from './routes/dispute.routes';
+import savingsRoutes from './routes/savings.routes';
 
 dotenv.config();
 
@@ -179,6 +180,7 @@ app.use('/api/exchange', exchangeRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/disputes', disputeRoutes);
+app.use('/api/savings', savingsRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
