@@ -404,28 +404,50 @@ export class DisputeService {
 
       // Validate escrow exists and user has access
       // Accept both UUID and formatted ID (#ESC-YYYY-XXX)
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.escrowId);
-      const isFormattedId = /^#ESC-\d{4}-\d{3}$/.test(request.escrowId);
+      // Trim whitespace and handle case variations
+      const escrowIdInput = (request.escrowId || '').trim();
+      
+      console.log('[DEBUG] createDispute: Escrow ID validation', {
+        original: request.escrowId,
+        trimmed: escrowIdInput,
+        length: escrowIdInput.length,
+        firstChar: escrowIdInput[0],
+        lastChar: escrowIdInput[escrowIdInput.length - 1],
+      });
+      
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(escrowIdInput);
+      // More flexible regex - allow case variations and optional leading/trailing spaces
+      const isFormattedId = /^#?ESC[-_]?\d{4}[-_]?\d{3}$/i.test(escrowIdInput) || /^#ESC-\d{4}-\d{3}$/i.test(escrowIdInput);
       
       let escrow;
       let escrowError;
 
       if (isUUID) {
         // Query by UUID
+        console.log('[DEBUG] createDispute: Querying by UUID', { escrowId: escrowIdInput });
         const result = await adminClient
           .from('escrows')
           .select('id, user_id, counterparty_id, escrow_sequence, created_at')
-          .eq('id', request.escrowId)
+          .eq('id', escrowIdInput)
           .single();
         
         escrow = result.data;
         escrowError = result.error;
       } else if (isFormattedId) {
-        // Parse formatted ID: #ESC-YYYY-XXX
-        const match = request.escrowId.match(/^#ESC-(\d{4})-(\d{3})$/);
+        // Parse formatted ID: #ESC-YYYY-XXX (with various formats)
+        console.log('[DEBUG] createDispute: Querying by formatted ID', { escrowId: escrowIdInput });
+        
+        // Try multiple patterns
+        let match = escrowIdInput.match(/^#?ESC[-_]?(\d{4})[-_]?(\d{3})$/i);
+        if (!match) {
+          match = escrowIdInput.match(/^#ESC-(\d{4})-(\d{3})$/i);
+        }
+        
         if (match) {
           const year = parseInt(match[1], 10);
           const sequence = parseInt(match[2], 10);
+          
+          console.log('[DEBUG] createDispute: Parsed formatted ID', { year, sequence });
           
           // Query by year and sequence
           const yearStart = new Date(year, 0, 1).toISOString();
@@ -441,17 +463,29 @@ export class DisputeService {
           
           escrow = result.data;
           escrowError = result.error;
+          
+          console.log('[DEBUG] createDispute: Formatted ID query result', {
+            found: !!escrow,
+            error: escrowError?.message,
+          });
         } else {
+          console.error('[DEBUG] createDispute: Failed to parse formatted ID', { escrowId: escrowIdInput });
           return {
             success: false,
-            message: 'Invalid escrow ID format',
+            message: `Invalid escrow ID format: "${escrowIdInput}". Expected format: #ESC-YYYY-XXX or UUID`,
             error: 'Invalid escrow ID format',
           };
         }
       } else {
+        console.error('[DEBUG] createDispute: Escrow ID does not match any format', {
+          escrowId: escrowIdInput,
+          isUUID,
+          isFormattedId,
+          charCodes: escrowIdInput.split('').map(c => c.charCodeAt(0)),
+        });
         return {
           success: false,
-          message: 'Invalid escrow ID format. Please use either the UUID or formatted ID (#ESC-YYYY-XXX)',
+          message: `Invalid escrow ID format: "${escrowIdInput}". Expected format: #ESC-YYYY-XXX or UUID`,
           error: 'Invalid escrow ID format',
         };
       }
