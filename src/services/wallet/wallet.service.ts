@@ -79,6 +79,20 @@ export class WalletService {
         wallet = newWallet;
       }
 
+      // Check if there are recent swap transactions (internal ledger swaps)
+      // If so, use database balances instead of overwriting with XRPL balances
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: recentSwaps } = await adminClient
+        .from('transactions')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('type', 'swap')
+        .eq('status', 'completed')
+        .gte('created_at', fiveMinutesAgo)
+        .limit(1);
+
+      const hasRecentSwaps = recentSwaps && recentSwaps.length > 0;
+
       // Get live balances from XRPL (XRP, USDT, USDC)
       console.log('[DEBUG] wallet.service.getBalance: Querying XRPL for user wallet', {
         userId,
@@ -87,10 +101,13 @@ export class WalletService {
         dbBalanceXrp: wallet.balance_xrp,
         dbBalanceUsdt: wallet.balance_usdt,
         dbBalanceUsdc: wallet.balance_usdc,
+        hasRecentSwaps,
         note: 'Verify this address matches what user funded. Check network (testnet vs mainnet) if account not found.',
       });
       
       let balances;
+      let useDatabaseBalances = false;
+      
       try {
         balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
         console.log('[DEBUG] wallet.service.getBalance: Got balances from XRPL', {
@@ -100,7 +117,39 @@ export class WalletService {
           dbBalanceXrp: wallet.balance_xrp,
           dbBalanceUsdt: wallet.balance_usdt,
           dbBalanceUsdc: wallet.balance_usdc,
+          hasRecentSwaps,
         });
+
+        // If there are recent swaps, use database balances instead of XRPL balances
+        // (because swaps are internal ledger swaps that don't affect XRPL)
+        if (hasRecentSwaps) {
+          console.log('[DEBUG] wallet.service.getBalance: Recent swaps detected, using database balances', {
+            userId,
+            xrplBalances: balances,
+            dbBalances: {
+              xrp: wallet.balance_xrp,
+              usdt: wallet.balance_usdt,
+              usdc: wallet.balance_usdc,
+            },
+          });
+          balances = {
+            xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
+            usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
+            usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
+          };
+          useDatabaseBalances = true;
+        } else {
+          // Update wallet balance in database with XRPL balances (normal flow)
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: balances.xrp,
+              balance_usdt: balances.usdt,
+              balance_usdc: balances.usdc,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', wallet.id);
+        }
       } catch (balanceError) {
         console.error('[ERROR] wallet.service.getBalance: Failed to fetch balances from XRPL', {
           userId,
@@ -108,47 +157,13 @@ export class WalletService {
           error: balanceError instanceof Error ? balanceError.message : String(balanceError),
         });
         // Return database balances if XRPL query fails
-        // Calculate USD equivalent from database balances
-        let totalUsd = (wallet.balance_usdt || 0) + (wallet.balance_usdc || 0);
-        try {
-          const exchangeRates = await exchangeService.getLiveExchangeRates();
-          const xrpUsdRate = exchangeRates.data?.rates.find(r => r.currency === 'USD')?.rate;
-          if (xrpUsdRate && xrpUsdRate > 0 && xrpUsdRate < 100) {
-            totalUsd += (wallet.balance_xrp || 0) * xrpUsdRate;
-          } else {
-            // If exchange rate is not available, only count USDT + USDC in USD total
-            console.warn('[WARNING] XRP/USD exchange rate not available for database balance, USD total will only include USDT + USDC');
-          }
-        } catch (rateError) {
-          // If exchange rate fetch fails, only count USDT + USDC in USD total
-          console.error('[ERROR] Failed to fetch exchange rate for database balance USD calculation:', rateError);
-        }
-        
-        return {
-          success: true,
-          message: 'Wallet balance retrieved from database (XRPL query failed)',
-          data: {
-            balance: {
-              xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
-              usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
-              usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
-              usd: parseFloat(totalUsd.toFixed(2)), // USD equivalent
-            },
-            xrplAddress: wallet.xrpl_address,
-          },
+        balances = {
+          xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
+          usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
+          usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
         };
+        useDatabaseBalances = true;
       }
-
-      // Update wallet balance in database
-      await adminClient
-        .from('wallets')
-        .update({
-          balance_xrp: balances.xrp,
-          balance_usdt: balances.usdt,
-          balance_usdc: balances.usdc,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', wallet.id);
 
       // Calculate USD equivalent: (XRP * XRP/USD rate) + USDT + USDC
       let totalUsd = balances.usdt + balances.usdc; // USDT and USDC are already in USD
