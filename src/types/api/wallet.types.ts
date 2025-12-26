@@ -49,6 +49,29 @@ export interface SwapQuoteResponse {
   error?: string;
 }
 
+export interface SwapExecuteRequest {
+  amount: number;
+  fromCurrency: WalletSwapCurrency;
+  toCurrency: WalletSwapCurrency;
+}
+
+export interface SwapExecuteResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    fromCurrency: WalletSwapCurrency;
+    toCurrency: WalletSwapCurrency;
+    fromAmount: number;
+    toAmount: number;
+    rate: number;
+    usdValue: number;
+    feeUsd: number;
+    status: string;
+  };
+  error?: string;
+}
+
 export interface FundWalletRequest {
   amount: number;
   currency: 'USD' | 'XRP' | 'USDT' | 'USDC';
@@ -102,7 +125,7 @@ export interface WithdrawWalletResponse {
 
 export interface WalletTransaction {
   id: string;
-  type: 'deposit' | 'withdrawal' | 'escrow_create' | 'escrow_release' | 'escrow_cancel' | 'transfer';
+  type: 'deposit' | 'withdrawal' | 'escrow_create' | 'escrow_release' | 'escrow_cancel' | 'transfer' | 'swap';
   amount: {
     usd: number;
     xrp: number;

@@ -10,6 +10,8 @@ import {
   WalletTransaction,
   SwapQuoteRequest,
   SwapQuoteResponse,
+  SwapExecuteRequest,
+  SwapExecuteResponse,
 } from '../../types/api/wallet.types';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
@@ -358,6 +360,210 @@ export class WalletService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get swap quote',
         error: error instanceof Error ? error.message : 'Failed to get swap quote',
+      };
+    }
+  }
+
+  /**
+   * Execute a swap between XRP, USDT, and USDC.
+   * This performs an internal ledger swap (updates database balances).
+   * For on-chain XRPL DEX swaps, this would need to be extended to submit Payment transactions.
+   */
+  async executeSwap(userId: string, request: SwapExecuteRequest): Promise<SwapExecuteResponse> {
+    try {
+      const { amount, fromCurrency, toCurrency } = request;
+
+      if (!amount || amount <= 0) {
+        return {
+          success: false,
+          message: 'Amount must be greater than 0',
+          error: 'Invalid amount',
+        };
+      }
+
+      if (fromCurrency === toCurrency) {
+        return {
+          success: false,
+          message: 'From and to currencies must be different',
+          error: 'Invalid currency pair',
+        };
+      }
+
+      // Get fresh quote to ensure rates are current
+      const quoteResult = await this.getSwapQuote(userId, {
+        amount,
+        fromCurrency,
+        toCurrency,
+      });
+
+      if (!quoteResult.success || !quoteResult.data) {
+        return {
+          success: false,
+          message: quoteResult.message || 'Failed to get swap quote',
+          error: quoteResult.error || 'Quote failed',
+        };
+      }
+
+      const { fromAmount, toAmount, rate, usdValue, feeUsd } = quoteResult.data;
+
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get wallet
+      const { data: wallet, error: walletError } = await adminClient
+        .from('wallets')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (walletError || !wallet) {
+        return {
+          success: false,
+          message: 'Wallet not found',
+          error: 'Wallet not found',
+        };
+      }
+
+      // Calculate new balances
+      let newBalanceXrp = parseFloat((wallet.balance_xrp || 0).toFixed(6));
+      let newBalanceUsdt = parseFloat((wallet.balance_usdt || 0).toFixed(6));
+      let newBalanceUsdc = parseFloat((wallet.balance_usdc || 0).toFixed(6));
+
+      // Debit fromCurrency
+      if (fromCurrency === 'XRP') {
+        newBalanceXrp = Math.max(0, newBalanceXrp - fromAmount);
+      } else if (fromCurrency === 'USDT') {
+        newBalanceUsdt = Math.max(0, newBalanceUsdt - fromAmount);
+      } else {
+        newBalanceUsdc = Math.max(0, newBalanceUsdc - fromAmount);
+      }
+
+      // Credit toCurrency
+      if (toCurrency === 'XRP') {
+        newBalanceXrp += toAmount;
+      } else if (toCurrency === 'USDT') {
+        newBalanceUsdt += toAmount;
+      } else {
+        newBalanceUsdc += toAmount;
+      }
+
+      // Round to 6 decimal places for consistency
+      newBalanceXrp = parseFloat(newBalanceXrp.toFixed(6));
+      newBalanceUsdt = parseFloat(newBalanceUsdt.toFixed(6));
+      newBalanceUsdc = parseFloat(newBalanceUsdc.toFixed(6));
+
+      // Calculate XRP and USD amounts for transaction record
+      // For transaction record, we need to represent the swap in terms of XRP and USD
+      let amountXrp = 0;
+      let amountUsd = usdValue;
+
+      if (fromCurrency === 'XRP') {
+        amountXrp = fromAmount;
+      } else if (toCurrency === 'XRP') {
+        amountXrp = toAmount;
+      } else {
+        // Both are tokens, use the fromAmount converted to XRP equivalent
+        const ratesResult = await exchangeService.getLiveExchangeRates();
+        const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
+        if (xrpUsdRate && xrpUsdRate > 0) {
+          amountXrp = usdValue / xrpUsdRate;
+        }
+      }
+
+      // Create transaction record
+      const { data: transaction, error: txError } = await adminClient
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'swap',
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
+          status: 'completed',
+          description: `Swap ${fromAmount} ${fromCurrency} → ${toAmount.toFixed(6)} ${toCurrency}`,
+        })
+        .select()
+        .single();
+
+      if (txError || !transaction) {
+        console.error('Failed to create swap transaction:', txError);
+        return {
+          success: false,
+          message: 'Failed to create transaction record',
+          error: 'Transaction creation failed',
+        };
+      }
+
+      // Update wallet balances
+      const { error: updateError } = await adminClient
+        .from('wallets')
+        .update({
+          balance_xrp: newBalanceXrp,
+          balance_usdt: newBalanceUsdt,
+          balance_usdc: newBalanceUsdc,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', wallet.id);
+
+      if (updateError) {
+        console.error('Failed to update wallet balances:', updateError);
+        // Rollback transaction status if balance update fails
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'failed',
+            description: `Swap failed: ${updateError.message}`,
+          })
+          .eq('id', transaction.id);
+
+        return {
+          success: false,
+          message: 'Failed to update wallet balances',
+          error: 'Balance update failed',
+        };
+      }
+
+      // Create notification
+      try {
+        await notificationService.createNotification({
+          userId,
+          type: 'wallet_swap',
+          title: 'Swap completed',
+          message: `You swapped ${fromAmount.toFixed(6)} ${fromCurrency} for ${toAmount.toFixed(6)} ${toCurrency}.`,
+          metadata: {
+            transactionId: transaction.id,
+            fromCurrency,
+            toCurrency,
+            fromAmount,
+            toAmount,
+            rate,
+            usdValue,
+          },
+        });
+      } catch (notifyError) {
+        console.warn('Failed to create swap notification:', notifyError);
+        // Don't fail the swap if notification fails
+      }
+
+      return {
+        success: true,
+        message: 'Swap executed successfully',
+        data: {
+          transactionId: transaction.id,
+          fromCurrency,
+          toCurrency,
+          fromAmount,
+          toAmount,
+          rate,
+          usdValue,
+          feeUsd,
+          status: 'completed',
+        },
+      };
+    } catch (error) {
+      console.error('Error executing swap:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to execute swap',
+        error: error instanceof Error ? error.message : 'Failed to execute swap',
       };
     }
   }

@@ -25,6 +25,16 @@ router.post('/swap/quote', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/wallet/swap
+ * @desc    Execute a swap between XRP, USDT, and USDC
+ * @access  Private
+ * @body    { amount: number, fromCurrency: 'XRP' | 'USDT' | 'USDC', toCurrency: 'XRP' | 'USDT' | 'USDC' }
+ */
+router.post('/swap', authenticate, asyncHandler(async (req, res) => {
+  await walletController.executeSwap(req, res);
+}));
+
+/**
  * @route   GET /api/wallet/fund/status
  * @desc    Get XUMM payload status for deposit (if using XUMM)
  * @access  Private

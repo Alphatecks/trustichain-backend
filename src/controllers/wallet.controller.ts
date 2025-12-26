@@ -9,6 +9,8 @@ import {
   XUMMPayloadStatusResponse,
   SwapQuoteRequest,
   SwapQuoteResponse,
+  SwapExecuteRequest,
+  SwapExecuteResponse,
 } from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
@@ -49,6 +51,33 @@ export class WalletController {
     try {
       const userId = req.userId!;
       const result = await walletService.getSwapQuote(userId, req.body);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Execute a swap between XRP, USDT, and USDC
+   * POST /api/wallet/swap
+   */
+  async executeSwap(
+    req: Request<{}, SwapExecuteResponse, SwapExecuteRequest>,
+    res: Response<SwapExecuteResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.executeSwap(userId, req.body);
 
       if (result.success) {
         res.status(200).json(result);
