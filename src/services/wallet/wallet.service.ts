@@ -106,7 +106,6 @@ export class WalletService {
       });
       
       let balances;
-      let useDatabaseBalances = false;
       
       try {
         balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
@@ -137,7 +136,6 @@ export class WalletService {
             usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
             usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
           };
-          useDatabaseBalances = true;
         } else {
           // Update wallet balance in database with XRPL balances (normal flow)
           await adminClient
@@ -162,7 +160,6 @@ export class WalletService {
           usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
           usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
         };
-        useDatabaseBalances = true;
       }
 
       // Calculate USD equivalent: (XRP * XRP/USD rate) + USDT + USDC
