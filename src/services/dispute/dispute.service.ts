@@ -403,8 +403,9 @@ export class DisputeService {
       }
 
       // Validate escrow exists and user has access
-      // First check if escrowId is a UUID format, if not, it might be a formatted ID
+      // Accept both UUID and formatted ID (#ESC-YYYY-XXX)
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.escrowId);
+      const isFormattedId = /^#ESC-\d{4}-\d{3}$/.test(request.escrowId);
       
       let escrow;
       let escrowError;
@@ -413,17 +414,44 @@ export class DisputeService {
         // Query by UUID
         const result = await adminClient
           .from('escrows')
-          .select('id, user_id, counterparty_id')
+          .select('id, user_id, counterparty_id, escrow_sequence, created_at')
           .eq('id', request.escrowId)
           .single();
         
         escrow = result.data;
         escrowError = result.error;
+      } else if (isFormattedId) {
+        // Parse formatted ID: #ESC-YYYY-XXX
+        const match = request.escrowId.match(/^#ESC-(\d{4})-(\d{3})$/);
+        if (match) {
+          const year = parseInt(match[1], 10);
+          const sequence = parseInt(match[2], 10);
+          
+          // Query by year and sequence
+          const yearStart = new Date(year, 0, 1).toISOString();
+          const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999).toISOString();
+          
+          const result = await adminClient
+            .from('escrows')
+            .select('id, user_id, counterparty_id, escrow_sequence, created_at')
+            .eq('escrow_sequence', sequence)
+            .gte('created_at', yearStart)
+            .lte('created_at', yearEnd)
+            .single();
+          
+          escrow = result.data;
+          escrowError = result.error;
+        } else {
+          return {
+            success: false,
+            message: 'Invalid escrow ID format',
+            error: 'Invalid escrow ID format',
+          };
+        }
       } else {
-        // If not a UUID, return error - formatted IDs need to be converted to UUID first
         return {
           success: false,
-          message: 'Invalid escrow ID format. Please use the UUID (not the formatted ID like #ESC-YYYY-XXX)',
+          message: 'Invalid escrow ID format. Please use either the UUID or formatted ID (#ESC-YYYY-XXX)',
           error: 'Invalid escrow ID format',
         };
       }
@@ -433,6 +461,7 @@ export class DisputeService {
           escrowId: request.escrowId,
           error: escrowError,
           isUUID,
+          isFormattedId,
         });
         
         // Provide more helpful error message
