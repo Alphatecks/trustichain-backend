@@ -10,9 +10,19 @@ import {
   GetDisputesResponse,
   GetDisputeDetailResponse,
   DisputeListItem,
+  CreateDisputeRequest,
+  CreateDisputeResponse,
 } from '../../types/api/dispute.types';
+import { exchangeService } from '../exchange/exchange.service';
 
 export class DisputeService {
+  /**
+   * Format dispute case ID as #DSP-YYYY-XXX
+   */
+  private formatDisputeId(year: number, sequence: number): string {
+    return `#DSP-${year}-${sequence.toString().padStart(3, '0')}`;
+  }
+
   /**
    * Get party names (initiator and respondent) for disputes
    */
@@ -339,6 +349,282 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get dispute',
         error: error instanceof Error ? error.message : 'Failed to get dispute',
+      };
+    }
+  }
+
+  /**
+   * Create a new dispute
+   * POST /api/disputes
+   */
+  async createDispute(userId: string, request: CreateDisputeRequest): Promise<CreateDisputeResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Validate required fields
+      if (!request.escrowId) {
+        return {
+          success: false,
+          message: 'Escrow ID is required',
+          error: 'Escrow ID is required',
+        };
+      }
+
+      if (!request.disputeCategory || !request.disputeReasonType) {
+        return {
+          success: false,
+          message: 'Dispute category and reason type are required',
+          error: 'Missing required fields',
+        };
+      }
+
+      if (!request.payerXrpWalletAddress || !request.respondentXrpWalletAddress) {
+        return {
+          success: false,
+          message: 'Both payer and respondent XRP wallet addresses are required',
+          error: 'Wallet addresses required',
+        };
+      }
+
+      if (!request.disputeReason || !request.description) {
+        return {
+          success: false,
+          message: 'Dispute reason and description are required',
+          error: 'Missing required fields',
+        };
+      }
+
+      if (!request.amount || request.amount <= 0) {
+        return {
+          success: false,
+          message: 'Amount must be greater than 0',
+          error: 'Invalid amount',
+        };
+      }
+
+      // Validate escrow exists and user has access
+      const { data: escrow, error: escrowError } = await adminClient
+        .from('escrows')
+        .select('id, user_id, counterparty_id')
+        .eq('id', request.escrowId)
+        .single();
+
+      if (escrowError || !escrow) {
+        return {
+          success: false,
+          message: 'Escrow not found',
+          error: 'Escrow not found',
+        };
+      }
+
+      // Verify user is either the initiator or counterparty of the escrow
+      if (escrow.user_id !== userId && escrow.counterparty_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this escrow',
+          error: 'Access denied',
+        };
+      }
+
+      // Look up payer (initiator) user by wallet address
+      // The authenticated user is the initiator, but we validate the wallet address matches
+      const { data: payerWallet, error: payerWalletError } = await adminClient
+        .from('wallets')
+        .select('user_id, xrpl_address')
+        .eq('xrpl_address', request.payerXrpWalletAddress)
+        .maybeSingle();
+
+      if (payerWalletError || !payerWallet) {
+        return {
+          success: false,
+          message: 'Payer wallet not found. The payer must have a registered wallet.',
+          error: 'Payer wallet not found',
+        };
+      }
+
+      // Verify the payer wallet belongs to the authenticated user
+      if (payerWallet.user_id !== userId) {
+        return {
+          success: false,
+          message: 'Payer wallet address does not match your registered wallet',
+          error: 'Wallet address mismatch',
+        };
+      }
+
+      // Look up respondent user by wallet address
+      const { data: respondentWallet, error: respondentWalletError } = await adminClient
+        .from('wallets')
+        .select('user_id, xrpl_address')
+        .eq('xrpl_address', request.respondentXrpWalletAddress)
+        .maybeSingle();
+
+      if (respondentWalletError || !respondentWallet) {
+        return {
+          success: false,
+          message: 'Respondent wallet not found. The respondent must have a registered wallet.',
+          error: 'Respondent wallet not found',
+        };
+      }
+
+      const respondentUserId = respondentWallet.user_id;
+
+      // Prevent creating dispute with yourself
+      if (userId === respondentUserId) {
+        return {
+          success: false,
+          message: 'You cannot create a dispute with yourself',
+          error: 'Invalid dispute parties',
+        };
+      }
+
+      // Convert amount to XRP and USD
+      let amountXrp = request.amount;
+      let amountUsd = request.amount;
+
+      if (request.currency === 'USD') {
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
+        amountXrp = request.amount / usdRate;
+      } else {
+        // Currency is XRP, convert to USD
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        if (!exchangeRates.success || !exchangeRates.data) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates for currency conversion',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
+        amountUsd = request.amount * usdRate;
+      }
+
+      // Round to appropriate decimal places
+      amountXrp = parseFloat(amountXrp.toFixed(6));
+      amountUsd = parseFloat(amountUsd.toFixed(2));
+
+      // Generate case ID
+      const currentYear = new Date().getFullYear();
+      const { data: lastDispute } = await adminClient
+        .from('disputes')
+        .select('case_id')
+        .gte('created_at', new Date(currentYear, 0, 1).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(100); // Get last 100 to find max sequence
+
+      // Extract sequence numbers from case IDs
+      let maxSequence = 0;
+      if (lastDispute && lastDispute.length > 0) {
+        for (const dispute of lastDispute) {
+          const match = dispute.case_id.match(/^#DSP-\d{4}-(\d{3})$/);
+          if (match) {
+            const seq = parseInt(match[1], 10);
+            if (seq > maxSequence) {
+              maxSequence = seq;
+            }
+          }
+        }
+      }
+
+      const nextSequence = maxSequence + 1;
+      const caseId = this.formatDisputeId(currentYear, nextSequence);
+
+      // Create dispute record
+      const { data: dispute, error: disputeError } = await adminClient
+        .from('disputes')
+        .insert({
+          case_id: caseId,
+          escrow_id: request.escrowId,
+          initiator_user_id: userId,
+          respondent_user_id: respondentUserId,
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
+          status: 'pending',
+          reason: request.disputeReason,
+          description: request.description,
+          dispute_category: request.disputeCategory,
+          dispute_reason_type: request.disputeReasonType,
+          payer_name: request.payerName || null,
+          payer_email: request.payerEmail || null,
+          payer_phone: request.payerPhone || null,
+          respondent_name: request.respondentName || null,
+          respondent_email: request.respondentEmail || null,
+          respondent_phone: request.respondentPhone || null,
+          resolution_period: request.resolutionPeriod || null,
+          expected_resolution_date: request.expectedResolutionDate
+            ? new Date(request.expectedResolutionDate).toISOString()
+            : null,
+          payer_xrp_wallet_address: request.payerXrpWalletAddress,
+          respondent_xrp_wallet_address: request.respondentXrpWalletAddress,
+        })
+        .select()
+        .single();
+
+      if (disputeError || !dispute) {
+        console.error('Failed to create dispute:', disputeError);
+        return {
+          success: false,
+          message: 'Failed to create dispute record',
+          error: 'Database error',
+        };
+      }
+
+      // Create evidence records if provided
+      if (request.evidence && request.evidence.length > 0) {
+        const evidenceRecords = request.evidence.map((item) => ({
+          dispute_id: dispute.id,
+          file_url: item.fileUrl,
+          file_name: item.fileName,
+          file_type: item.fileType || null,
+          file_size: item.fileSize || null,
+          uploaded_by_user_id: userId,
+        }));
+
+        const { error: evidenceError } = await adminClient
+          .from('dispute_evidence')
+          .insert(evidenceRecords);
+
+        if (evidenceError) {
+          console.error('Failed to create evidence records:', evidenceError);
+          // Don't fail the dispute creation if evidence fails, just log it
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Dispute created successfully',
+        data: {
+          disputeId: dispute.id,
+          caseId: dispute.case_id,
+        },
+      };
+    } catch (error) {
+      console.error('Error creating dispute:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create dispute',
+        error: error instanceof Error ? error.message : 'Failed to create dispute',
       };
     }
   }

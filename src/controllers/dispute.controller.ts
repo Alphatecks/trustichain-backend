@@ -4,6 +4,8 @@ import {
   GetDisputesResponse,
   GetDisputeDetailResponse,
   DisputeStatus,
+  CreateDisputeRequest,
+  CreateDisputeResponse,
 } from '../types/api/dispute.types';
 import { disputeService } from '../services/dispute/dispute.service';
 
@@ -93,6 +95,35 @@ export class DisputeController {
       } else {
         const statusCode = result.error === 'Dispute not found or access denied' ? 404 : 400;
         res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Create a new dispute
+   * POST /api/disputes
+   */
+  async createDispute(
+    req: Request,
+    res: Response<CreateDisputeResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const request = req.body as CreateDisputeRequest;
+
+      const result = await disputeService.createDispute(userId, request);
+
+      if (result.success) {
+        res.status(201).json(result);
+      } else {
+        res.status(400).json(result);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';

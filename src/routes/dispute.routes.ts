@@ -20,6 +20,20 @@ router.get(
 );
 
 /**
+ * @route   POST /api/disputes
+ * @desc    Create a new dispute
+ * @access  Private
+ * @body    CreateDisputeRequest - Dispute details including escrow ID, category, reason, parties, amount, etc.
+ */
+router.post(
+  '/',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.createDispute(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes
  * @desc    Get list of disputes for dispute dashboard table
  * @access  Private

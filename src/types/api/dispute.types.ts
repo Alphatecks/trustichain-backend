@@ -3,6 +3,8 @@
  */
 
 export type DisputeStatus = 'pending' | 'active' | 'resolved' | 'cancelled';
+export type DisputeCategory = 'freelancing' | 'real_estate' | 'product_purchase' | 'custom';
+export type DisputeReasonType = 'quality_issue' | 'delivery_delay' | 'payment_dispute';
 
 export interface DisputeSummaryMetrics {
   totalDisputes: number;
@@ -61,6 +63,44 @@ export interface GetDisputeDetailResponse {
   success: boolean;
   message: string;
   data?: DisputeDetail;
+  error?: string;
+}
+
+export interface DisputeEvidenceItem {
+  fileUrl: string;
+  fileName: string;
+  fileType?: string;
+  fileSize?: number;
+}
+
+export interface CreateDisputeRequest {
+  escrowId: string; // UUID of the escrow
+  disputeCategory: DisputeCategory;
+  disputeReasonType: DisputeReasonType;
+  payerXrpWalletAddress: string;
+  payerName?: string;
+  payerEmail?: string;
+  payerPhone?: string;
+  respondentXrpWalletAddress: string;
+  respondentName?: string;
+  respondentEmail?: string;
+  respondentPhone?: string;
+  disputeReason: string;
+  amount: number; // Amount in dispute
+  currency: 'USD' | 'XRP';
+  resolutionPeriod?: string; // e.g., "7 days"
+  expectedResolutionDate?: string; // ISO date string
+  description: string;
+  evidence?: DisputeEvidenceItem[];
+}
+
+export interface CreateDisputeResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    disputeId: string;
+    caseId: string; // Formatted as #DSP-YYYY-XXX
+  };
   error?: string;
 }
 
