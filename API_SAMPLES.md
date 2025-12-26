@@ -216,6 +216,305 @@ curl -X POST https://your-api.com/api/wallet/withdraw \
 }
 ```
 
+### Get Swap Quote
+
+**Endpoint:** `POST /api/wallet/swap/quote`
+
+**Description:** Get a quote for swapping between XRP, USDT, and USDC. Can use either internal exchange rates or live XRPL DEX orderbook prices.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body (Internal Quote - Default):**
+```json
+{
+  "amount": 1000,
+  "fromCurrency": "XRP",
+  "toCurrency": "USDT"
+}
+```
+
+**Request Body (DEX Quote - Live XRPL Prices):**
+```json
+{
+  "amount": 1000,
+  "fromCurrency": "XRP",
+  "toCurrency": "USDT",
+  "useDEX": true
+}
+```
+
+**Request:**
+```bash
+# Internal quote
+curl -X POST https://your-api.com/api/wallet/swap/quote \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000,
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT"
+  }'
+
+# DEX quote (live prices)
+curl -X POST https://your-api.com/api/wallet/swap/quote \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000,
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "useDEX": true
+  }'
+```
+
+**Response (200 OK - Internal Quote):**
+```json
+{
+  "success": true,
+  "message": "Swap quote calculated successfully",
+  "data": {
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "fromAmount": 1000,
+    "toAmount": 542.123456,
+    "rate": 0.542123,
+    "usdValue": 542.12,
+    "feeUsd": 0.00
+  }
+}
+```
+
+**Response (200 OK - DEX Quote):**
+```json
+{
+  "success": true,
+  "message": "DEX swap quote calculated successfully",
+  "data": {
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "fromAmount": 1000,
+    "toAmount": 540.856234,
+    "rate": 0.540856,
+    "usdValue": 540.86,
+    "feeUsd": 0.000006
+  }
+}
+```
+
+**Error Response (400 Bad Request - Insufficient Balance):**
+```json
+{
+  "success": false,
+  "message": "Insufficient XRP balance for swap",
+  "error": "Insufficient balance"
+}
+```
+
+**Error Response (400 Bad Request - No Liquidity):**
+```json
+{
+  "success": false,
+  "message": "No liquidity available for XRP/USDT",
+  "error": "No liquidity available for XRP/USDT"
+}
+```
+
+---
+
+### Execute Swap
+
+**Endpoint:** `POST /api/wallet/swap`
+
+**Description:** Execute a swap between XRP, USDT, and USDC. Supports both internal (database) swaps and on-chain (XRPL DEX) swaps.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body (Internal Swap - Default):**
+```json
+{
+  "amount": 1000,
+  "fromCurrency": "XRP",
+  "toCurrency": "USDT",
+  "swapType": "internal"
+}
+```
+
+**Request Body (On-Chain Swap - Real Tokens):**
+```json
+{
+  "amount": 1000,
+  "fromCurrency": "XRP",
+  "toCurrency": "USDT",
+  "swapType": "onchain",
+  "slippageTolerance": 5
+}
+```
+
+**Request:**
+```bash
+# Internal swap (database only)
+curl -X POST https://your-api.com/api/wallet/swap \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000,
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "swapType": "internal"
+  }'
+
+# On-chain swap (real XRPL transaction)
+curl -X POST https://your-api.com/api/wallet/swap \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000,
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "swapType": "onchain",
+    "slippageTolerance": 5
+  }'
+```
+
+**Response (200 OK - Internal Swap Completed):**
+```json
+{
+  "success": true,
+  "message": "Swap executed successfully",
+  "data": {
+    "transactionId": "770e8400-e29b-41d4-a716-446655440000",
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "fromAmount": 1000,
+    "toAmount": 542.123456,
+    "rate": 0.542123,
+    "usdValue": 542.12,
+    "feeUsd": 0.00,
+    "status": "completed",
+    "swapType": "internal"
+  }
+}
+```
+
+**Response (200 OK - On-Chain Swap Completed - Custodial Wallet):**
+```json
+{
+  "success": true,
+  "message": "On-chain swap executed successfully",
+  "data": {
+    "transactionId": "880e8400-e29b-41d4-a716-446655440000",
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "fromAmount": 1000,
+    "toAmount": 540.856234,
+    "rate": 0.540856,
+    "usdValue": 540.86,
+    "feeUsd": 0.000006,
+    "status": "completed",
+    "swapType": "onchain",
+    "xrplTxHash": "A1B2C3D4E5F6789012345678901234567890ABCDEF1234567890ABCDEF1234"
+  }
+}
+```
+
+**Response (200 OK - On-Chain Swap Pending - Non-Custodial Wallet):**
+```json
+{
+  "success": true,
+  "message": "Transaction prepared. Please sign in Xaman app.",
+  "data": {
+    "transactionId": "990e8400-e29b-41d4-a716-446655440000",
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "fromAmount": 1000,
+    "toAmount": 540.856234,
+    "rate": 0.540856,
+    "usdValue": 540.86,
+    "feeUsd": 0.000006,
+    "status": "pending",
+    "swapType": "onchain",
+    "transactionBlob": "120000220000000024000000012E...",
+    "xummUrl": "https://xumm.app/sign/550e8400-e29b-41d4-a716-446655440000",
+    "xummUuid": "550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+**Response (200 OK - On-Chain Swap Pending - Browser Wallet):**
+```json
+{
+  "success": true,
+  "message": "Transaction prepared. Please sign with your XRPL wallet.",
+  "data": {
+    "transactionId": "aa0e8400-e29b-41d4-a716-446655440000",
+    "fromCurrency": "XRP",
+    "toCurrency": "USDT",
+    "fromAmount": 1000,
+    "toAmount": 540.856234,
+    "rate": 0.540856,
+    "usdValue": 540.86,
+    "feeUsd": 0.000006,
+    "status": "pending",
+    "swapType": "onchain",
+    "transactionBlob": "120000220000000024000000012E..."
+  }
+}
+```
+
+**Error Response (400 Bad Request - Insufficient Balance):**
+```json
+{
+  "success": false,
+  "message": "Insufficient XRP balance for swap",
+  "error": "Insufficient balance"
+}
+```
+
+**Error Response (400 Bad Request - No Liquidity):**
+```json
+{
+  "success": false,
+  "message": "No liquidity available for XRP/USDT",
+  "error": "No liquidity available for XRP/USDT"
+}
+```
+
+**Error Response (400 Bad Request - Trust Line Required):**
+```json
+{
+  "success": false,
+  "message": "Trust line required for USDT. Please connect your wallet to create it.",
+  "error": "Trust line required"
+}
+```
+
+**Supported Currency Pairs:**
+- `XRP` ↔ `USDT`
+- `XRP` ↔ `USDC`
+- `USDT` ↔ `USDC` (routes through XRP automatically)
+- `USDC` ↔ `USDT` (routes through XRP automatically)
+
+**Swap Type Options:**
+- `internal` (default): Fast database-only swap. Tokens are not withdrawable but appear in your wallet balance.
+- `onchain`: Real XRPL DEX swap. Tokens are real and can be withdrawn. Requires blockchain confirmation (~3-5 seconds).
+
+**Parameters:**
+- `amount` (required): Amount to swap in `fromCurrency`
+- `fromCurrency` (required): `'XRP' | 'USDT' | 'USDC'`
+- `toCurrency` (required): `'XRP' | 'USDT' | 'USDC'`
+- `swapType` (optional): `'internal' | 'onchain'` (default: `'internal'`)
+- `slippageTolerance` (optional): Percentage (0-100) for on-chain swaps (default: 5%)
+
+---
+
 ### Get Wallet Transactions
 
 **Endpoint:** `GET /api/wallet/transactions?limit=50&offset=0`

@@ -1243,7 +1243,7 @@ export class EscrowService {
         const milestones = await this.getMilestones(updatedEscrow.id);
         const year = new Date(updatedEscrow.created_at).getFullYear();
         const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
-
+        
         const formattedEscrow: Escrow = {
           id: updatedEscrow.id,
             escrowId: formattedEscrowId,
@@ -1254,7 +1254,7 @@ export class EscrowService {
             amount: {
             usd: parseFloat(updatedEscrow.amount_usd),
             xrp: parseFloat(updatedEscrow.amount_xrp),
-          },
+            },
           status: updatedEscrow.status,
           transactionType: updatedEscrow.transaction_type as TransactionType,
           industry: updatedEscrow.industry || null,

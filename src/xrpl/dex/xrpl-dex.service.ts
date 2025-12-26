@@ -1,0 +1,538 @@
+/**
+ * XRPL DEX Service
+ * Handles decentralized exchange operations on XRPL
+ */
+
+import { Client, Wallet, xrpToDrops, dropsToXrp, Payment } from 'xrpl';
+
+export interface DEXSwapQuote {
+  fromAmount: number;
+  toAmount: number;
+  rate: number;
+  minAmount: number; // Minimum amount user will receive (slippage protection)
+  estimatedFee: number; // Estimated XRPL transaction fee
+}
+
+export interface DEXSwapExecutionResult {
+  success: boolean;
+  txHash?: string;
+  actualFromAmount?: number;
+  actualToAmount?: number;
+  error?: string;
+}
+
+export class XRPLDEXService {
+  private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
+  private readonly XRPL_SERVER = this.XRPL_NETWORK === 'mainnet'
+    ? 'wss://xrplcluster.com'
+    : 'wss://s.altnet.rippletest.net:51233';
+  
+  // Issuer addresses (same as in xrpl-wallet.service.ts)
+  private readonly USDT_ISSUER = this.XRPL_NETWORK === 'mainnet'
+    ? 'rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B' // Tether USDT mainnet
+    : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet
+  
+  private readonly USDC_ISSUER = this.XRPL_NETWORK === 'mainnet'
+    ? 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY' // Circle USDC mainnet
+    : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet
+
+  /**
+   * Get issuer address for a currency
+   */
+  private getIssuer(currency: 'USDT' | 'USDC'): string {
+    return currency === 'USDT' ? this.USDT_ISSUER : this.USDC_ISSUER;
+  }
+
+  /**
+   * Check if user has trust line for a token
+   */
+  async hasTrustLine(
+    xrplAddress: string,
+    currency: 'USDT' | 'USDC'
+  ): Promise<boolean> {
+    const client = new Client(this.XRPL_SERVER);
+    try {
+      await client.connect();
+      
+      const issuer = this.getIssuer(currency);
+      const accountLines = await client.request({
+        command: 'account_lines',
+        account: xrplAddress,
+        ledger_index: 'validated',
+        peer: issuer,
+      });
+
+      await client.disconnect();
+
+      const lines = accountLines.result.lines || [];
+      return lines.length > 0 && (parseFloat(lines[0].balance) !== 0 || parseFloat(lines[0].limit) > 0);
+    } catch (error) {
+      await client.disconnect();
+      console.error(`Error checking trust line for ${currency}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get current price from DEX orderbook
+   */
+  async getDEXPrice(
+    fromCurrency: 'XRP' | 'USDT' | 'USDC',
+    toCurrency: 'XRP' | 'USDT' | 'USDC',
+    amount: number
+  ): Promise<{
+    success: boolean;
+    data?: DEXSwapQuote;
+    error?: string;
+  }> {
+    const client = new Client(this.XRPL_SERVER);
+    
+    try {
+      await client.connect();
+
+      // Handle token-to-token swaps (route through XRP)
+      if (fromCurrency !== 'XRP' && toCurrency !== 'XRP') {
+        const fromIssuer = this.getIssuer(fromCurrency as 'USDT' | 'USDC');
+        const toIssuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
+        
+        // Step 1: fromCurrency -> XRP
+        const step1 = await client.request({
+          command: 'book_offers',
+          taker_gets: { currency: 'XRP' },
+          taker_pays: {
+            currency: 'USD',
+            issuer: fromIssuer,
+          },
+          limit: 10,
+        });
+
+        if (!step1.result.offers || step1.result.offers.length === 0) {
+          await client.disconnect();
+          return {
+            success: false,
+            error: `No liquidity available for ${fromCurrency}/XRP`,
+          };
+        }
+
+        // Calculate XRP amount from available offers
+        let remainingAmount = amount;
+        let totalXrp = 0;
+        for (const offer of step1.result.offers) {
+          const offerAmount = parseFloat(offer.TakerPays.value);
+          const offerXrp = parseFloat(offer.TakerGets);
+          const rate = offerXrp / offerAmount;
+          
+          if (remainingAmount <= offerAmount) {
+            totalXrp += remainingAmount * rate;
+            remainingAmount = 0;
+            break;
+          } else {
+            totalXrp += offerXrp;
+            remainingAmount -= offerAmount;
+          }
+        }
+
+        if (remainingAmount > 0) {
+          await client.disconnect();
+          return {
+            success: false,
+            error: `Insufficient liquidity for ${fromCurrency}/XRP. Available: ${amount - remainingAmount}`,
+          };
+        }
+
+        // Step 2: XRP -> toCurrency
+        const step2 = await client.request({
+          command: 'book_offers',
+          taker_gets: {
+            currency: 'USD',
+            issuer: toIssuer,
+          },
+          taker_pays: { currency: 'XRP' },
+          limit: 10,
+        });
+
+        if (!step2.result.offers || step2.result.offers.length === 0) {
+          await client.disconnect();
+          return {
+            success: false,
+            error: `No liquidity available for XRP/${toCurrency}`,
+          };
+        }
+
+        // Calculate token amount from available offers
+        let remainingXrp = totalXrp;
+        let totalTokens = 0;
+        for (const offer of step2.result.offers) {
+          const offerXrp = parseFloat(offer.TakerPays);
+          const offerTokens = parseFloat(offer.TakerGets.value);
+          const rate = offerTokens / offerXrp;
+          
+          if (remainingXrp <= offerXrp) {
+            totalTokens += remainingXrp * rate;
+            remainingXrp = 0;
+            break;
+          } else {
+            totalTokens += offerTokens;
+            remainingXrp -= offerXrp;
+          }
+        }
+
+        if (remainingXrp > 0) {
+          await client.disconnect();
+          return {
+            success: false,
+            error: `Insufficient liquidity for XRP/${toCurrency}. Available: ${totalXrp - remainingXrp} XRP`,
+          };
+        }
+
+        await client.disconnect();
+
+        return {
+          success: true,
+          data: {
+            fromAmount: amount,
+            toAmount: totalTokens,
+            rate: totalTokens / amount,
+            minAmount: totalTokens * 0.95, // 5% slippage tolerance
+            estimatedFee: 0.000012, // XRPL transaction fee
+          },
+        };
+      }
+
+      // Build orderbook query for direct swaps (XRP <-> Token)
+      let takerGets: any;
+      let takerPays: any;
+
+      if (fromCurrency === 'XRP' && toCurrency !== 'XRP') {
+        // Buying token with XRP
+        const issuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
+        takerGets = {
+          currency: 'USD',
+          issuer: issuer,
+        };
+        takerPays = {
+          currency: 'XRP',
+        };
+      } else if (fromCurrency !== 'XRP' && toCurrency === 'XRP') {
+        // Selling token for XRP
+        const issuer = this.getIssuer(fromCurrency as 'USDT' | 'USDC');
+        takerGets = {
+          currency: 'XRP',
+        };
+        takerPays = {
+          currency: 'USD',
+          issuer: issuer,
+        };
+      } else {
+        await client.disconnect();
+        return {
+          success: false,
+          error: 'XRP to XRP swap not supported',
+        };
+      }
+
+      // Query orderbook
+      const orderbook = await client.request({
+        command: 'book_offers',
+        taker_gets: takerGets,
+        taker_pays: takerPays,
+        limit: 20, // Get more offers for better price calculation
+      });
+
+      await client.disconnect();
+
+      if (!orderbook.result.offers || orderbook.result.offers.length === 0) {
+        return {
+          success: false,
+          error: `No liquidity available for ${fromCurrency}/${toCurrency}`,
+        };
+      }
+
+      // Calculate price from available offers (walk the orderbook)
+      let remainingAmount = amount;
+      let totalReceived = 0;
+
+      for (const offer of orderbook.result.offers) {
+        if (fromCurrency === 'XRP') {
+          // Buying token: paying XRP, receiving token
+          const offerXrp = parseFloat(offer.TakerPays);
+          const offerTokens = parseFloat(offer.TakerGets.value);
+          const rate = offerTokens / offerXrp;
+
+          if (remainingAmount <= offerXrp) {
+            totalReceived += remainingAmount * rate;
+            remainingAmount = 0;
+            break;
+          } else {
+            totalReceived += offerTokens;
+            remainingAmount -= offerXrp;
+          }
+        } else {
+          // Selling token: paying token, receiving XRP
+          const offerTokens = parseFloat(offer.TakerPays.value);
+          const offerXrp = parseFloat(offer.TakerGets);
+          const rate = offerXrp / offerTokens;
+
+          if (remainingAmount <= offerTokens) {
+            totalReceived += remainingAmount * rate;
+            remainingAmount = 0;
+            break;
+          } else {
+            totalReceived += offerXrp;
+            remainingAmount -= offerTokens;
+          }
+        }
+      }
+
+      if (remainingAmount > 0) {
+        return {
+          success: false,
+          error: `Insufficient liquidity. Available: ${amount - remainingAmount} ${fromCurrency}`,
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          fromAmount: amount,
+          toAmount: totalReceived,
+          rate: totalReceived / amount,
+          minAmount: totalReceived * 0.95, // 5% slippage tolerance
+          estimatedFee: 0.000012, // XRPL transaction fee
+        },
+      };
+    } catch (error) {
+      await client.disconnect();
+      console.error('Error getting DEX price:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get DEX price',
+      };
+    }
+  }
+
+  /**
+   * Prepare swap transaction using Payment with pathfinding
+   * This creates a Payment transaction that routes through the DEX
+   */
+  async prepareSwapTransaction(
+    userAddress: string,
+    fromAmount: number,
+    fromCurrency: 'XRP' | 'USDT' | 'USDC',
+    toCurrency: 'XRP' | 'USDT' | 'USDC',
+    minAmount: number // Minimum amount to receive (slippage protection)
+  ): Promise<{
+    success: boolean;
+    transaction?: any;
+    transactionBlob?: string;
+    error?: string;
+  }> {
+    try {
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      // Build payment transaction
+      // Key: When Destination = Account, XRPL treats it as currency conversion
+      const payment: Payment = {
+        TransactionType: 'Payment',
+        Account: userAddress,
+        Destination: userAddress, // Same address = currency conversion via DEX
+      };
+
+      // Set what user wants to receive
+      if (toCurrency === 'XRP') {
+        payment.Amount = xrpToDrops(minAmount.toString());
+      } else {
+        const issuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
+        payment.Amount = {
+          currency: 'USD',
+          value: minAmount.toFixed(6),
+          issuer: issuer,
+        };
+      }
+
+      // Set what user is willing to pay (maximum)
+      if (fromCurrency === 'XRP') {
+        payment.SendMax = xrpToDrops(fromAmount.toString());
+      } else {
+        const issuer = this.getIssuer(fromCurrency as 'USDT' | 'USDC');
+        payment.SendMax = {
+          currency: 'USD',
+          value: fromAmount.toFixed(6),
+          issuer: issuer,
+        };
+      }
+
+      // Let XRPL find the best path automatically
+      payment.Paths = [];
+
+      // Autofill transaction
+      const prepared = await client.autofill(payment);
+      await client.disconnect();
+
+      // Serialize to blob
+      const transactionBlob = JSON.stringify(prepared);
+
+      return {
+        success: true,
+        transaction: prepared,
+        transactionBlob,
+      };
+    } catch (error) {
+      console.error('Error preparing swap transaction:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to prepare swap transaction',
+      };
+    }
+  }
+
+  /**
+   * Execute swap transaction (for custodial wallets with stored secrets)
+   */
+  async executeSwap(
+    userAddress: string,
+    walletSecret: string,
+    fromAmount: number,
+    fromCurrency: 'XRP' | 'USDT' | 'USDC',
+    toCurrency: 'XRP' | 'USDT' | 'USDC',
+    minAmount: number
+  ): Promise<DEXSwapExecutionResult> {
+    try {
+      const prepareResult = await this.prepareSwapTransaction(
+        userAddress,
+        fromAmount,
+        fromCurrency,
+        toCurrency,
+        minAmount
+      );
+
+      if (!prepareResult.success || !prepareResult.transaction) {
+        return {
+          success: false,
+          error: prepareResult.error || 'Failed to prepare transaction',
+        };
+      }
+
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      // Sign transaction
+      const wallet = Wallet.fromSeed(walletSecret);
+      const signed = wallet.sign(prepareResult.transaction);
+
+      // Submit transaction
+      const result = await client.submitAndWait(signed.tx_blob);
+      await client.disconnect();
+
+      // Check transaction result
+      const txResult = result.result.meta?.TransactionResult;
+      if (txResult !== 'tesSUCCESS') {
+        return {
+          success: false,
+          error: `Transaction failed: ${txResult}`,
+        };
+      }
+
+      // Get actual amounts from transaction result
+      const meta = result.result.meta;
+      let actualFromAmount = fromAmount;
+      let actualToAmount = minAmount;
+
+      if (meta && typeof meta === 'object' && 'DeliveredAmount' in meta) {
+        const delivered = meta.DeliveredAmount;
+        if (typeof delivered === 'string') {
+          actualToAmount = parseFloat(dropsToXrp(delivered));
+        } else if (delivered && typeof delivered === 'object' && 'value' in delivered) {
+          actualToAmount = parseFloat(delivered.value as string);
+        }
+      }
+
+      return {
+        success: true,
+        txHash: result.result.hash,
+        actualFromAmount,
+        actualToAmount,
+      };
+    } catch (error) {
+      console.error('Error executing swap:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to execute swap',
+      };
+    }
+  }
+
+  /**
+   * Ensure trust line exists for a token
+   * Returns true if trust line exists or was created, false otherwise
+   */
+  async ensureTrustLine(
+    userAddress: string,
+    walletSecret: string,
+    currency: 'USDT' | 'USDC',
+    limit: string = '1000000' // Default trust line limit
+  ): Promise<{
+    success: boolean;
+    created: boolean;
+    error?: string;
+  }> {
+    try {
+      // Check if trust line already exists
+      const hasTrust = await this.hasTrustLine(userAddress, currency);
+      if (hasTrust) {
+        return {
+          success: true,
+          created: false,
+        };
+      }
+
+      // Create trust line
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      const issuer = this.getIssuer(currency);
+      const wallet = Wallet.fromSeed(walletSecret);
+
+      const trustSet = {
+        TransactionType: 'TrustSet',
+        Account: userAddress,
+        LimitAmount: {
+          currency: 'USD',
+          issuer: issuer,
+          value: limit,
+        },
+      };
+
+      const prepared = await client.autofill(trustSet);
+      const signed = wallet.sign(prepared);
+      const result = await client.submitAndWait(signed.tx_blob);
+      await client.disconnect();
+
+      const txResult = result.result.meta?.TransactionResult;
+      if (txResult !== 'tesSUCCESS') {
+        return {
+          success: false,
+          created: false,
+          error: `Failed to create trust line: ${txResult}`,
+        };
+      }
+
+      return {
+        success: true,
+        created: true,
+      };
+    } catch (error) {
+      console.error(`Error ensuring trust line for ${currency}:`, error);
+      return {
+        success: false,
+        created: false,
+        error: error instanceof Error ? error.message : 'Failed to create trust line',
+      };
+    }
+  }
+}
+
+// Export singleton instance
+export const xrplDexService = new XRPLDEXService();
+

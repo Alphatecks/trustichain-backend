@@ -23,6 +23,7 @@ export interface SwapQuoteRequest {
   amount: number;
   fromCurrency: WalletSwapCurrency;
   toCurrency: WalletSwapCurrency;
+  useDEX?: boolean; // If true, get price from XRPL DEX instead of external API
 }
 
 export interface SwapQuoteResponse {
@@ -53,6 +54,8 @@ export interface SwapExecuteRequest {
   amount: number;
   fromCurrency: WalletSwapCurrency;
   toCurrency: WalletSwapCurrency;
+  swapType?: 'internal' | 'onchain'; // 'internal' = database only, 'onchain' = real XRPL DEX swap
+  slippageTolerance?: number; // Percentage (0-100), default 5%
 }
 
 export interface SwapExecuteResponse {
@@ -68,6 +71,11 @@ export interface SwapExecuteResponse {
     usdValue: number;
     feeUsd: number;
     status: string;
+    swapType?: 'internal' | 'onchain';
+    xrplTxHash?: string; // Only for on-chain swaps
+    transactionBlob?: string; // For user signing (on-chain swaps)
+    xummUrl?: string; // For XUMM signing (on-chain swaps)
+    xummUuid?: string; // For XUMM signing (on-chain swaps)
   };
   error?: string;
 }

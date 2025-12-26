@@ -14,6 +14,7 @@ import {
   SwapExecuteResponse,
 } from '../../types/api/wallet.types';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
+import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
 import { exchangeService } from '../exchange/exchange.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { xummService } from '../xumm/xumm.service';
@@ -79,19 +80,17 @@ export class WalletService {
         wallet = newWallet;
       }
 
-      // Check if there are recent swap transactions (internal ledger swaps)
-      // If so, use database balances instead of overwriting with XRPL balances
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const { data: recentSwaps } = await adminClient
+      // Check if there are any swap transactions (internal ledger swaps)
+      // If so, use database balances for tokens instead of overwriting with XRPL balances
+      const { data: anySwaps } = await adminClient
         .from('transactions')
         .select('id')
         .eq('user_id', userId)
         .eq('type', 'swap')
         .eq('status', 'completed')
-        .gte('created_at', fiveMinutesAgo)
         .limit(1);
 
-      const hasRecentSwaps = recentSwaps && recentSwaps.length > 0;
+      const hasAnySwaps = anySwaps && anySwaps.length > 0;
 
       // Get live balances from XRPL (XRP, USDT, USDC)
       console.log('[DEBUG] wallet.service.getBalance: Querying XRPL for user wallet', {
@@ -101,7 +100,7 @@ export class WalletService {
         dbBalanceXrp: wallet.balance_xrp,
         dbBalanceUsdt: wallet.balance_usdt,
         dbBalanceUsdc: wallet.balance_usdc,
-        hasRecentSwaps,
+        hasAnySwaps,
         note: 'Verify this address matches what user funded. Check network (testnet vs mainnet) if account not found.',
       });
       
@@ -116,13 +115,13 @@ export class WalletService {
           dbBalanceXrp: wallet.balance_xrp,
           dbBalanceUsdt: wallet.balance_usdt,
           dbBalanceUsdc: wallet.balance_usdc,
-          hasRecentSwaps,
+          hasAnySwaps,
         });
 
-        // If there are recent swaps, use database balances instead of XRPL balances
+        // If there are any swaps, use database balances for tokens (but sync XRP from XRPL)
         // (because swaps are internal ledger swaps that don't affect XRPL)
-        if (hasRecentSwaps) {
-          console.log('[DEBUG] wallet.service.getBalance: Recent swaps detected, using database balances', {
+        if (hasAnySwaps) {
+          console.log('[DEBUG] wallet.service.getBalance: Swaps detected, using database balances for tokens', {
             userId,
             xrplBalances: balances,
             dbBalances: {
@@ -131,8 +130,20 @@ export class WalletService {
               usdc: wallet.balance_usdc,
             },
           });
+          // Sync XRP from XRPL but keep token balances from database
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: balances.xrp,  // Sync XRP from XRPL
+              // Keep existing USDT and USDC from database (don't overwrite)
+              balance_usdt: wallet.balance_usdt || 0,
+              balance_usdc: wallet.balance_usdc || 0,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', wallet.id);
+          
           balances = {
-            xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
+            xrp: parseFloat(balances.xrp.toFixed(6)),
             usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
             usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
           };
@@ -317,6 +328,54 @@ export class WalletService {
         };
       }
 
+      // If useDEX is true, get price from XRPL DEX orderbook
+      if (request.useDEX) {
+        const dexQuote = await xrplDexService.getDEXPrice(
+          fromCurrency,
+          toCurrency,
+          amount
+        );
+
+        if (!dexQuote.success || !dexQuote.data) {
+          return {
+            success: false,
+            message: dexQuote.error || 'Failed to get DEX quote',
+            error: dexQuote.error || 'DEX quote failed',
+          };
+        }
+
+        const { toAmount: dexToAmount, rate: dexRate, estimatedFee } = dexQuote.data;
+
+        // Get USD value for fee calculation
+        const ratesResult = await exchangeService.getLiveExchangeRates();
+        const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate || 0.5;
+        
+        let usdValue = 0;
+        if (fromCurrency === 'XRP') {
+          usdValue = amount * xrpUsdRate;
+        } else {
+          usdValue = amount; // USDT/USDC 1:1 with USD
+        }
+
+        // DEX fee is just the XRPL transaction fee (converted to USD)
+        const feeUsd = estimatedFee * xrpUsdRate;
+
+        return {
+          success: true,
+          message: 'DEX swap quote calculated successfully',
+          data: {
+            fromCurrency,
+            toCurrency,
+            fromAmount: amount,
+            toAmount: parseFloat(dexToAmount.toFixed(6)),
+            rate: parseFloat(dexRate.toFixed(8)),
+            usdValue: parseFloat(usdValue.toFixed(2)),
+            feeUsd: parseFloat(feeUsd.toFixed(6)),
+          },
+        };
+      }
+
+      // Default: Use external exchange rates (internal swap)
       // Get XRP/USD rate from exchange service
       const ratesResult = await exchangeService.getLiveExchangeRates();
       const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
@@ -378,12 +437,11 @@ export class WalletService {
 
   /**
    * Execute a swap between XRP, USDT, and USDC.
-   * This performs an internal ledger swap (updates database balances).
-   * For on-chain XRPL DEX swaps, this would need to be extended to submit Payment transactions.
+   * Supports both internal (database) and on-chain (XRPL DEX) swaps.
    */
   async executeSwap(userId: string, request: SwapExecuteRequest): Promise<SwapExecuteResponse> {
     try {
-      const { amount, fromCurrency, toCurrency } = request;
+      const { amount, fromCurrency, toCurrency, swapType = 'internal', slippageTolerance = 5 } = request;
 
       if (!amount || amount <= 0) {
         return {
@@ -400,23 +458,6 @@ export class WalletService {
           error: 'Invalid currency pair',
         };
       }
-
-      // Get fresh quote to ensure rates are current
-      const quoteResult = await this.getSwapQuote(userId, {
-        amount,
-        fromCurrency,
-        toCurrency,
-      });
-
-      if (!quoteResult.success || !quoteResult.data) {
-        return {
-          success: false,
-          message: quoteResult.message || 'Failed to get swap quote',
-          error: quoteResult.error || 'Quote failed',
-        };
-      }
-
-      const { fromAmount, toAmount, rate, usdValue, feeUsd } = quoteResult.data;
 
       const adminClient = supabaseAdmin || supabase;
 
@@ -435,141 +476,26 @@ export class WalletService {
         };
       }
 
-      // Calculate new balances
-      let newBalanceXrp = parseFloat((wallet.balance_xrp || 0).toFixed(6));
-      let newBalanceUsdt = parseFloat((wallet.balance_usdt || 0).toFixed(6));
-      let newBalanceUsdc = parseFloat((wallet.balance_usdc || 0).toFixed(6));
-
-      // Debit fromCurrency
-      if (fromCurrency === 'XRP') {
-        newBalanceXrp = Math.max(0, newBalanceXrp - fromAmount);
-      } else if (fromCurrency === 'USDT') {
-        newBalanceUsdt = Math.max(0, newBalanceUsdt - fromAmount);
-      } else {
-        newBalanceUsdc = Math.max(0, newBalanceUsdc - fromAmount);
-      }
-
-      // Credit toCurrency
-      if (toCurrency === 'XRP') {
-        newBalanceXrp += toAmount;
-      } else if (toCurrency === 'USDT') {
-        newBalanceUsdt += toAmount;
-      } else {
-        newBalanceUsdc += toAmount;
-      }
-
-      // Round to 6 decimal places for consistency
-      newBalanceXrp = parseFloat(newBalanceXrp.toFixed(6));
-      newBalanceUsdt = parseFloat(newBalanceUsdt.toFixed(6));
-      newBalanceUsdc = parseFloat(newBalanceUsdc.toFixed(6));
-
-      // Calculate XRP and USD amounts for transaction record
-      // For transaction record, we need to represent the swap in terms of XRP and USD
-      let amountXrp = 0;
-      let amountUsd = usdValue;
-
-      if (fromCurrency === 'XRP') {
-        amountXrp = fromAmount;
-      } else if (toCurrency === 'XRP') {
-        amountXrp = toAmount;
-      } else {
-        // Both are tokens, use the fromAmount converted to XRP equivalent
-        const ratesResult = await exchangeService.getLiveExchangeRates();
-        const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
-        if (xrpUsdRate && xrpUsdRate > 0) {
-          amountXrp = usdValue / xrpUsdRate;
-        }
-      }
-
-      // Create transaction record
-      const { data: transaction, error: txError } = await adminClient
-        .from('transactions')
-        .insert({
-          user_id: userId,
-          type: 'swap',
-          amount_xrp: amountXrp,
-          amount_usd: amountUsd,
-          status: 'completed',
-          description: `Swap ${fromAmount} ${fromCurrency} → ${toAmount.toFixed(6)} ${toCurrency}`,
-        })
-        .select()
-        .single();
-
-      if (txError || !transaction) {
-        console.error('Failed to create swap transaction:', txError);
-        return {
-          success: false,
-          message: 'Failed to create transaction record',
-          error: 'Transaction creation failed',
-        };
-      }
-
-      // Update wallet balances
-      const { error: updateError } = await adminClient
-        .from('wallets')
-        .update({
-          balance_xrp: newBalanceXrp,
-          balance_usdt: newBalanceUsdt,
-          balance_usdc: newBalanceUsdc,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', wallet.id);
-
-      if (updateError) {
-        console.error('Failed to update wallet balances:', updateError);
-        // Rollback transaction status if balance update fails
-        await adminClient
-          .from('transactions')
-          .update({
-            status: 'failed',
-            description: `Swap failed: ${updateError.message}`,
-          })
-          .eq('id', transaction.id);
-
-        return {
-          success: false,
-          message: 'Failed to update wallet balances',
-          error: 'Balance update failed',
-        };
-      }
-
-      // Create notification
-      try {
-        await notificationService.createNotification({
+      // Handle on-chain swap
+      if (swapType === 'onchain') {
+        return await this.executeOnChainSwap(
           userId,
-          type: 'wallet_swap',
-          title: 'Swap completed',
-          message: `You swapped ${fromAmount.toFixed(6)} ${fromCurrency} for ${toAmount.toFixed(6)} ${toCurrency}.`,
-          metadata: {
-            transactionId: transaction.id,
-            fromCurrency,
-            toCurrency,
-            fromAmount,
-            toAmount,
-            rate,
-            usdValue,
-          },
-        });
-      } catch (notifyError) {
-        console.warn('Failed to create swap notification:', notifyError);
-        // Don't fail the swap if notification fails
-      }
-
-      return {
-        success: true,
-        message: 'Swap executed successfully',
-        data: {
-          transactionId: transaction.id,
+          wallet,
+          amount,
           fromCurrency,
           toCurrency,
-          fromAmount,
-          toAmount,
-          rate,
-          usdValue,
-          feeUsd,
-          status: 'completed',
-        },
-      };
+          slippageTolerance
+        );
+      }
+
+      // Handle internal swap (existing logic)
+      return await this.executeInternalSwap(
+        userId,
+        wallet,
+        amount,
+        fromCurrency,
+        toCurrency
+      );
     } catch (error) {
       console.error('Error executing swap:', error);
       return {
@@ -577,6 +503,478 @@ export class WalletService {
         message: error instanceof Error ? error.message : 'Failed to execute swap',
         error: error instanceof Error ? error.message : 'Failed to execute swap',
       };
+    }
+  }
+
+  /**
+   * Execute internal swap (database only)
+   */
+  private async executeInternalSwap(
+    userId: string,
+    wallet: any,
+    amount: number,
+    fromCurrency: 'XRP' | 'USDT' | 'USDC',
+    toCurrency: 'XRP' | 'USDT' | 'USDC'
+  ): Promise<SwapExecuteResponse> {
+    const adminClient = supabaseAdmin || supabase;
+
+    // Get fresh quote
+    const quoteResult = await this.getSwapQuote(userId, {
+      amount,
+      fromCurrency,
+      toCurrency,
+      useDEX: false,
+    });
+
+    if (!quoteResult.success || !quoteResult.data) {
+      return {
+        success: false,
+        message: quoteResult.message || 'Failed to get swap quote',
+        error: quoteResult.error || 'Quote failed',
+      };
+    }
+
+    const { fromAmount, toAmount, rate, usdValue, feeUsd } = quoteResult.data;
+
+    // Calculate new balances
+    let newBalanceXrp = parseFloat((wallet.balance_xrp || 0).toFixed(6));
+    let newBalanceUsdt = parseFloat((wallet.balance_usdt || 0).toFixed(6));
+    let newBalanceUsdc = parseFloat((wallet.balance_usdc || 0).toFixed(6));
+
+    // Debit fromCurrency
+    if (fromCurrency === 'XRP') {
+      newBalanceXrp = Math.max(0, newBalanceXrp - fromAmount);
+    } else if (fromCurrency === 'USDT') {
+      newBalanceUsdt = Math.max(0, newBalanceUsdt - fromAmount);
+    } else {
+      newBalanceUsdc = Math.max(0, newBalanceUsdc - fromAmount);
+    }
+
+    // Credit toCurrency
+    if (toCurrency === 'XRP') {
+      newBalanceXrp += toAmount;
+    } else if (toCurrency === 'USDT') {
+      newBalanceUsdt += toAmount;
+    } else {
+      newBalanceUsdc += toAmount;
+    }
+
+    // Round to 6 decimal places
+    newBalanceXrp = parseFloat(newBalanceXrp.toFixed(6));
+    newBalanceUsdt = parseFloat(newBalanceUsdt.toFixed(6));
+    newBalanceUsdc = parseFloat(newBalanceUsdc.toFixed(6));
+
+    // Calculate XRP and USD amounts for transaction record
+    let amountXrp = 0;
+    let amountUsd = usdValue;
+
+    if (fromCurrency === 'XRP') {
+      amountXrp = fromAmount;
+    } else if (toCurrency === 'XRP') {
+      amountXrp = toAmount;
+    } else {
+      const ratesResult = await exchangeService.getLiveExchangeRates();
+      const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
+      if (xrpUsdRate && xrpUsdRate > 0) {
+        amountXrp = usdValue / xrpUsdRate;
+      }
+    }
+
+    // Create transaction record
+    const { data: transaction, error: txError } = await adminClient
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        type: 'swap',
+        amount_xrp: amountXrp,
+        amount_usd: amountUsd,
+        status: 'completed',
+        description: `Internal swap ${fromAmount} ${fromCurrency} → ${toAmount.toFixed(6)} ${toCurrency}`,
+      })
+      .select()
+      .single();
+
+    if (txError || !transaction) {
+      console.error('Failed to create swap transaction:', txError);
+      return {
+        success: false,
+        message: 'Failed to create transaction record',
+        error: 'Transaction creation failed',
+      };
+    }
+
+    // Update wallet balances
+    const { error: updateError } = await adminClient
+      .from('wallets')
+      .update({
+        balance_xrp: newBalanceXrp,
+        balance_usdt: newBalanceUsdt,
+        balance_usdc: newBalanceUsdc,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', wallet.id);
+
+    if (updateError) {
+      console.error('Failed to update wallet balances:', updateError);
+      await adminClient
+        .from('transactions')
+        .update({
+          status: 'failed',
+          description: `Swap failed: ${updateError.message}`,
+        })
+        .eq('id', transaction.id);
+
+      return {
+        success: false,
+        message: 'Failed to update wallet balances',
+        error: 'Balance update failed',
+      };
+    }
+
+    // Create notification
+    try {
+      await notificationService.createNotification({
+        userId,
+        type: 'wallet_swap',
+        title: 'Swap completed',
+        message: `You swapped ${fromAmount.toFixed(6)} ${fromCurrency} for ${toAmount.toFixed(6)} ${toCurrency}.`,
+        metadata: {
+          transactionId: transaction.id,
+          fromCurrency,
+          toCurrency,
+          fromAmount,
+          toAmount,
+          rate,
+          usdValue,
+        },
+      });
+    } catch (notifyError) {
+      console.warn('Failed to create swap notification:', notifyError);
+    }
+
+    return {
+      success: true,
+      message: 'Swap executed successfully',
+      data: {
+        transactionId: transaction.id,
+        fromCurrency,
+        toCurrency,
+        fromAmount,
+        toAmount,
+        rate,
+        usdValue,
+        feeUsd,
+        status: 'completed',
+        swapType: 'internal',
+      },
+    };
+  }
+
+  /**
+   * Execute on-chain swap via XRPL DEX
+   */
+  private async executeOnChainSwap(
+    userId: string,
+    wallet: any,
+    amount: number,
+    fromCurrency: 'XRP' | 'USDT' | 'USDC',
+    toCurrency: 'XRP' | 'USDT' | 'USDC',
+    slippageTolerance: number
+  ): Promise<SwapExecuteResponse> {
+    const adminClient = supabaseAdmin || supabase;
+
+    // Get DEX quote
+    const dexQuote = await xrplDexService.getDEXPrice(
+      fromCurrency,
+      toCurrency,
+      amount
+    );
+
+    if (!dexQuote.success || !dexQuote.data) {
+      return {
+        success: false,
+        message: dexQuote.error || 'Failed to get DEX quote',
+        error: dexQuote.error || 'DEX quote failed',
+      };
+    }
+
+    const { toAmount, rate, minAmount, estimatedFee } = dexQuote.data;
+
+    // Calculate USD value
+    const ratesResult = await exchangeService.getLiveExchangeRates();
+    const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate || 0.5;
+    let usdValue = 0;
+    if (fromCurrency === 'XRP') {
+      usdValue = amount * xrpUsdRate;
+    } else {
+      usdValue = amount;
+    }
+    const feeUsd = estimatedFee * xrpUsdRate;
+
+    // Ensure trust line exists if receiving token
+    if (toCurrency !== 'XRP') {
+      const hasTrust = await xrplDexService.hasTrustLine(
+        wallet.xrpl_address,
+        toCurrency as 'USDT' | 'USDC'
+      );
+
+      if (!hasTrust) {
+        // Check if wallet has secret for creating trust line
+        if (!wallet.encrypted_wallet_secret) {
+          return {
+            success: false,
+            message: `Trust line required for ${toCurrency}. Please connect your wallet to create it.`,
+            error: 'Trust line required',
+          };
+        }
+
+        try {
+          const walletSecret = encryptionService.decrypt(wallet.encrypted_wallet_secret);
+          const trustResult = await xrplDexService.ensureTrustLine(
+            wallet.xrpl_address,
+            walletSecret,
+            toCurrency as 'USDT' | 'USDC'
+          );
+
+          if (!trustResult.success) {
+            return {
+              success: false,
+              message: `Failed to create trust line for ${toCurrency}: ${trustResult.error}`,
+              error: 'Trust line creation failed',
+            };
+          }
+        } catch (error) {
+          return {
+            success: false,
+            message: 'Failed to decrypt wallet secret for trust line creation',
+            error: 'Wallet secret decryption failed',
+          };
+        }
+      }
+    }
+
+    // Create transaction record (pending status)
+    let amountXrp = 0;
+    if (fromCurrency === 'XRP') {
+      amountXrp = amount;
+    } else if (toCurrency === 'XRP') {
+      amountXrp = toAmount;
+    } else {
+      amountXrp = usdValue / xrpUsdRate;
+    }
+
+    const { data: transaction, error: txError } = await adminClient
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        type: 'swap',
+        amount_xrp: amountXrp,
+        amount_usd: usdValue,
+        status: 'pending',
+        description: `On-chain swap ${amount} ${fromCurrency} → ${toAmount.toFixed(6)} ${toCurrency}`,
+      })
+      .select()
+      .single();
+
+    if (txError || !transaction) {
+      console.error('Failed to create swap transaction:', txError);
+      return {
+        success: false,
+        message: 'Failed to create transaction record',
+        error: 'Transaction creation failed',
+      };
+    }
+
+    // Prepare swap transaction
+    const prepareResult = await xrplDexService.prepareSwapTransaction(
+      wallet.xrpl_address,
+      amount,
+      fromCurrency,
+      toCurrency,
+      minAmount
+    );
+
+    if (!prepareResult.success || !prepareResult.transaction) {
+      await adminClient
+        .from('transactions')
+        .update({
+          status: 'failed',
+          description: `Swap preparation failed: ${prepareResult.error}`,
+        })
+        .eq('id', transaction.id);
+
+      return {
+        success: false,
+        message: prepareResult.error || 'Failed to prepare swap transaction',
+        error: 'Transaction preparation failed',
+      };
+    }
+
+    // Check if wallet has secret (custodial) or needs user signing (non-custodial)
+    if (wallet.encrypted_wallet_secret) {
+      // Custodial: Execute swap directly
+      try {
+        const walletSecret = encryptionService.decrypt(wallet.encrypted_wallet_secret);
+        const swapResult = await xrplDexService.executeSwap(
+          wallet.xrpl_address,
+          walletSecret,
+          amount,
+          fromCurrency,
+          toCurrency,
+          minAmount
+        );
+
+        if (!swapResult.success || !swapResult.txHash) {
+          await adminClient
+            .from('transactions')
+            .update({
+              status: 'failed',
+              description: `Swap execution failed: ${swapResult.error}`,
+            })
+            .eq('id', transaction.id);
+
+          return {
+            success: false,
+            message: swapResult.error || 'Failed to execute swap',
+            error: 'Swap execution failed',
+          };
+        }
+
+        // Update transaction with hash
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: swapResult.txHash,
+            status: 'completed',
+            description: `On-chain swap completed: ${swapResult.txHash}`,
+          })
+          .eq('id', transaction.id);
+
+        // Sync balances from XRPL
+        const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+        await adminClient
+          .from('wallets')
+          .update({
+            balance_xrp: balances.xrp,
+            balance_usdt: balances.usdt,
+            balance_usdc: balances.usdc,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', wallet.id);
+
+        // Create notification
+        try {
+          await notificationService.createNotification({
+            userId,
+            type: 'wallet_swap',
+            title: 'On-chain swap completed',
+            message: `You swapped ${amount} ${fromCurrency} for ${swapResult.actualToAmount?.toFixed(6) || toAmount.toFixed(6)} ${toCurrency} on XRPL.`,
+            metadata: {
+              transactionId: transaction.id,
+              xrplTxHash: swapResult.txHash,
+              fromCurrency,
+              toCurrency,
+              fromAmount: swapResult.actualFromAmount || amount,
+              toAmount: swapResult.actualToAmount || toAmount,
+              rate,
+              usdValue,
+            },
+          });
+        } catch (notifyError) {
+          console.warn('Failed to create swap notification:', notifyError);
+        }
+
+        return {
+          success: true,
+          message: 'On-chain swap executed successfully',
+          data: {
+            transactionId: transaction.id,
+            fromCurrency,
+            toCurrency,
+            fromAmount: swapResult.actualFromAmount || amount,
+            toAmount: swapResult.actualToAmount || toAmount,
+            rate,
+            usdValue,
+            feeUsd,
+            status: 'completed',
+            swapType: 'onchain',
+            xrplTxHash: swapResult.txHash,
+          },
+        };
+      } catch (error) {
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'failed',
+            description: `Swap execution error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          })
+          .eq('id', transaction.id);
+
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to execute swap',
+          error: 'Swap execution failed',
+        };
+      }
+    } else {
+      // Non-custodial: Return transaction for user signing
+      try {
+        // Try to create XUMM payload
+        let xummPayload = null;
+        try {
+          xummPayload = await xummService.createPayload(prepareResult.transaction);
+        } catch (xummError) {
+          console.log('XUMM not available, returning transaction blob for direct signing');
+        }
+
+        // Update transaction with signing info
+        const description = xummPayload
+          ? `On-chain swap pending signature | XUMM_UUID:${xummPayload.uuid}`
+          : `On-chain swap pending signature | Transaction prepared`;
+
+        await adminClient
+          .from('transactions')
+          .update({
+            description,
+          })
+          .eq('id', transaction.id);
+
+        return {
+          success: true,
+          message: xummPayload
+            ? 'Transaction prepared. Please sign in Xaman app.'
+            : 'Transaction prepared. Please sign with your XRPL wallet.',
+          data: {
+            transactionId: transaction.id,
+            fromCurrency,
+            toCurrency,
+            fromAmount: amount,
+            toAmount,
+            rate,
+            usdValue,
+            feeUsd,
+            status: 'pending',
+            swapType: 'onchain',
+            transactionBlob: prepareResult.transactionBlob,
+            xummUrl: xummPayload?.next?.always || undefined,
+            xummUuid: xummPayload?.uuid || undefined,
+          },
+        };
+      } catch (error) {
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'failed',
+            description: `Swap preparation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          })
+          .eq('id', transaction.id);
+
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to prepare swap',
+          error: 'Swap preparation failed',
+        };
+      }
     }
   }
 
