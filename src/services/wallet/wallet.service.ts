@@ -854,17 +854,46 @@ export class WalletService {
           })
           .eq('id', transaction.id);
 
-        // Sync balances from XRPL
+        // Sync balances from XRPL, but preserve internal swap balances
+        // Check if user has any internal swaps to preserve
+        const { data: internalSwaps } = await adminClient
+          .from('transactions')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('type', 'swap')
+          .eq('status', 'completed')
+          .is('xrpl_tx_hash', null) // Internal swaps have no xrpl_tx_hash
+          .limit(1);
+
+        const hasInternalSwaps = internalSwaps && internalSwaps.length > 0;
+        
         const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-        await adminClient
-          .from('wallets')
-          .update({
-            balance_xrp: balances.xrp,
-            balance_usdt: balances.usdt,
-            balance_usdc: balances.usdc,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', wallet.id);
+        
+        // Update balances: sync XRP always, but preserve token balances if internal swaps exist
+        if (hasInternalSwaps) {
+          // Preserve internal swap balances for tokens, but sync XRP
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: balances.xrp,  // Always sync XRP from XRPL
+              // Preserve USDT/USDC from database (internal swaps)
+              balance_usdt: wallet.balance_usdt || balances.usdt,
+              balance_usdc: wallet.balance_usdc || balances.usdc,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', wallet.id);
+        } else {
+          // No internal swaps, safe to sync all from XRPL
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: balances.xrp,
+              balance_usdt: balances.usdt,
+              balance_usdc: balances.usdc,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', wallet.id);
+        }
 
         // Create notification
         try {
