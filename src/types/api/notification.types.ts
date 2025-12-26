@@ -1,6 +1,7 @@
 export type NotificationType =
   | 'wallet_deposit'
   | 'wallet_withdrawal'
+  | 'wallet_swap'
   | 'escrow_created'
   | 'escrow_completed'
   | 'escrow_cancelled'
