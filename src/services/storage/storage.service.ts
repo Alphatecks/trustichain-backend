@@ -72,7 +72,6 @@ export class StorageService {
    */
   private generateFilePath(userId: string, originalFileName: string): string {
     const timestamp = Date.now();
-    const fileExtension = originalFileName.split('.').pop() || '';
     const uniqueId = uuidv4().substring(0, 8);
     const sanitizedFileName = originalFileName
       .replace(/[^a-zA-Z0-9.-]/g, '_')
