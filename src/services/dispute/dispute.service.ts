@@ -403,17 +403,51 @@ export class DisputeService {
       }
 
       // Validate escrow exists and user has access
-      const { data: escrow, error: escrowError } = await adminClient
-        .from('escrows')
-        .select('id, user_id, counterparty_id')
-        .eq('id', request.escrowId)
-        .single();
+      // First check if escrowId is a UUID format, if not, it might be a formatted ID
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.escrowId);
+      
+      let escrow;
+      let escrowError;
 
-      if (escrowError || !escrow) {
+      if (isUUID) {
+        // Query by UUID
+        const result = await adminClient
+          .from('escrows')
+          .select('id, user_id, counterparty_id')
+          .eq('id', request.escrowId)
+          .single();
+        
+        escrow = result.data;
+        escrowError = result.error;
+      } else {
+        // If not a UUID, return error - formatted IDs need to be converted to UUID first
         return {
           success: false,
-          message: 'Escrow not found',
-          error: 'Escrow not found',
+          message: 'Invalid escrow ID format. Please use the UUID (not the formatted ID like #ESC-YYYY-XXX)',
+          error: 'Invalid escrow ID format',
+        };
+      }
+
+      if (escrowError || !escrow) {
+        console.error('Error fetching escrow:', {
+          escrowId: request.escrowId,
+          error: escrowError,
+          isUUID,
+        });
+        
+        // Provide more helpful error message
+        if (escrowError?.code === 'PGRST116') {
+          return {
+            success: false,
+            message: 'Escrow not found. Please verify the escrow ID is correct.',
+            error: 'Escrow not found',
+          };
+        }
+        
+        return {
+          success: false,
+          message: escrowError?.message || 'Escrow not found',
+          error: escrowError?.message || 'Escrow not found',
         };
       }
 
