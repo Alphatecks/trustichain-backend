@@ -398,10 +398,45 @@ export class XRPLDEXService {
         };
       }
 
-      // Let XRPL find the best path automatically
-      payment.Paths = [];
+      // For currency conversion (Account = Destination), we may need explicit paths
+      // Construct paths based on currency pair
+      // Path structure: [{account: issuer, currency, issuer}, ...]
+      
+      // If converting between tokens (not XRP), route through XRP
+      if (fromCurrency !== 'XRP' && toCurrency !== 'XRP') {
+        // Token to token: route through XRP
+        const fromIssuer = this.getIssuer(fromCurrency as 'USDT' | 'USDC');
+        const toIssuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
+        
+        payment.Paths = [
+          [
+            { account: fromIssuer, currency: 'USD', issuer: fromIssuer },
+            { currency: 'XRP' },
+            { account: toIssuer, currency: 'USD', issuer: toIssuer },
+          ],
+        ];
+      } else if (fromCurrency === 'XRP' && toCurrency !== 'XRP') {
+        // XRP to token: direct path
+        const toIssuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
+        payment.Paths = [
+          [
+            { currency: 'XRP' },
+            { account: toIssuer, currency: 'USD', issuer: toIssuer },
+          ],
+        ];
+      } else if (fromCurrency !== 'XRP' && toCurrency === 'XRP') {
+        // Token to XRP: direct path
+        const fromIssuer = this.getIssuer(fromCurrency as 'USDT' | 'USDC');
+        payment.Paths = [
+          [
+            { account: fromIssuer, currency: 'USD', issuer: fromIssuer },
+            { currency: 'XRP' },
+          ],
+        ];
+      }
+      // If both are XRP, no paths needed (but this shouldn't happen in a swap)
 
-      // Autofill transaction
+      // Autofill transaction (this will add missing fields like Fee, Sequence, etc.)
       const prepared = await client.autofill(payment);
       await client.disconnect();
 
