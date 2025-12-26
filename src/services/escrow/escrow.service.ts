@@ -9,6 +9,7 @@ import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
 import { xummService } from '../xumm/xumm.service';
+import { notificationService } from '../notification/notification.service';
 
 export class EscrowService {
   /**
@@ -582,6 +583,37 @@ export class EscrowService {
           description: `Escrow create: ${request.description || 'No description'} | XRPL TX: ${xrplTxHash}`,
         });
 
+      // Create notifications for initiator and counterparty (if user)
+      try {
+        // Initiator
+        await notificationService.createNotification({
+          userId,
+          type: 'escrow_created',
+          title: 'Escrow created',
+          message: `Escrow was created for ${amountXrp.toFixed(6)} XRP.`,
+          metadata: {
+            escrowId: escrow.id,
+            xrplTxHash: xrplTxHash,
+          },
+        });
+
+        // Counterparty
+        if (counterpartyUserId) {
+          await notificationService.createNotification({
+            userId: counterpartyUserId,
+            type: 'escrow_created',
+            title: 'New escrow assigned',
+            message: `You have been added to a new escrow for ${amountXrp.toFixed(6)} XRP.`,
+            metadata: {
+              escrowId: escrow.id,
+              xrplTxHash: xrplTxHash,
+            },
+          });
+        }
+      } catch (notifyError) {
+        console.warn('Failed to create escrow created notifications:', notifyError);
+      }
+
       return {
         success: true,
         message: 'Escrow created successfully on XRPL',
@@ -1104,14 +1136,14 @@ export class EscrowService {
         try {
           finishTxHash = await xrplEscrowService.finishEscrow({
             ownerAddress: platformAddress,
-            escrowSequence: escrowDetails.sequence,
-            condition: escrowDetails.condition,
-            fulfillment: undefined, // TODO: Implement fulfillment if condition exists
+          escrowSequence: escrowDetails.sequence,
+          condition: escrowDetails.condition,
+          fulfillment: undefined, // TODO: Implement fulfillment if condition exists
             walletSecret: platformSecret,
-          });
+        });
           console.log('[Escrow Release] Escrow finished on XRPL:', {
             txHash: finishTxHash,
-            escrowSequence: escrowDetails.sequence,
+          escrowSequence: escrowDetails.sequence,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1214,12 +1246,12 @@ export class EscrowService {
 
         const formattedEscrow: Escrow = {
           id: updatedEscrow.id,
-          escrowId: formattedEscrowId,
+            escrowId: formattedEscrowId,
           userId: updatedEscrow.user_id,
           counterpartyId: updatedEscrow.counterparty_id || '',
           initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
           counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
-          amount: {
+            amount: {
             usd: parseFloat(updatedEscrow.amount_usd),
             xrp: parseFloat(updatedEscrow.amount_xrp),
           },
@@ -1244,6 +1276,37 @@ export class EscrowService {
           releaseConditions: updatedEscrow.release_conditions || undefined,
           milestones: milestones.length > 0 ? milestones : undefined,
         };
+
+        // Create notifications for initiator and counterparty
+        try {
+          if (updatedEscrow.user_id) {
+            await notificationService.createNotification({
+              userId: updatedEscrow.user_id,
+              type: 'escrow_completed',
+              title: 'Escrow released',
+              message: 'Funds for your escrow have been released.',
+              metadata: {
+                escrowId: updatedEscrow.id,
+                xrplTxHash: updatedEscrow.xrpl_escrow_id,
+              },
+            });
+          }
+
+          if (updatedEscrow.counterparty_id) {
+            await notificationService.createNotification({
+              userId: updatedEscrow.counterparty_id,
+              type: 'escrow_completed',
+              title: 'Escrow completed',
+              message: 'You received funds from a completed escrow.',
+              metadata: {
+                escrowId: updatedEscrow.id,
+                xrplTxHash: updatedEscrow.xrpl_escrow_id,
+              },
+            });
+          }
+        } catch (notifyError) {
+          console.warn('Failed to create escrow completed notifications:', notifyError);
+        }
 
         return {
           success: true,

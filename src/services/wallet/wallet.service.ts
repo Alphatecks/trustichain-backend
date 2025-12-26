@@ -4,11 +4,18 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import { FundWalletRequest, WithdrawWalletRequest, WalletTransaction } from '../../types/api/wallet.types';
+import {
+  FundWalletRequest,
+  WithdrawWalletRequest,
+  WalletTransaction,
+  SwapQuoteRequest,
+  SwapQuoteResponse,
+} from '../../types/api/wallet.types';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { xummService } from '../xumm/xumm.service';
+import { notificationService } from '../notification/notification.service';
 
 export class WalletService {
   /**
@@ -234,6 +241,123 @@ export class WalletService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get wallet balance',
         error: error instanceof Error ? error.message : 'Failed to get wallet balance',
+      };
+    }
+  }
+
+  /**
+   * Get swap quote between XRP, USDT, and USDC for the user's wallet.
+   * This powers the "Preview Swap" UI and does not execute any on-chain swap.
+   */
+  async getSwapQuote(userId: string, request: SwapQuoteRequest): Promise<SwapQuoteResponse> {
+    try {
+      const { amount, fromCurrency, toCurrency } = request;
+
+      if (!amount || amount <= 0) {
+        return {
+          success: false,
+          message: 'Amount must be greater than 0',
+          error: 'Invalid amount',
+        };
+      }
+
+      if (fromCurrency === toCurrency) {
+        return {
+          success: false,
+          message: 'From and to currencies must be different',
+          error: 'Invalid currency pair',
+        };
+      }
+
+      // Get current wallet balances
+      const balanceResult = await this.getBalance(userId);
+      if (!balanceResult.success || !balanceResult.data) {
+        return {
+          success: false,
+          message: 'Failed to retrieve wallet balance',
+          error: 'Balance fetch failed',
+        };
+      }
+
+      const { balance } = balanceResult.data;
+
+      // Determine available "from" balance, respecting XRP reserve rules
+      let availableFromBalance: number;
+      if (fromCurrency === 'XRP') {
+        const BASE_RESERVE = 1.0; // XRPL base reserve (as used in withdrawWallet)
+        const ESTIMATED_FEE = 0.000015;
+        const minimumRequired = BASE_RESERVE + ESTIMATED_FEE;
+        const availableXrp = Math.max(0, balance.xrp - minimumRequired);
+        availableFromBalance = availableXrp;
+      } else if (fromCurrency === 'USDT') {
+        availableFromBalance = balance.usdt;
+      } else {
+        availableFromBalance = balance.usdc;
+      }
+
+      if (amount > availableFromBalance) {
+        return {
+          success: false,
+          message: `Insufficient ${fromCurrency} balance for swap`,
+          error: 'Insufficient balance',
+        };
+      }
+
+      // Get XRP/USD rate from exchange service
+      const ratesResult = await exchangeService.getLiveExchangeRates();
+      const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
+
+      if (!ratesResult.success || !ratesResult.data || !xrpUsdRate || xrpUsdRate <= 0) {
+        return {
+          success: false,
+          message: 'XRP/USD exchange rate not available',
+          error: 'Exchange rate not available',
+        };
+      }
+
+      // Convert "from" amount to USD-equivalent
+      let usdValue = 0;
+      if (fromCurrency === 'XRP') {
+        usdValue = amount * xrpUsdRate;
+      } else {
+        // USDT and USDC are treated as USD-pegged
+        usdValue = amount;
+      }
+
+      // Apply a small platform fee (configurable later)
+      const SWAP_FEE_PERCENT = 0.0; // 0% for now – adjust when ready to charge fees
+      const feeUsd = usdValue * SWAP_FEE_PERCENT;
+      const netUsd = usdValue - feeUsd;
+
+      // Convert net USD value into target currency
+      let toAmount = 0;
+      if (toCurrency === 'XRP') {
+        toAmount = netUsd / xrpUsdRate;
+      } else {
+        toAmount = netUsd; // USDT/USDC 1:1 with USD
+      }
+
+      const rate = toAmount / amount;
+
+      return {
+        success: true,
+        message: 'Swap quote calculated successfully',
+        data: {
+          fromCurrency,
+          toCurrency,
+          fromAmount: amount,
+          toAmount: parseFloat(toAmount.toFixed(6)),
+          rate: parseFloat(rate.toFixed(8)),
+          usdValue: parseFloat(netUsd.toFixed(2)),
+          feeUsd: parseFloat(feeUsd.toFixed(2)),
+        },
+      };
+    } catch (error) {
+      console.error('Error getting swap quote:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get swap quote',
+        error: error instanceof Error ? error.message : 'Failed to get swap quote',
       };
     }
   }
@@ -751,14 +875,14 @@ export class WalletService {
 
       // Update wallet balance if successful
       if (status === 'completed') {
-        const { data: wallet } = await adminClient
+        const { data: walletForBalance } = await adminClient
           .from('wallets')
           .select('xrpl_address')
           .eq('user_id', userId)
           .single();
 
-        if (wallet) {
-          const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+        if (walletForBalance) {
+          const balances = await xrplWalletService.getAllBalances(walletForBalance.xrpl_address);
           await adminClient
             .from('wallets')
             .update({
@@ -768,6 +892,24 @@ export class WalletService {
               updated_at: new Date().toISOString(),
             })
             .eq('user_id', userId);
+
+          // Create notification for successful deposit
+          try {
+            await notificationService.createNotification({
+              userId,
+              type: 'wallet_deposit',
+              title: 'Deposit received',
+              message: `You deposited ${parseFloat(transaction.amount_xrp).toFixed(6)} XRP (~$${parseFloat(transaction.amount_usd).toFixed(2)}).`,
+              metadata: {
+                transactionId,
+                xrplTxHash: submitResult.hash,
+                amountXrp: parseFloat(transaction.amount_xrp),
+                amountUsd: parseFloat(transaction.amount_usd),
+              },
+            });
+          } catch (notifyError) {
+            console.warn('Failed to create deposit notification:', notifyError);
+          }
         }
       }
 
@@ -1280,7 +1422,7 @@ export class WalletService {
 
         if (receiverWallet && receiverWallet.user_id !== userId) {
           // Destination is a TrustiChain user - create deposit transaction for them
-          await adminClient
+          const { data: receiverTx } = await adminClient
             .from('transactions')
             .insert({
               user_id: receiverWallet.user_id,
@@ -1290,7 +1432,9 @@ export class WalletService {
               xrpl_tx_hash: xrplTxHash,
               status: 'completed',
               description: `Deposit from ${wallet.xrpl_address}`,
-            });
+            })
+            .select()
+            .single();
 
           // Update receiver's wallet balance
           const receiverBalances = await xrplWalletService.getAllBalances(request.destinationAddress);
@@ -1303,6 +1447,25 @@ export class WalletService {
               updated_at: new Date().toISOString(),
             })
             .eq('user_id', receiverWallet.user_id);
+
+          // Create notification for receiver
+          try {
+            await notificationService.createNotification({
+              userId: receiverWallet.user_id,
+              type: 'wallet_deposit',
+              title: 'Payment received',
+              message: `You received ${amountXrp.toFixed(6)} XRP from ${wallet.xrpl_address}.`,
+              metadata: {
+                amountXrp,
+                amountUsd,
+                xrplTxHash,
+                transactionId: receiverTx?.id,
+                fromAddress: wallet.xrpl_address,
+              },
+            });
+          } catch (notifyError) {
+            console.warn('Failed to create receiver deposit notification:', notifyError);
+          }
         }
       } catch (receiverError) {
         // Log but don't fail the withdrawal if receiver transaction creation fails

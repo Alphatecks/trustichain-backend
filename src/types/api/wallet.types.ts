@@ -17,6 +17,38 @@ export interface WalletBalanceResponse {
   error?: string;
 }
 
+export type WalletSwapCurrency = 'XRP' | 'USDT' | 'USDC';
+
+export interface SwapQuoteRequest {
+  amount: number;
+  fromCurrency: WalletSwapCurrency;
+  toCurrency: WalletSwapCurrency;
+}
+
+export interface SwapQuoteResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    fromCurrency: WalletSwapCurrency;
+    toCurrency: WalletSwapCurrency;
+    fromAmount: number;
+    toAmount: number;
+    /**
+     * Conversion rate expressed as: 1 fromCurrency = rate toCurrency
+     */
+    rate: number;
+    /**
+     * Approximate USD value of the swap after fees
+     */
+    usdValue: number;
+    /**
+     * Platform fee charged for the swap, in USD-equivalent
+     */
+    feeUsd: number;
+  };
+  error?: string;
+}
+
 export interface FundWalletRequest {
   amount: number;
   currency: 'USD' | 'XRP' | 'USDT' | 'USDC';
