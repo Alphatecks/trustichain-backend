@@ -699,6 +699,10 @@ export class WalletService {
     }
 
     const { toAmount, rate, minAmount, estimatedFee } = dexQuote.data;
+    
+    // Apply slippage tolerance
+    const slippageMultiplier = (100 - slippageTolerance) / 100;
+    const adjustedMinAmount = minAmount * slippageMultiplier;
 
     // Calculate USD value
     const ratesResult = await exchangeService.getLiveExchangeRates();
@@ -791,7 +795,7 @@ export class WalletService {
       amount,
       fromCurrency,
       toCurrency,
-      minAmount
+      adjustedMinAmount
     );
 
     if (!prepareResult.success || !prepareResult.transaction) {
@@ -821,7 +825,7 @@ export class WalletService {
           amount,
           fromCurrency,
           toCurrency,
-          minAmount
+          adjustedMinAmount
         );
 
         if (!swapResult.success || !swapResult.txHash) {

@@ -115,11 +115,19 @@ export class XRPLDEXService {
         }
 
         // Calculate XRP amount from available offers
+        // Step 1: fromCurrency -> XRP, so TakerPays is token (object), TakerGets is XRP (drops string)
         let remainingAmount = amount;
         let totalXrp = 0;
         for (const offer of step1.result.offers) {
-          const offerAmount = parseFloat(offer.TakerPays.value);
-          const offerXrp = parseFloat(offer.TakerGets);
+          const takerPays = offer.TakerPays;
+          const takerGets = offer.TakerGets;
+          const offerAmount = typeof takerPays === 'string' ? parseFloat(takerPays) : parseFloat((takerPays as any).value);
+          // TakerGets should be XRP (string in drops) when converting from token to XRP
+          let offerXrp = 0;
+          if (typeof takerGets === 'string') {
+            const dropsStr: string = String(takerGets);
+            offerXrp = parseFloat((dropsToXrp as any)(dropsStr));
+          }
           const rate = offerXrp / offerAmount;
           
           if (remainingAmount <= offerAmount) {
@@ -160,11 +168,19 @@ export class XRPLDEXService {
         }
 
         // Calculate token amount from available offers
+        // Step 2: XRP -> toCurrency, so TakerPays is XRP (drops string), TakerGets is token (object)
         let remainingXrp = totalXrp;
         let totalTokens = 0;
         for (const offer of step2.result.offers) {
-          const offerXrp = parseFloat(offer.TakerPays);
-          const offerTokens = parseFloat(offer.TakerGets.value);
+          const takerPays = offer.TakerPays;
+          const takerGets = offer.TakerGets;
+          // TakerPays should be XRP (string in drops) when converting from XRP to token
+          let offerXrp = 0;
+          if (typeof takerPays === 'string') {
+            const dropsStr: string = String(takerPays);
+            offerXrp = parseFloat((dropsToXrp as any)(dropsStr));
+          }
+          const offerTokens = typeof takerGets === 'string' ? parseFloat(takerGets) : parseFloat((takerGets as any).value);
           const rate = offerTokens / offerXrp;
           
           if (remainingXrp <= offerXrp) {
@@ -253,10 +269,18 @@ export class XRPLDEXService {
       let totalReceived = 0;
 
       for (const offer of orderbook.result.offers) {
+        const takerPays = offer.TakerPays;
+        const takerGets = offer.TakerGets;
+        
         if (fromCurrency === 'XRP') {
           // Buying token: paying XRP, receiving token
-          const offerXrp = parseFloat(offer.TakerPays);
-          const offerTokens = parseFloat(offer.TakerGets.value);
+          // TakerPays is XRP (string in drops), TakerGets is token (object)
+          let offerXrp = 0;
+          if (typeof takerPays === 'string') {
+            const dropsStr: string = String(takerPays);
+            offerXrp = parseFloat((dropsToXrp as any)(dropsStr));
+          }
+          const offerTokens = typeof takerGets === 'string' ? parseFloat(takerGets) : parseFloat((takerGets as any).value);
           const rate = offerTokens / offerXrp;
 
           if (remainingAmount <= offerXrp) {
@@ -269,8 +293,13 @@ export class XRPLDEXService {
           }
         } else {
           // Selling token: paying token, receiving XRP
-          const offerTokens = parseFloat(offer.TakerPays.value);
-          const offerXrp = parseFloat(offer.TakerGets);
+          // TakerPays is token (object), TakerGets is XRP (string in drops)
+          const offerTokens = typeof takerPays === 'string' ? parseFloat(takerPays) : parseFloat((takerPays as any).value);
+          let offerXrp = 0;
+          if (typeof takerGets === 'string') {
+            const dropsStr: string = String(takerGets);
+            offerXrp = parseFloat((dropsToXrp as any)(dropsStr));
+          }
           const rate = offerXrp / offerTokens;
 
           if (remainingAmount <= offerTokens) {
@@ -333,21 +362,27 @@ export class XRPLDEXService {
 
       // Build payment transaction
       // Key: When Destination = Account, XRPL treats it as currency conversion
-      const payment: Payment = {
-        TransactionType: 'Payment',
-        Account: userAddress,
-        Destination: userAddress, // Same address = currency conversion via DEX
-      };
+      let payment: Payment;
 
       // Set what user wants to receive
       if (toCurrency === 'XRP') {
-        payment.Amount = xrpToDrops(minAmount.toString());
+        payment = {
+          TransactionType: 'Payment',
+          Account: userAddress,
+          Destination: userAddress, // Same address = currency conversion via DEX
+          Amount: xrpToDrops(minAmount.toString()),
+        };
       } else {
         const issuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
-        payment.Amount = {
-          currency: 'USD',
-          value: minAmount.toFixed(6),
-          issuer: issuer,
+        payment = {
+          TransactionType: 'Payment',
+          Account: userAddress,
+          Destination: userAddress, // Same address = currency conversion via DEX
+          Amount: {
+            currency: 'USD',
+            value: minAmount.toFixed(6),
+            issuer: issuer,
+          },
         };
       }
 
@@ -426,25 +461,30 @@ export class XRPLDEXService {
       await client.disconnect();
 
       // Check transaction result
-      const txResult = result.result.meta?.TransactionResult;
+      const swapMeta = result.result.meta;
+      let txResult: string | undefined;
+      if (swapMeta && typeof swapMeta === 'object' && 'TransactionResult' in swapMeta) {
+        txResult = (swapMeta as any).TransactionResult;
+      }
+      
       if (txResult !== 'tesSUCCESS') {
         return {
           success: false,
-          error: `Transaction failed: ${txResult}`,
+          error: `Transaction failed: ${txResult || 'Unknown error'}`,
         };
       }
 
       // Get actual amounts from transaction result
-      const meta = result.result.meta;
       let actualFromAmount = fromAmount;
       let actualToAmount = minAmount;
 
-      if (meta && typeof meta === 'object' && 'DeliveredAmount' in meta) {
-        const delivered = meta.DeliveredAmount;
+      if (swapMeta && typeof swapMeta === 'object' && 'DeliveredAmount' in swapMeta) {
+        const delivered = (swapMeta as any).DeliveredAmount;
         if (typeof delivered === 'string') {
-          actualToAmount = parseFloat(dropsToXrp(delivered));
+          const deliveredStr: string = String(delivered);
+          actualToAmount = parseFloat((dropsToXrp as any)(deliveredStr));
         } else if (delivered && typeof delivered === 'object' && 'value' in delivered) {
-          actualToAmount = parseFloat(delivered.value as string);
+          actualToAmount = parseFloat(String(delivered.value));
         }
       }
 
@@ -494,7 +534,7 @@ export class XRPLDEXService {
       const issuer = this.getIssuer(currency);
       const wallet = Wallet.fromSeed(walletSecret);
 
-      const trustSet = {
+      const trustSet: any = {
         TransactionType: 'TrustSet',
         Account: userAddress,
         LimitAmount: {
@@ -506,10 +546,14 @@ export class XRPLDEXService {
 
       const prepared = await client.autofill(trustSet);
       const signed = wallet.sign(prepared);
-      const result = await client.submitAndWait(signed.tx_blob);
+      const trustResult = await client.submitAndWait(signed.tx_blob);
       await client.disconnect();
 
-      const txResult = result.result.meta?.TransactionResult;
+      const trustMeta = trustResult.result.meta;
+      let txResult: string | undefined;
+      if (trustMeta && typeof trustMeta === 'object' && 'TransactionResult' in trustMeta) {
+        txResult = (trustMeta as any).TransactionResult;
+      }
       if (txResult !== 'tesSUCCESS') {
         return {
           success: false,
