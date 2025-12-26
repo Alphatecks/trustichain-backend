@@ -6,8 +6,10 @@ import {
   DisputeStatus,
   CreateDisputeRequest,
   CreateDisputeResponse,
+  UploadEvidenceResponse,
 } from '../types/api/dispute.types';
 import { disputeService } from '../services/dispute/dispute.service';
+import { storageService } from '../services/storage/storage.service';
 
 export class DisputeController {
   /**
@@ -122,6 +124,44 @@ export class DisputeController {
 
       if (result.success) {
         res.status(201).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Upload evidence file for dispute
+   * POST /api/disputes/evidence/upload
+   */
+  async uploadEvidence(
+    req: Request,
+    res: Response<UploadEvidenceResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const file = req.file;
+
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          message: 'No file provided',
+          error: 'No file provided',
+        });
+        return;
+      }
+
+      const result = await storageService.uploadFile(userId, file);
+
+      if (result.success) {
+        res.status(200).json(result);
       } else {
         res.status(400).json(result);
       }

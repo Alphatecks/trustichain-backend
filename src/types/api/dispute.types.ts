@@ -104,4 +104,16 @@ export interface CreateDisputeResponse {
   error?: string;
 }
 
+export interface UploadEvidenceResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    fileUrl: string;
+    fileName: string;
+    fileSize: number;
+    fileType: string;
+  };
+  error?: string;
+}
+
 

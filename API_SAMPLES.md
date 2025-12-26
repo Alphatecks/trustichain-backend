@@ -447,6 +447,293 @@ curl -X GET "https://your-api.com/api/escrow/list?limit=10&offset=0" \
 
 ---
 
+## Dispute APIs
+
+### Create Dispute
+
+**Endpoint:** `POST /api/disputes`
+
+**Description:** Creates a new dispute for an escrow transaction. Requires the user to be either the initiator or counterparty of the escrow.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "escrowId": "770e8400-e29b-41d4-a716-446655440000",
+  "disputeCategory": "freelancing",
+  "disputeReasonType": "quality_issue",
+  "payerXrpWalletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+  "payerName": "John Doe",
+  "payerEmail": "john.doe@example.com",
+  "payerPhone": "+1234567890",
+  "respondentXrpWalletAddress": "rDKoevwXEsVqaKmfuudtVSrczAPqVs2wSJ",
+  "respondentName": "Jane Smith",
+  "respondentEmail": "jane.smith@example.com",
+  "respondentPhone": "+0987654321",
+  "disputeReason": "Service quality did not meet agreed standards",
+  "amount": 1000.00,
+  "currency": "USD",
+  "resolutionPeriod": "14 days",
+  "expectedResolutionDate": "2024-02-15T00:00:00Z",
+  "description": "The freelancer delivered work that did not meet the specifications outlined in the contract. Multiple revisions were requested but the quality remained subpar.",
+  "evidence": [
+    {
+      "fileUrl": "https://storage.example.com/evidence/contract.pdf",
+      "fileName": "contract.pdf",
+      "fileType": "application/pdf",
+      "fileSize": 245760
+    },
+    {
+      "fileUrl": "https://storage.example.com/evidence/screenshots.zip",
+      "fileName": "screenshots.zip",
+      "fileType": "application/zip",
+      "fileSize": 1024000
+    }
+  ]
+}
+```
+
+**Request (cURL):**
+```bash
+curl -X POST https://your-api.com/api/disputes \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "escrowId": "770e8400-e29b-41d4-a716-446655440000",
+    "disputeCategory": "freelancing",
+    "disputeReasonType": "quality_issue",
+    "payerXrpWalletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+    "payerName": "John Doe",
+    "payerEmail": "john.doe@example.com",
+    "payerPhone": "+1234567890",
+    "respondentXrpWalletAddress": "rDKoevwXEsVqaKmfuudtVSrczAPqVs2wSJ",
+    "respondentName": "Jane Smith",
+    "respondentEmail": "jane.smith@example.com",
+    "respondentPhone": "+0987654321",
+    "disputeReason": "Service quality did not meet agreed standards",
+    "amount": 1000.00,
+    "currency": "USD",
+    "resolutionPeriod": "14 days",
+    "expectedResolutionDate": "2024-02-15T00:00:00Z",
+    "description": "The freelancer delivered work that did not meet the specifications outlined in the contract. Multiple revisions were requested but the quality remained subpar.",
+    "evidence": [
+      {
+        "fileUrl": "https://storage.example.com/evidence/contract.pdf",
+        "fileName": "contract.pdf",
+        "fileType": "application/pdf",
+        "fileSize": 245760
+      }
+    ]
+  }'
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "message": "Dispute created successfully",
+  "data": {
+    "disputeId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "caseId": "#DSP-2024-001"
+  }
+}
+```
+
+**Error Response (400 Bad Request - Missing Fields):**
+```json
+{
+  "success": false,
+  "message": "Escrow ID is required",
+  "error": "Escrow ID is required"
+}
+```
+
+**Error Response (400 Bad Request - Wallet Not Found):**
+```json
+{
+  "success": false,
+  "message": "Respondent wallet not found. The respondent must have a registered wallet.",
+  "error": "Respondent wallet not found"
+}
+```
+
+**Error Response (400 Bad Request - Access Denied):**
+```json
+{
+  "success": false,
+  "message": "You do not have access to this escrow",
+  "error": "Access denied"
+}
+```
+
+**Request Body Fields:**
+- `escrowId` (string, required) - UUID of the escrow this dispute relates to
+- `disputeCategory` (string, required) - One of: `freelancing`, `real_estate`, `product_purchase`, `custom`
+- `disputeReasonType` (string, required) - One of: `quality_issue`, `delivery_delay`, `payment_dispute`
+- `payerXrpWalletAddress` (string, required) - XRPL wallet address of the payer (must match authenticated user's wallet)
+- `payerName` (string, optional) - Full name of the payer
+- `payerEmail` (string, optional) - Email address of the payer
+- `payerPhone` (string, optional) - Phone number of the payer
+- `respondentXrpWalletAddress` (string, required) - XRPL wallet address of the respondent
+- `respondentName` (string, optional) - Full name of the respondent
+- `respondentEmail` (string, optional) - Email address of the respondent
+- `respondentPhone` (string, optional) - Phone number of the respondent
+- `disputeReason` (string, required) - Brief reason for the dispute
+- `amount` (number, required) - Amount in dispute (must be > 0)
+- `currency` (string, required) - One of: `USD`, `XRP`
+- `resolutionPeriod` (string, optional) - Expected resolution period (e.g., "7 days", "14 days")
+- `expectedResolutionDate` (string, optional) - ISO 8601 date string for expected resolution
+- `description` (string, required) - Detailed description of the dispute
+- `evidence` (array, optional) - Array of evidence items with:
+  - `fileUrl` (string, required) - URL to the evidence file
+  - `fileName` (string, required) - Name of the file
+  - `fileType` (string, optional) - MIME type of the file
+  - `fileSize` (number, optional) - Size of the file in bytes
+
+**Minimal Request Example (Required Fields Only):**
+```json
+{
+  "escrowId": "770e8400-e29b-41d4-a716-446655440000",
+  "disputeCategory": "freelancing",
+  "disputeReasonType": "quality_issue",
+  "payerXrpWalletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+  "respondentXrpWalletAddress": "rDKoevwXEsVqaKmfuudtVSrczAPqVs2wSJ",
+  "disputeReason": "Service quality did not meet agreed standards",
+  "amount": 1000.00,
+  "currency": "USD",
+  "description": "The freelancer delivered work that did not meet the specifications outlined in the contract."
+}
+```
+
+### Upload Evidence File
+
+**Endpoint:** `POST /api/disputes/evidence/upload`
+
+**Description:** Uploads an evidence file for dispute. Returns the file URL that can be used in the Create Dispute request.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+**Request Body (multipart/form-data):**
+- `file` (file, required) - The evidence file to upload
+
+**Request (cURL):**
+```bash
+curl -X POST https://your-api.com/api/disputes/evidence/upload \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/evidence.pdf"
+```
+
+**Request (JavaScript/Fetch):**
+```javascript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+
+const response = await fetch('https://your-api.com/api/disputes/evidence/upload', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+  },
+  body: formData,
+});
+
+const result = await response.json();
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "File uploaded successfully",
+  "data": {
+    "fileUrl": "https://your-project.supabase.co/storage/v1/object/public/dispute-evidence/user-id/1234567890-abc12345-evidence.pdf",
+    "fileName": "evidence.pdf",
+    "fileSize": 245760,
+    "fileType": "application/pdf"
+  }
+}
+```
+
+**Error Response (400 Bad Request - No File):**
+```json
+{
+  "success": false,
+  "message": "No file provided",
+  "error": "No file provided"
+}
+```
+
+**Error Response (400 Bad Request - File Too Large):**
+```json
+{
+  "success": false,
+  "message": "File size exceeds maximum allowed size of 50MB",
+  "error": "File size exceeds maximum allowed size of 50MB"
+}
+```
+
+**Error Response (400 Bad Request - Invalid File Type):**
+```json
+{
+  "success": false,
+  "message": "File type not allowed. Allowed types: image/jpeg, image/png, application/pdf, ...",
+  "error": "File type not allowed. Allowed types: image/jpeg, image/png, application/pdf, ..."
+}
+```
+
+**File Upload Limits:**
+- **Max File Size:** 50MB
+- **Allowed File Types:**
+  - Images: `image/jpeg`, `image/jpg`, `image/png`, `image/gif`, `image/webp`
+  - Documents: `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `text/plain`
+  - Archives: `application/zip`, `application/x-zip-compressed`
+  - Video: `video/mp4`, `video/quicktime`
+  - Audio: `audio/mpeg`, `audio/wav`
+
+**Usage Flow:**
+1. Upload evidence files using this endpoint
+2. Collect the `fileUrl` from each upload response
+3. Include the `fileUrl` in the `evidence` array when creating a dispute
+
+**Example Workflow:**
+```javascript
+// Step 1: Upload evidence files
+const file1 = await uploadEvidence(file1Input.files[0], token);
+const file2 = await uploadEvidence(file2Input.files[0], token);
+
+// Step 2: Create dispute with file URLs
+const disputeData = {
+  escrowId: "...",
+  // ... other fields
+  evidence: [
+    {
+      fileUrl: file1.data.fileUrl,
+      fileName: file1.data.fileName,
+      fileType: file1.data.fileType,
+      fileSize: file1.data.fileSize,
+    },
+    {
+      fileUrl: file2.data.fileUrl,
+      fileName: file2.data.fileName,
+      fileType: file2.data.fileType,
+      fileSize: file2.data.fileSize,
+    },
+  ],
+};
+
+await createDispute(disputeData, token);
+```
+
+---
+
 ## Trustiscore APIs
 
 ### Get Trustiscore

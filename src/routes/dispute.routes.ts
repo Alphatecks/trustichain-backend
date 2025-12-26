@@ -1,7 +1,16 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { disputeController } from '../controllers/dispute.controller';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
+
+// Configure multer for memory storage (files stored in memory before upload to Supabase)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB max file size
+  },
+});
 
 const router = Router();
 
@@ -16,6 +25,21 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     await disputeController.getSummary(req, res);
+  })
+);
+
+/**
+ * @route   POST /api/disputes/evidence/upload
+ * @desc    Upload evidence file for dispute
+ * @access  Private
+ * @body    multipart/form-data with 'file' field
+ */
+router.post(
+  '/evidence/upload',
+  authenticate,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    await disputeController.uploadEvidence(req, res);
   })
 );
 
