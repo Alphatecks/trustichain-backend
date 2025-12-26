@@ -403,7 +403,7 @@ export class DisputeService {
       }
 
       // Validate escrow exists and user has access
-      // Accept both UUID and formatted ID (#ESC-YYYY-XXX)
+      // Accept UUID, formatted ID (#ESC-YYYY-XXX), or XRPL escrow ID (#hexadecimal)
       // Trim whitespace and handle case variations
       const escrowIdInput = (request.escrowId || '').trim();
       
@@ -416,8 +416,10 @@ export class DisputeService {
       });
       
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(escrowIdInput);
-      // More flexible regex - allow case variations and optional leading/trailing spaces
+      // Formatted ID: #ESC-YYYY-XXX
       const isFormattedId = /^#?ESC[-_]?\d{4}[-_]?\d{3}$/i.test(escrowIdInput) || /^#ESC-\d{4}-\d{3}$/i.test(escrowIdInput);
+      // XRPL escrow ID: #hexadecimal (e.g., #60A8AEC3)
+      const isXrplEscrowId = /^#[0-9a-f]+$/i.test(escrowIdInput);
       
       let escrow;
       let escrowError;
@@ -433,6 +435,25 @@ export class DisputeService {
         
         escrow = result.data;
         escrowError = result.error;
+      } else if (isXrplEscrowId) {
+        // Query by XRPL escrow ID (hexadecimal with # prefix, e.g., #60A8AEC3)
+        console.log('[DEBUG] createDispute: Querying by XRPL escrow ID', { escrowId: escrowIdInput });
+        // Remove the # prefix for database query
+        const xrplId = escrowIdInput.startsWith('#') ? escrowIdInput.substring(1) : escrowIdInput;
+        
+        const result = await adminClient
+          .from('escrows')
+          .select('id, user_id, counterparty_id, escrow_sequence, created_at')
+          .eq('xrpl_escrow_id', xrplId)
+          .single();
+        
+        escrow = result.data;
+        escrowError = result.error;
+        
+        console.log('[DEBUG] createDispute: XRPL escrow ID query result', {
+          found: !!escrow,
+          error: escrowError?.message,
+        });
       } else if (isFormattedId) {
         // Parse formatted ID: #ESC-YYYY-XXX (with various formats)
         console.log('[DEBUG] createDispute: Querying by formatted ID', { escrowId: escrowIdInput });
@@ -481,11 +502,12 @@ export class DisputeService {
           escrowId: escrowIdInput,
           isUUID,
           isFormattedId,
+          isXrplEscrowId,
           charCodes: escrowIdInput.split('').map(c => c.charCodeAt(0)),
         });
         return {
           success: false,
-          message: `Invalid escrow ID format: "${escrowIdInput}". Expected format: #ESC-YYYY-XXX or UUID`,
+          message: `Invalid escrow ID format: "${escrowIdInput}". Expected format: UUID, #ESC-YYYY-XXX, or #hexadecimal (XRPL escrow ID)`,
           error: 'Invalid escrow ID format',
         };
       }
