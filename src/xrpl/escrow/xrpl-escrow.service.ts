@@ -400,45 +400,9 @@ export class XRPLEscrowService {
           fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:266',message:'getEscrowDetailsByTxHash: Transaction not found - trying fallback',data:{txHash,network:this.XRPL_NETWORK,reason:'txResponse or result is null'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
           // #endregion
           
-          // Fallback: Try to find escrow by querying account_objects directly
-          // This handles cases where escrow was created with placeholder hash
-          console.log('[XRPL] Transaction not found, attempting fallback: querying account_objects for escrows');
-          try {
-            const accountObjectsResponse = await client.request({
-              command: 'account_objects',
-              account: ownerAddress,
-              type: 'escrow',
-            });
-
-            const escrowObjects = accountObjectsResponse.result.account_objects || [];
-            console.log(`[XRPL] Found ${escrowObjects.length} escrow objects for account ${ownerAddress}`);
-            
-            // Return the first active escrow (if any)
-            // Note: This is a best-effort fallback - ideally escrow should be identified by other means
-            if (escrowObjects.length > 0) {
-              const escrowObject = escrowObjects[0] as any;
-              const escrowAmount = (escrowObject as any).Amount;
-              const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
-              const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
-              
-              console.log('[XRPL] Using fallback escrow object:', {
-                sequence: (escrowObject as any).Sequence,
-                amount,
-                destination: (escrowObject as any).Destination,
-              });
-
-              return {
-                sequence: (escrowObject as any).Sequence as number,
-                amount,
-                destination: (escrowObject as any).Destination || '',
-                finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
-                cancelAfter: (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined,
-                condition: (escrowObject as any).Condition || undefined,
-              };
-            }
-          } catch (fallbackError) {
-            console.error('[XRPL] Fallback query also failed:', fallbackError);
-          }
+          // Cannot proceed without transaction hash - EscrowFinish requires transaction sequence
+          // The escrow object sequence is different from the transaction sequence needed for OfferSequence
+          console.warn('[XRPL] Transaction not found and cannot determine transaction sequence. EscrowFinish requires the transaction sequence from EscrowCreate, which cannot be determined without a valid transaction hash.');
           
           return null;
         }
@@ -493,11 +457,12 @@ export class XRPLEscrowService {
         const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
         const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
 
-        // Use the escrow object's Sequence for EscrowFinish (this is what OfferSequence should reference)
-        const escrowObjectSequence = (escrowObject as any).Sequence as number;
+        // IMPORTANT: For EscrowFinish, OfferSequence must match the Sequence from the original EscrowCreate transaction
+        // This is the account sequence number from the EscrowCreate transaction, NOT the escrow object sequence
+        // The escrow object has its own sequence, but EscrowFinish requires the transaction sequence
 
         return {
-          sequence: escrowObjectSequence || escrowSequence, // Prefer escrow object sequence, fallback to transaction sequence
+          sequence: escrowSequence, // Use transaction sequence (account sequence from EscrowCreate), not escrow object sequence
           amount,
           destination: (escrowObject as any).Destination || '',
           finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,

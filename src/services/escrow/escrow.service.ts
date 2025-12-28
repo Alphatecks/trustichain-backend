@@ -1041,7 +1041,7 @@ export class EscrowService {
           }
 
           // Try to find escrow by querying account_objects and matching by destination and amount
-          // Use the XRPL service's method to query account_objects
+          // First, try to get the transaction sequence from the transaction hash if available
           try {
             const { Client } = await import('xrpl');
             const { xrpToDrops, dropsToXrp } = await import('xrpl');
@@ -1055,6 +1055,24 @@ export class EscrowService {
             await client.connect();
 
             try {
+              // First, try to get the transaction sequence from the transaction hash
+              let transactionSequence: number | null = null;
+              if (escrow.xrpl_escrow_id && /^[a-f0-9]{64}$/i.test(escrow.xrpl_escrow_id)) {
+                try {
+                  const txResponse = await client.request({
+                    command: 'tx',
+                    transaction: escrow.xrpl_escrow_id,
+                  });
+                  if (txResponse.result && (txResponse.result as any).Sequence) {
+                    transactionSequence = (txResponse.result as any).Sequence as number;
+                    console.log('[Escrow Release] Got transaction sequence from hash:', transactionSequence);
+                  }
+                } catch (txError) {
+                  // Transaction hash query failed, continue with fallback
+                  console.log('[Escrow Release] Could not get sequence from transaction hash, continuing with account_objects fallback');
+                }
+              }
+
               const accountObjectsResponse = await client.request({
                 command: 'account_objects',
                 account: platformAddress,
@@ -1070,7 +1088,9 @@ export class EscrowService {
                   (obj as any).Destination === counterpartyWalletAddress;
                 const objAmount = (obj as any).Amount;
                 const matchesAmount = objAmount && Math.abs(parseInt(String(objAmount)) - parseInt(String(targetAmountDrops))) < 1000; // Allow small difference for fees
-                return matchesDestination && matchesAmount;
+                // If we have a transaction hash, also try to match by PreviousTxnID
+                const matchesTxHash = !escrow.xrpl_escrow_id || (obj as any).PreviousTxnID === escrow.xrpl_escrow_id;
+                return matchesDestination && matchesAmount && (transactionSequence !== null || matchesTxHash);
               }) as any;
 
               if (escrowObject) {
@@ -1078,8 +1098,17 @@ export class EscrowService {
                 const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
                 const amount = parseFloat(dropsToXrp(amountDropsStr) as any);
 
+                // IMPORTANT: Use transaction sequence for EscrowFinish OfferSequence, not escrow object sequence
+                // If we couldn't get transaction sequence, this fallback won't work correctly
+                const sequenceToUse = transactionSequence || null;
+                
+                if (!sequenceToUse) {
+                  console.error('[Escrow Release] Fallback method cannot determine transaction sequence - cannot proceed');
+                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish');
+                }
+
                 escrowDetails = {
-                  sequence: (escrowObject as any).Sequence as number,
+                  sequence: sequenceToUse, // Use transaction sequence, not escrow object sequence
                   amount,
                   destination: (escrowObject as any).Destination || '',
                   finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
