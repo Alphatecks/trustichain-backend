@@ -474,14 +474,15 @@ export class XRPLEscrowService {
             // Look for EscrowFinish or EscrowCancel transactions that reference this escrow
             const relatedTx = transactions.find((txData: any) => {
               const tx = txData.tx || txData;
-              return (tx.TransactionType === 'EscrowFinish' || tx.TransactionType === 'EscrowCancel') &&
-                     tx.Owner === ownerAddress &&
-                     tx.OfferSequence === escrowSequence;
+              return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
+                     (tx as any).Owner === ownerAddress &&
+                     (tx as any).OfferSequence === escrowSequence;
             });
             
             if (relatedTx) {
-              const tx = relatedTx.tx || relatedTx;
-              console.warn(`[XRPL] Found ${tx.TransactionType} transaction for this escrow. Escrow was already ${tx.TransactionType === 'EscrowFinish' ? 'finished' : 'cancelled'}.`);
+              const tx = (relatedTx as any).tx || relatedTx;
+              const txType = (tx as any).TransactionType;
+              console.warn(`[XRPL] Found ${txType} transaction for this escrow. Escrow was already ${txType === 'EscrowFinish' ? 'finished' : 'cancelled'}.`);
               // Return null but we'll handle this in the calling code with a better error message
               return null;
             }
@@ -529,6 +530,187 @@ export class XRPLEscrowService {
     } catch (error) {
       console.error('Error getting escrow details:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get detailed escrow status from XRPL by transaction hash
+   * Returns comprehensive status including whether it's active, finished, or cancelled
+   */
+  async getEscrowStatus(txHash: string, ownerAddress: string): Promise<{
+    exists: boolean;
+    status: 'active' | 'finished' | 'cancelled' | 'unknown';
+    sequence?: number;
+    amount?: number;
+    destination?: string;
+    finishAfter?: number;
+    cancelAfter?: number;
+    condition?: string;
+    finishTxHash?: string;
+    cancelTxHash?: string;
+    finishedAt?: number; // Unix timestamp
+    cancelledAt?: number; // Unix timestamp
+    canFinish: boolean;
+    canCancel: boolean;
+    error?: string;
+  }> {
+    try {
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
+
+      try {
+        // First, try to get the transaction to get the sequence
+        let txResponse: any;
+        let txSequence: number | null = null;
+        
+        try {
+          txResponse = await client.request({
+            command: 'tx',
+            transaction: txHash,
+          });
+          
+          if (txResponse.result) {
+            txSequence = (txResponse.result as any).Sequence as number;
+          }
+        } catch (txError) {
+          await client.disconnect();
+          return {
+            exists: false,
+            status: 'unknown',
+            canFinish: false,
+            canCancel: false,
+            error: 'Transaction not found on XRPL',
+          };
+        }
+
+        // Check if escrow object exists
+        const accountObjectsResponse = await client.request({
+          command: 'account_objects',
+          account: ownerAddress,
+          type: 'escrow',
+        });
+
+        const escrowObjects = accountObjectsResponse.result.account_objects || [];
+        const escrowObject = escrowObjects.find(
+          (obj: any) => (obj as any).PreviousTxnID === txHash
+        ) as any;
+
+        // If escrow object exists, it's still active
+        if (escrowObject) {
+          const escrowAmount = (escrowObject as any).Amount;
+          const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
+          const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
+          
+          const finishAfter = (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined;
+          const cancelAfter = (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined;
+          const now = Math.floor(Date.now() / 1000);
+          
+          const canFinish = !finishAfter || finishAfter <= now;
+          const canCancel = cancelAfter ? cancelAfter <= now : false;
+
+          await client.disconnect();
+
+          return {
+            exists: true,
+            status: 'active',
+            sequence: txSequence || undefined,
+            amount,
+            destination: (escrowObject as any).Destination || undefined,
+            finishAfter,
+            cancelAfter,
+            condition: (escrowObject as any).Condition || undefined,
+            canFinish,
+            canCancel,
+          };
+        }
+
+        // Escrow object doesn't exist - check transaction history
+        if (txSequence) {
+          const accountTxResponse = await client.request({
+            command: 'account_tx',
+            account: ownerAddress,
+            ledger_index_min: -1,
+            ledger_index_max: -1,
+            limit: 200,
+          });
+
+          const transactions = accountTxResponse.result.transactions || [];
+          
+          // Find EscrowFinish or EscrowCancel transactions for this escrow
+          const finishTx = transactions.find((txData: any) => {
+            const tx = txData.tx || txData;
+            return (tx as any).TransactionType === 'EscrowFinish' &&
+                   (tx as any).Owner === ownerAddress &&
+                   (tx as any).OfferSequence === txSequence;
+          });
+
+          const cancelTx = transactions.find((txData: any) => {
+            const tx = txData.tx || txData;
+            return (tx as any).TransactionType === 'EscrowCancel' &&
+                   (tx as any).Owner === ownerAddress &&
+                   (tx as any).OfferSequence === txSequence;
+          });
+
+          await client.disconnect();
+
+          if (finishTx) {
+            const txData = finishTx as any;
+            const tx = txData.tx || txData;
+            // Try to get the date from the transaction metadata
+            const date = txData.date || (txData.meta && txData.meta.date) || undefined;
+            
+            return {
+              exists: false,
+              status: 'finished',
+              sequence: txSequence,
+              finishTxHash: (tx as any).hash || txData.hash || undefined,
+              finishedAt: date,
+              canFinish: false,
+              canCancel: false,
+            };
+          }
+
+          if (cancelTx) {
+            const txData = cancelTx as any;
+            const tx = txData.tx || txData;
+            // Try to get the date from the transaction metadata
+            const date = txData.date || (txData.meta && txData.meta.date) || undefined;
+            
+            return {
+              exists: false,
+              status: 'cancelled',
+              sequence: txSequence,
+              cancelTxHash: (tx as any).hash || txData.hash || undefined,
+              cancelledAt: date,
+              canFinish: false,
+              canCancel: false,
+            };
+          }
+        }
+
+        await client.disconnect();
+
+        return {
+          exists: false,
+          status: 'unknown',
+          sequence: txSequence || undefined,
+          canFinish: false,
+          canCancel: false,
+          error: 'Escrow object not found, but no finish/cancel transaction found in recent history',
+        };
+      } catch (error) {
+        await client.disconnect();
+        throw error;
+      }
+    } catch (error) {
+      console.error('[XRPL] Error getting escrow status:', error);
+      return {
+        exists: false,
+        status: 'unknown',
+        canFinish: false,
+        canCancel: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
 

@@ -176,6 +176,32 @@ export class EscrowController {
   }
 
   /**
+   * Get escrow XRPL status
+   * GET /api/escrow/:id/xrpl-status
+   */
+  async getEscrowXrplStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const escrowId = req.params.id as string;
+
+      const result = await escrowService.getEscrowXrplStatus(userId, escrowId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Release (finish) an escrow
    * POST /api/escrow/:id/release
    */

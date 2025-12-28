@@ -72,6 +72,15 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/escrow/:id/xrpl-status
+ * @desc    Get detailed escrow status from XRPL ledger
+ * @access  Private
+ */
+router.get('/:id/xrpl-status', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowXrplStatus(req, res);
+}));
+
+/**
  * @route   POST /api/escrow/:id/release
  * @desc    Release (finish) an escrow - creates XUMM payload for user signing
  * @access  Private

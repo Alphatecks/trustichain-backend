@@ -945,6 +945,89 @@ export class EscrowService {
   }
 
   /**
+   * Get detailed escrow status from XRPL
+   * Checks the actual state of the escrow on XRPL ledger
+   */
+  async getEscrowXrplStatus(userId: string, escrowId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      exists: boolean;
+      status: 'active' | 'finished' | 'cancelled' | 'unknown';
+      sequence?: number;
+      amount?: number;
+      destination?: string;
+      finishAfter?: number;
+      cancelAfter?: number;
+      finishTxHash?: string;
+      cancelTxHash?: string;
+      finishedAt?: number;
+      cancelledAt?: number;
+      canFinish: boolean;
+      canCancel: boolean;
+      error?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get escrow and verify user has permission
+      const { data: escrow, error: fetchError } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', escrowId)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+        .single();
+
+      if (fetchError || !escrow) {
+        return {
+          success: false,
+          message: 'Escrow not found or access denied',
+          error: 'Escrow not found or access denied',
+        };
+      }
+
+      if (!escrow.xrpl_escrow_id) {
+        return {
+          success: false,
+          message: 'Escrow does not have an XRPL transaction hash',
+          error: 'No XRPL transaction hash',
+        };
+      }
+
+      // Get platform wallet address
+      const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
+      if (!platformAddress) {
+        return {
+          success: false,
+          message: 'Platform wallet not configured',
+          error: 'Platform wallet not configured',
+        };
+      }
+
+      // Get escrow status from XRPL
+      const status = await xrplEscrowService.getEscrowStatus(
+        escrow.xrpl_escrow_id,
+        platformAddress
+      );
+
+      return {
+        success: true,
+        message: 'Escrow status retrieved successfully',
+        data: status,
+      };
+    } catch (error) {
+      console.error('Error getting escrow XRPL status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get escrow status',
+        error: error instanceof Error ? error.message : 'Failed to get escrow status',
+      };
+    }
+  }
+
+  /**
    * Release (finish) an escrow
    */
   async releaseEscrow(userId: string, escrowId: string, notes?: string): Promise<{
@@ -1165,14 +1248,14 @@ export class EscrowService {
                 const transactions = accountTxResponse.result.transactions || [];
                 const relatedTx = transactions.find((txData: any) => {
                   const tx = txData.tx || txData;
-                  return (tx.TransactionType === 'EscrowFinish' || tx.TransactionType === 'EscrowCancel') &&
-                         tx.Owner === platformAddress &&
-                         tx.OfferSequence === txSequence;
+                  return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
+                         (tx as any).Owner === platformAddress &&
+                         (tx as any).OfferSequence === txSequence;
                 });
                 
                 if (relatedTx) {
-                  const tx = relatedTx.tx || relatedTx;
-                  const wasFinished = tx.TransactionType === 'EscrowFinish';
+                  const tx = (relatedTx as any).tx || relatedTx;
+                  const wasFinished = (tx as any).TransactionType === 'EscrowFinish';
                   
                   // Update database status if it's still showing as active
                   if (escrow.status === 'active') {
