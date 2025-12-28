@@ -11,6 +11,8 @@ import {
   SwapQuoteResponse,
   SwapExecuteRequest,
   SwapExecuteResponse,
+  ConnectWalletRequest,
+  ConnectWalletResponse,
 } from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
@@ -283,6 +285,33 @@ export class WalletController {
       const offset = parseInt(req.query.offset as string) || 0;
 
       const result = await walletService.getTransactions(userId, limit, offset);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Connect MetaMask wallet
+   * POST /api/wallet/connect
+   */
+  async connectWallet(
+    req: Request<{}, ConnectWalletResponse, ConnectWalletRequest>,
+    res: Response<ConnectWalletResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.connectWallet(userId, req.body);
 
       if (result.success) {
         res.status(200).json(result);

@@ -84,6 +84,16 @@ router.get('/transactions', authenticate, asyncHandler(async (req, res) => {
   await walletController.getTransactions(req, res);
 }));
 
+/**
+ * @route   POST /api/wallet/connect
+ * @desc    Connect MetaMask wallet (XRPL address) to user account
+ * @access  Private
+ * @body    { walletAddress: string }
+ */
+router.post('/connect', authenticate, asyncHandler(async (req, res) => {
+  await walletController.connectWallet(req, res);
+}));
+
 export default router;
 
 

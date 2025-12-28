@@ -271,6 +271,131 @@ export class WalletService {
   }
 
   /**
+   * Connect MetaMask wallet (XRPL address) to user account
+   * Updates the user's wallet address to their MetaMask wallet
+   */
+  async connectWallet(userId: string, request: { walletAddress: string }): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      walletAddress: string;
+      previousAddress?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      const { walletAddress } = request;
+
+      // Validate XRPL address format
+      // XRPL addresses start with 'r' and are 25-35 characters
+      if (!walletAddress || !walletAddress.startsWith('r') || walletAddress.length < 25 || walletAddress.length > 35) {
+        return {
+          success: false,
+          message: 'Invalid XRPL wallet address format. XRPL addresses must start with "r" and be 25-35 characters long.',
+          error: 'Invalid wallet address format',
+        };
+      }
+
+      // Check if this address is already in use by another user
+      const { data: existingWallet, error: checkError } = await adminClient
+        .from('wallets')
+        .select('user_id, xrpl_address')
+        .eq('xrpl_address', walletAddress)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking existing wallet:', checkError);
+        return {
+          success: false,
+          message: 'Failed to verify wallet address',
+          error: 'Database error',
+        };
+      }
+
+      if (existingWallet && existingWallet.user_id !== userId) {
+        return {
+          success: false,
+          message: 'This wallet address is already connected to another account',
+          error: 'Wallet address already in use',
+        };
+      }
+
+      // Get user's current wallet
+      const { data: currentWallet, error: walletError } = await adminClient
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', userId)
+        .single();
+
+      if (walletError || !currentWallet) {
+        // Create new wallet record
+        const { error: createError } = await adminClient
+          .from('wallets')
+          .insert({
+            user_id: userId,
+            xrpl_address: walletAddress,
+            balance_xrp: 0,
+            balance_usdt: 0,
+            balance_usdc: 0,
+          });
+
+        if (createError) {
+          console.error('Error creating wallet:', createError);
+          return {
+            success: false,
+            message: 'Failed to connect wallet',
+            error: 'Failed to create wallet record',
+          };
+        }
+
+        return {
+          success: true,
+          message: 'MetaMask wallet connected successfully',
+          data: {
+            walletAddress,
+          },
+        };
+      }
+
+      // Update existing wallet
+      const previousAddress = currentWallet.xrpl_address;
+      const { error: updateError } = await adminClient
+        .from('wallets')
+        .update({
+          xrpl_address: walletAddress,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId);
+
+      if (updateError) {
+        console.error('Error updating wallet:', updateError);
+        return {
+          success: false,
+          message: 'Failed to update wallet address',
+          error: 'Database update failed',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'MetaMask wallet connected successfully. Your wallet address has been updated.',
+        data: {
+          walletAddress,
+          previousAddress: previousAddress !== walletAddress ? previousAddress : undefined,
+        },
+      };
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to connect wallet',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
    * Get swap quote between XRP, USDT, and USDC for the user's wallet.
    * This powers the "Preview Swap" UI and does not execute any on-chain swap.
    */

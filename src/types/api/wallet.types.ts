@@ -144,6 +144,20 @@ export interface WalletTransaction {
   createdAt: string;
 }
 
+export interface ConnectWalletRequest {
+  walletAddress: string; // XRPL address from MetaMask
+}
+
+export interface ConnectWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    walletAddress: string;
+    previousAddress?: string;
+  };
+  error?: string;
+}
+
 export interface WalletTransactionsResponse {
   success: boolean;
   message: string;
