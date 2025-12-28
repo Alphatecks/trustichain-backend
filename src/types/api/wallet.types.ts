@@ -146,6 +146,8 @@ export interface WalletTransaction {
 
 export interface ConnectWalletRequest {
   walletAddress: string; // XRPL address from MetaMask
+  amount?: number; // Optional: Amount to deposit after connecting
+  currency?: 'XRP' | 'USDT' | 'USDC' | 'USD'; // Optional: Currency for deposit
 }
 
 export interface ConnectWalletResponse {
@@ -154,6 +156,15 @@ export interface ConnectWalletResponse {
   data?: {
     walletAddress: string;
     previousAddress?: string;
+    // Deposit transaction (if amount provided)
+    depositTransaction?: {
+      transaction: any;
+      transactionBlob: string;
+      destinationAddress: string;
+      amount: number;
+      currency: string;
+      instructions: string;
+    };
   };
   error?: string;
 }
