@@ -181,11 +181,16 @@ export class XRPLEscrowService {
         console.log('[XRPL] Preparing EscrowFinish transaction:', {
           ownerAddress: params.ownerAddress,
           escrowSequence: params.escrowSequence,
+          escrowSequenceType: typeof params.escrowSequence,
           hasCondition: !!params.condition,
           hasFulfillment: !!params.fulfillment,
         });
 
+        console.log('[XRPL] EscrowFinish transaction before autofill:', JSON.stringify(escrowFinish, null, 2));
+
         const prepared = await client.autofill(escrowFinish);
+        console.log('[XRPL] EscrowFinish transaction after autofill:', JSON.stringify(prepared, null, 2));
+        
         const signed = wallet.sign(prepared);
         const result = await client.submitAndWait(signed.tx_blob);
 
@@ -410,6 +415,15 @@ export class XRPLEscrowService {
         const txResult = txResponse.result as any;
         const escrowSequence = txResult.Sequence as number;
 
+        console.log('[XRPL] Transaction details from tx command:', {
+          txHash,
+          transactionType: txResult.TransactionType,
+          sequence: escrowSequence,
+          account: txResult.Account,
+          destination: txResult.Destination,
+          amount: txResult.Amount,
+        });
+
         if (!escrowSequence) {
           console.error('[XRPL] No sequence found in transaction:', txHash);
           return null;
@@ -428,28 +442,34 @@ export class XRPLEscrowService {
           type: 'escrow',
         });
 
-        // Find the escrow object matching this sequence
+        // Find the escrow object matching this transaction hash
         const escrowObjects = accountObjectsResponse.result.account_objects || [];
+        console.log(`[XRPL] Found ${escrowObjects.length} escrow objects for account ${ownerAddress}`);
+        
+        // Match by PreviousTxnID (the transaction hash that created the escrow)
         const escrowObject = escrowObjects.find(
-          (obj: any) => (obj as any).PreviousTxnID === txHash || (obj as any).Sequence === escrowSequence
+          (obj: any) => (obj as any).PreviousTxnID === txHash
         ) as any;
 
         if (!escrowObject) {
-          console.warn('[XRPL] Escrow object not found, but transaction exists. Escrow may have been finished or cancelled.');
-          // Return details from transaction even if escrow object not found
-          // (escrow might have been finished/cancelled but we can still get sequence)
-          const txAmount = (txResult as any).Amount;
-          // dropsToXrp expects a string, ensure it's always a string
-          const txAmountDropsStr: string = txAmount ? String(txAmount) : '0';
-          return {
-            sequence: escrowSequence,
-            amount: parseFloat((dropsToXrp as any)(txAmountDropsStr)),
-            destination: (txResult as any).Destination || '',
-            finishAfter: (txResult as any).FinishAfter ? ((txResult as any).FinishAfter as number) : undefined,
-            cancelAfter: (txResult as any).CancelAfter ? ((txResult as any).CancelAfter as number) : undefined,
-            condition: (txResult as any).Condition || undefined,
-          };
+          console.warn('[XRPL] Escrow object not found in account_objects. Available escrows:', escrowObjects.map((obj: any) => ({
+            PreviousTxnID: (obj as any).PreviousTxnID,
+            Sequence: (obj as any).Sequence,
+            Destination: (obj as any).Destination,
+          })));
+          console.warn('[XRPL] Looking for escrow with PreviousTxnID:', txHash);
+          console.warn('[XRPL] Escrow object not found - escrow may have been finished or cancelled, or transaction hash mismatch');
+          // Don't return details if escrow object doesn't exist - we can't finish what doesn't exist
+          return null;
         }
+
+        console.log('[XRPL] Found matching escrow object:', {
+          PreviousTxnID: (escrowObject as any).PreviousTxnID,
+          ObjectSequence: (escrowObject as any).Sequence,
+          TransactionSequence: escrowSequence,
+          Destination: (escrowObject as any).Destination,
+          Amount: (escrowObject as any).Amount,
+        });
 
         // Extract amount from escrow object (it's in drops)
         const escrowAmount = (escrowObject as any).Amount;

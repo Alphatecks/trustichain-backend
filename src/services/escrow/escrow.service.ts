@@ -1140,8 +1140,11 @@ export class EscrowService {
 
         console.log('[Escrow Release] Found escrow on XRPL:', {
           sequence: escrowDetails.sequence,
+          sequenceType: typeof escrowDetails.sequence,
           amount: escrowDetails.amount,
           destination: escrowDetails.destination,
+          txHash: escrow.xrpl_escrow_id,
+          platformAddress: platformAddress,
         });
 
         // Check if escrow has a condition that requires fulfillment
