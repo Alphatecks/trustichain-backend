@@ -33,4 +33,20 @@ coverage/
 tmp/
 temp/
 
+# Build caches
+.cache/
+.next/
+.npm/
+.eslintcache
+*.tsbuildinfo
+
+# Package manager caches
+.pnpm-store/
+.yarn/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
 
