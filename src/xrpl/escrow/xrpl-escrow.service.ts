@@ -458,8 +458,39 @@ export class XRPLEscrowService {
             Destination: (obj as any).Destination,
           })));
           console.warn('[XRPL] Looking for escrow with PreviousTxnID:', txHash);
-          console.warn('[XRPL] Escrow object not found - escrow may have been finished or cancelled, or transaction hash mismatch');
-          // Don't return details if escrow object doesn't exist - we can't finish what doesn't exist
+          console.warn('[XRPL] Escrow object not found - escrow may have been finished or cancelled');
+          
+          // Check transaction history to see if escrow was finished/cancelled
+          try {
+            const accountTxResponse = await client.request({
+              command: 'account_tx',
+              account: ownerAddress,
+              ledger_index_min: -1,
+              ledger_index_max: -1,
+              limit: 100,
+            });
+            
+            const transactions = accountTxResponse.result.transactions || [];
+            // Look for EscrowFinish or EscrowCancel transactions that reference this escrow
+            const relatedTx = transactions.find((txData: any) => {
+              const tx = txData.tx || txData;
+              return (tx.TransactionType === 'EscrowFinish' || tx.TransactionType === 'EscrowCancel') &&
+                     tx.Owner === ownerAddress &&
+                     tx.OfferSequence === escrowSequence;
+            });
+            
+            if (relatedTx) {
+              const tx = relatedTx.tx || relatedTx;
+              console.warn(`[XRPL] Found ${tx.TransactionType} transaction for this escrow. Escrow was already ${tx.TransactionType === 'EscrowFinish' ? 'finished' : 'cancelled'}.`);
+              // Return null but we'll handle this in the calling code with a better error message
+              return null;
+            }
+          } catch (historyError) {
+            console.warn('[XRPL] Could not check transaction history:', historyError);
+          }
+          
+          // Escrow object doesn't exist and we couldn't verify it was finished - return null
+          // The calling code should handle this with a helpful error message
           return null;
         }
 
