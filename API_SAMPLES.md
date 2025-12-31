@@ -101,11 +101,85 @@ curl -X GET https://your-api.com/api/wallet/balance \
 }
 ```
 
+### Connect MetaMask Wallet
+
+**Endpoint:** `POST /api/wallet/connect`
+
+**Description:** Links a MetaMask wallet (XRPL address) to the user's TrustiChain account. This allows the user to fund their wallet from the connected MetaMask wallet later using the fund endpoint.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "walletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
+}
+```
+
+**Request:**
+```bash
+curl -X POST https://your-api.com/api/wallet/connect \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.",
+  "data": {
+    "walletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
+  }
+}
+```
+
+**Response (200 OK - Wallet Updated):**
+```json
+{
+  "success": true,
+  "message": "MetaMask wallet connected successfully. Your wallet address has been updated. You can now fund your wallet from this connected wallet.",
+  "data": {
+    "walletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+    "previousAddress": "rOldWalletAddress123456789012345"
+  }
+}
+```
+
+**Error Response (400 Bad Request - Invalid Address):**
+```json
+{
+  "success": false,
+  "message": "Invalid XRPL wallet address format. XRPL addresses must start with \"r\" and be 25-35 characters long.",
+  "error": "Invalid wallet address format"
+}
+```
+
+**Error Response (400 Bad Request - Address Already in Use):**
+```json
+{
+  "success": false,
+  "message": "This wallet address is already connected to another account",
+  "error": "Wallet address already in use"
+}
+```
+
+**Note:** After connecting your MetaMask wallet, use the `/api/wallet/fund` endpoint to deposit funds from your connected wallet.
+
+---
+
 ### Fund Wallet (Deposit)
 
 **Endpoint:** `POST /api/wallet/fund`
 
-**Description:** Initiates a deposit transaction to fund the wallet.
+**Description:** Initiates a deposit transaction to fund the wallet. Works with connected MetaMask wallets (via XRPL Snap) or other XRPL wallets. If you have connected a MetaMask wallet, you can fund from that wallet using this endpoint.
 
 **Headers:**
 ```
@@ -156,6 +230,86 @@ curl -X POST https://your-api.com/api/wallet/fund \
   "currency": "XRP"
 }
 ```
+
+**Response (200 OK - MetaMask/Browser Wallet - Pending Signing):**
+```json
+{
+  "success": true,
+  "message": "Transaction prepared. Please sign with MetaMask (XRPL Snap) for XRP deposit.",
+  "data": {
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "amount": {
+      "usd": 1000.00,
+      "xrp": 1841.62
+    },
+    "status": "pending",
+    "transactionBlob": "120000228000000024000000012E...",
+    "walletType": "metamask",
+    "instructions": "Use MetaMask with XRPL Snap to sign XRP transaction"
+  }
+}
+```
+
+**Note:** For MetaMask wallets, after receiving the transaction blob, sign it in MetaMask and then submit it using the `/api/wallet/fund/submit` endpoint.
+
+---
+
+### Submit Signed Transaction (MetaMask)
+
+**Endpoint:** `POST /api/wallet/fund/submit`
+
+**Description:** Submits a signed transaction from MetaMask (XRPL Snap) or other browser wallets to complete a deposit. Use this endpoint after signing a transaction in MetaMask.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+  "signedTxBlob": "120000228000000024000000012E00000000000000016140000000000000006468400000000000000A732103AB40A0490F9B7ED8DF29D246BF2D6269820A0EE7742ACDD457BEA7C7D0931EDB74473045022100A7A0..."
+}
+```
+
+**Request:**
+```bash
+curl -X POST https://your-api.com/api/wallet/fund/submit \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "signedTxBlob": "120000228000000024000000012E00000000000000016140000000000000006468400000000000000A732103AB40A0490F9B7ED8DF29D246BF2D6269820A0EE7742ACDD457BEA7C7D0931EDB74473045022100A7A0..."
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Deposit transaction submitted successfully",
+  "data": {
+    "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+    "xrplTxHash": "A1B2C3D4E5F6789012345678901234567890ABCDEF1234567890ABCDEF123456",
+    "status": "completed"
+  }
+}
+```
+
+**Error Response (400 Bad Request - Invalid Transaction):**
+```json
+{
+  "success": false,
+  "message": "Invalid signed transaction format. Expected a signed transaction from MetaMask/XRPL Snap (hex string 1000+ chars or transaction object).",
+  "error": "Invalid transaction format"
+}
+```
+
+**Note:** The `signedTxBlob` should be the complete signed transaction returned by MetaMask/XRPL Snap after signing. It can be either a hex string or a transaction object.
+
+---
 
 ### Withdraw from Wallet
 

@@ -272,27 +272,17 @@ export class WalletService {
 
   /**
    * Connect MetaMask wallet (XRPL address) to user account
-   * Updates the user's wallet address to their MetaMask wallet
-   * Optionally prepares a deposit transaction for immediate funding
+   * Links the MetaMask wallet address to the user's TrustiChain account
+   * This allows the user to fund their wallet from the connected MetaMask wallet later
    */
   async connectWallet(userId: string, request: { 
     walletAddress: string;
-    amount?: number;
-    currency?: 'XRP' | 'USDT' | 'USDC' | 'USD';
   }): Promise<{
     success: boolean;
     message: string;
     data?: {
       walletAddress: string;
       previousAddress?: string;
-      depositTransaction?: {
-        transaction: any;
-        transactionBlob: string;
-        destinationAddress: string;
-        amount: number;
-        currency: string;
-        instructions: string;
-      };
     };
     error?: string;
   }> {
@@ -362,63 +352,11 @@ export class WalletService {
           };
         }
 
-        // If amount is provided, prepare a deposit transaction
-        let depositTransaction = undefined;
-        if (request.amount && request.amount > 0 && request.currency) {
-          try {
-            // Get the platform wallet address (destination for deposit)
-            const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
-            if (!platformAddress) {
-              console.warn('Platform wallet not configured, skipping deposit transaction preparation');
-            } else {
-              // Determine the currency for the transaction
-              let depositCurrency: 'XRP' | 'USDT' | 'USDC' = 'XRP';
-              let depositAmount = request.amount;
-
-              if (request.currency === 'USD') {
-                // Convert USD to XRP
-                const exchangeRates = await exchangeService.getLiveExchangeRates();
-                if (exchangeRates.success && exchangeRates.data) {
-                  const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-                  if (usdRate && usdRate > 0) {
-                    depositAmount = request.amount / usdRate;
-                    depositCurrency = 'XRP';
-                  }
-                }
-              } else {
-                depositCurrency = request.currency;
-              }
-
-              // Prepare payment transaction for MetaMask signing
-              const prepareResult = await xrplWalletService.preparePaymentTransaction(
-                platformAddress, // Destination: platform wallet
-                depositAmount,
-                depositCurrency
-              );
-
-              depositTransaction = {
-                transaction: prepareResult.transaction,
-                transactionBlob: prepareResult.transactionBlob,
-                destinationAddress: platformAddress,
-                amount: depositAmount,
-                currency: depositCurrency,
-                instructions: `Sign this transaction in MetaMask to deposit ${depositAmount} ${depositCurrency} to your escrow wallet`,
-              };
-            }
-          } catch (depositError) {
-            console.error('Error preparing deposit transaction:', depositError);
-            // Don't fail the connection if deposit preparation fails
-          }
-        }
-
         return {
           success: true,
-          message: depositTransaction 
-            ? 'MetaMask wallet connected successfully. Please sign the deposit transaction in MetaMask to fund your wallet.'
-            : 'MetaMask wallet connected successfully',
+          message: 'MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.',
           data: {
             walletAddress,
-            depositTransaction,
           },
         };
       }
@@ -442,66 +380,12 @@ export class WalletService {
         };
       }
 
-      // If amount is provided, prepare a deposit transaction
-      let depositTransaction = undefined;
-      if (request.amount && request.amount > 0 && request.currency) {
-        try {
-          // Get the platform wallet address (destination for deposit)
-          const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
-          if (!platformAddress) {
-            console.warn('Platform wallet not configured, skipping deposit transaction preparation');
-          } else {
-            // Determine the currency for the transaction
-            let depositCurrency: 'XRP' | 'USDT' | 'USDC' = 'XRP';
-            let depositAmount = request.amount;
-
-            if (request.currency === 'USD') {
-              // Convert USD to XRP
-              const exchangeRates = await exchangeService.getLiveExchangeRates();
-              if (exchangeRates.success && exchangeRates.data) {
-                const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-                if (usdRate && usdRate > 0) {
-                  depositAmount = request.amount / usdRate;
-                  depositCurrency = 'XRP';
-                }
-              }
-            } else {
-              depositCurrency = request.currency;
-            }
-
-            // Prepare payment transaction for MetaMask signing
-            // Send funds FROM MetaMask wallet TO user's wallet address (which is the MetaMask address)
-            // This funds the user's escrow wallet balance
-            const prepareResult = await xrplWalletService.preparePaymentTransaction(
-              walletAddress, // Destination: user's wallet (same as MetaMask address)
-              depositAmount,
-              depositCurrency
-            );
-
-            depositTransaction = {
-              transaction: prepareResult.transaction,
-              transactionBlob: prepareResult.transactionBlob,
-              destinationAddress: walletAddress, // User's wallet address
-              amount: depositAmount,
-              currency: depositCurrency,
-              instructions: `Sign this transaction in MetaMask to deposit ${depositAmount} ${depositCurrency} to your escrow wallet`,
-            };
-          }
-        } catch (depositError) {
-          console.error('Error preparing deposit transaction:', depositError);
-          // Don't fail the connection if deposit preparation fails
-        }
-      }
-
       return {
         success: true,
-        message: depositTransaction 
-          ? 'MetaMask wallet connected successfully. Please sign the deposit transaction in MetaMask to fund your wallet.'
-          : 'MetaMask wallet connected successfully. Your wallet address has been updated.',
+        message: 'MetaMask wallet connected successfully. Your wallet address has been updated. You can now fund your wallet from this connected wallet.',
         data: {
           walletAddress,
           previousAddress: previousAddress !== walletAddress ? previousAddress : undefined,
-          depositTransaction,
         },
       };
     } catch (error) {
