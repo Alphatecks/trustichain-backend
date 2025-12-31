@@ -15,6 +15,9 @@ import {
   ConnectWalletResponse,
   ValidateAddressRequest,
   ValidateAddressResponse,
+  ConnectXUMMRequest,
+  ConnectXUMMResponse,
+  ConnectXUMMStatusResponse,
 } from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
@@ -340,6 +343,71 @@ export class WalletController {
   ): Promise<void> {
     try {
       const result = await walletService.validateAddress(req.body.walletAddress);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Connect wallet via XUMM
+   * POST /api/wallet/connect/xumm
+   */
+  async connectWalletViaXUMM(
+    req: Request<{}, ConnectXUMMResponse, ConnectXUMMRequest>,
+    res: Response<ConnectXUMMResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.connectWalletViaXUMM(userId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Check XUMM connection status
+   * GET /api/wallet/connect/xumm/status?xummUuid=...
+   */
+  async checkXUMMConnectionStatus(
+    req: Request<{}, ConnectXUMMStatusResponse>,
+    res: Response<ConnectXUMMStatusResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const xummUuid = req.query.xummUuid as string;
+
+      if (!xummUuid) {
+        res.status(400).json({
+          success: false,
+          message: 'XUMM UUID is required',
+          error: 'Missing xummUuid parameter',
+        });
+        return;
+      }
+
+      const result = await walletService.checkXUMMConnectionStatus(userId, xummUuid);
 
       if (result.success) {
         res.status(200).json(result);

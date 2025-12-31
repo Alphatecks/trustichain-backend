@@ -478,6 +478,185 @@ const xrplAddress = xrplResponse.address || xrplResponse;`
   }
 
   /**
+   * Connect wallet via XUMM
+   * Creates a XUMM payload that requests the user's XRPL address
+   */
+  async connectWalletViaXUMM(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      xummUrl: string;
+      xummUuid: string;
+      qrCode?: string;
+      qrUri?: string;
+      instructions: string;
+    };
+    error?: string;
+  }> {
+    try {
+      // Create a SignIn transaction to get the user's XRPL address
+      // SignIn is a special XUMM transaction type that just requires signing
+      // It doesn't submit anything to XRPL, just gets the account address
+      const signInTransaction = {
+        TransactionType: 'SignIn',
+      };
+
+      // Create XUMM payload
+      const xummPayload = await xummService.createPayload(signInTransaction);
+
+      // Store the connection request in database for tracking
+      const adminClient = supabaseAdmin || supabase;
+      await adminClient
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'wallet_connect',
+          status: 'pending',
+          description: `XUMM wallet connection | XUMM_UUID:${xummPayload.uuid}`,
+        });
+
+      return {
+        success: true,
+        message: 'XUMM connection request created. Please scan the QR code with Xaman app to connect your wallet.',
+        data: {
+          xummUrl: xummPayload.next.always,
+          xummUuid: xummPayload.uuid,
+          qrCode: xummPayload.refs.qr_png,
+          qrUri: xummPayload.refs.qr_uri,
+          instructions: 'Open Xaman app and scan the QR code to connect your XRPL wallet',
+        },
+      };
+    } catch (error) {
+      console.error('Error creating XUMM connection payload:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create XUMM connection request',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Check XUMM connection status and connect wallet when signed
+   */
+  async checkXUMMConnectionStatus(userId: string, xummUuid: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      signed: boolean;
+      walletAddress?: string;
+      xummUuid: string;
+      status: 'pending' | 'signed' | 'cancelled' | 'expired' | 'connected';
+    };
+    error?: string;
+  }> {
+    try {
+      // Get payload status from XUMM
+      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
+
+      // Check if cancelled or expired
+      if (payloadStatus.meta.cancelled) {
+        return {
+          success: true,
+          message: 'XUMM connection request was cancelled',
+          data: {
+            signed: false,
+            xummUuid,
+            status: 'cancelled',
+          },
+        };
+      }
+
+      if (payloadStatus.meta.expired) {
+        return {
+          success: true,
+          message: 'XUMM connection request has expired',
+          data: {
+            signed: false,
+            xummUuid,
+            status: 'expired',
+          },
+        };
+      }
+
+      // Check if signed
+      if (!payloadStatus.meta.signed) {
+        return {
+          success: true,
+          message: 'Waiting for user to sign in Xaman app',
+          data: {
+            signed: false,
+            xummUuid,
+            status: 'pending',
+          },
+        };
+      }
+
+      // Extract account address from response
+      const walletAddress = payloadStatus.response?.account;
+      
+      if (!walletAddress) {
+        return {
+          success: false,
+          message: 'XUMM response does not contain account address',
+          error: 'Missing account address in XUMM response',
+        };
+      }
+
+      // Validate address format
+      if (!walletAddress.startsWith('r') || walletAddress.length < 25 || walletAddress.length > 35) {
+        return {
+          success: false,
+          message: `Invalid XRPL address received from XUMM: ${walletAddress}`,
+          error: 'Invalid address format',
+        };
+      }
+
+      // Connect the wallet using existing connectWallet logic
+      const connectResult = await this.connectWallet(userId, { walletAddress });
+
+      if (connectResult.success) {
+        // Update transaction status
+        const adminClient = supabaseAdmin || supabase;
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'completed',
+            description: `XUMM wallet connected | Address: ${walletAddress} | XUMM_UUID:${xummUuid}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId)
+          .like('description', `%XUMM_UUID:${xummUuid}%`)
+          .eq('status', 'pending');
+
+        return {
+          success: true,
+          message: 'Wallet connected successfully via XUMM',
+          data: {
+            signed: true,
+            walletAddress,
+            xummUuid,
+            status: 'connected',
+          },
+        };
+      } else {
+        return {
+          success: false,
+          message: connectResult.message || 'Failed to connect wallet',
+          error: connectResult.error || 'Connection failed',
+        };
+      }
+    } catch (error) {
+      console.error('Error checking XUMM connection status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to check XUMM connection status',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
    * Validate wallet address format (helper endpoint)
    * Allows frontend to check address format before attempting to connect
    */

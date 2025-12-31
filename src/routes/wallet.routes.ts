@@ -104,6 +104,26 @@ router.post('/validate-address', asyncHandler(async (req, res) => {
   await walletController.validateAddress(req, res);
 }));
 
+/**
+ * @route   POST /api/wallet/connect/xumm
+ * @desc    Connect wallet via XUMM (Xaman app)
+ * @access  Private
+ * @body    {} (no body needed)
+ */
+router.post('/connect/xumm', authenticate, asyncHandler(async (req, res) => {
+  await walletController.connectWalletViaXUMM(req, res);
+}));
+
+/**
+ * @route   GET /api/wallet/connect/xumm/status
+ * @desc    Check XUMM connection status and connect wallet when signed
+ * @access  Private
+ * @query   xummUuid
+ */
+router.get('/connect/xumm/status', authenticate, asyncHandler(async (req, res) => {
+  await walletController.checkXUMMConnectionStatus(req, res);
+}));
+
 export default router;
 
 

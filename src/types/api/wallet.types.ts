@@ -180,6 +180,35 @@ export interface ValidateAddressResponse {
   error?: string;
 }
 
+export interface ConnectXUMMRequest {
+  // No body needed - XUMM will return the address
+}
+
+export interface ConnectXUMMResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    xummUrl: string;
+    xummUuid: string;
+    qrCode?: string;
+    qrUri?: string;
+    instructions: string;
+  };
+  error?: string;
+}
+
+export interface ConnectXUMMStatusResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    signed: boolean;
+    walletAddress?: string;
+    xummUuid: string;
+    status: 'pending' | 'signed' | 'cancelled' | 'expired' | 'connected';
+  };
+  error?: string;
+}
+
 export interface WalletTransactionsResponse {
   success: boolean;
   message: string;

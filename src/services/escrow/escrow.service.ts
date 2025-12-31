@@ -1272,8 +1272,8 @@ export class EscrowService {
                   
                   await client.disconnect();
                   
-                  return {
-                    success: false,
+          return {
+            success: false,
                     message: `Cannot release escrow: The escrow was already ${wasFinished ? 'finished' : 'cancelled'} on XRPL. The database status has been updated.`,
                     error: `Escrow already ${wasFinished ? 'finished' : 'cancelled'}`,
                   };
