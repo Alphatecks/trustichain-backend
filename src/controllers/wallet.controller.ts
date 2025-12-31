@@ -13,6 +13,8 @@ import {
   SwapExecuteResponse,
   ConnectWalletRequest,
   ConnectWalletResponse,
+  ValidateAddressRequest,
+  ValidateAddressResponse,
 } from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
@@ -312,6 +314,32 @@ export class WalletController {
     try {
       const userId = req.userId!;
       const result = await walletService.connectWallet(userId, req.body);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Validate wallet address format
+   * POST /api/wallet/validate-address
+   */
+  async validateAddress(
+    req: Request<{}, ValidateAddressResponse, ValidateAddressRequest>,
+    res: Response<ValidateAddressResponse>
+  ): Promise<void> {
+    try {
+      const result = await walletService.validateAddress(req.body.walletAddress);
 
       if (result.success) {
         res.status(200).json(result);

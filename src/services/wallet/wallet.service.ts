@@ -285,6 +285,11 @@ export class WalletService {
       previousAddress?: string;
     };
     error?: string;
+    help?: {
+      detectedType?: 'ethereum' | 'invalid' | 'wrong_length';
+      exampleCode?: string;
+      correctFormat?: string;
+    };
   }> {
     try {
       const adminClient = supabaseAdmin || supabase;
@@ -321,6 +326,23 @@ export class WalletService {
           success: false,
           message: 'Invalid address format: This appears to be an Ethereum address (starts with 0x). Please provide an XRPL address (starts with "r"). If you are using MetaMask with XRPL Snap, make sure you are getting the XRPL address, not the Ethereum address.',
           error: 'Ethereum address detected',
+          help: {
+            detectedType: 'ethereum',
+            correctFormat: 'XRPL addresses start with "r" and are 25-35 characters long (e.g., rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH)',
+            exampleCode: `// ❌ Wrong - This gets Ethereum address
+const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+const ethereumAddress = accounts[0]; // This is 0x...
+
+// ✅ Correct - This gets XRPL address
+const xrplResponse = await window.ethereum.request({
+  method: 'wallet_invokeSnap',
+  params: {
+    snapId: 'npm:@xrpl/snap',
+    request: { method: 'getAddress' }
+  }
+});
+const xrplAddress = xrplResponse.address || xrplResponse; // This is r...`
+          },
         };
       }
 
@@ -329,6 +351,19 @@ export class WalletService {
           success: false,
           message: `Invalid XRPL wallet address format. XRPL addresses must start with "r". Received: "${walletAddress.substring(0, 10)}..." (length: ${walletAddress.length})`,
           error: 'Invalid wallet address format',
+          help: {
+            detectedType: 'invalid',
+            correctFormat: 'XRPL addresses start with "r" and are 25-35 characters long (e.g., rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH)',
+            exampleCode: `// Get XRPL address from MetaMask XRPL Snap
+const xrplResponse = await window.ethereum.request({
+  method: 'wallet_invokeSnap',
+  params: {
+    snapId: 'npm:@xrpl/snap',
+    request: { method: 'getAddress' }
+  }
+});
+const xrplAddress = xrplResponse.address || xrplResponse;`
+          },
         };
       }
 
@@ -337,6 +372,10 @@ export class WalletService {
           success: false,
           message: `Invalid XRPL wallet address length. XRPL addresses must be 25-35 characters long. Received: "${walletAddress}" (length: ${walletAddress.length})`,
           error: 'Invalid wallet address format',
+          help: {
+            detectedType: 'wrong_length',
+            correctFormat: 'XRPL addresses are 25-35 characters long (e.g., rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH)',
+          },
         };
       }
 
@@ -433,6 +472,108 @@ export class WalletService {
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to connect wallet',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Validate wallet address format (helper endpoint)
+   * Allows frontend to check address format before attempting to connect
+   */
+  async validateAddress(address: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      isValid: boolean;
+      addressType: 'xrpl' | 'ethereum' | 'invalid';
+      formattedAddress?: string;
+      suggestions?: string[];
+    };
+    error?: string;
+  }> {
+    try {
+      // Trim and normalize
+      let normalizedAddress = String(address || '').trim();
+
+      if (!normalizedAddress) {
+        return {
+          success: true,
+          message: 'Address is empty',
+          data: {
+            isValid: false,
+            addressType: 'invalid',
+            suggestions: ['Please provide a wallet address'],
+          },
+        };
+      }
+
+      // Check if Ethereum address
+      if (normalizedAddress.startsWith('0x')) {
+        return {
+          success: true,
+          message: 'This is an Ethereum address. XRPL addresses start with "r".',
+          data: {
+            isValid: false,
+            addressType: 'ethereum',
+            formattedAddress: normalizedAddress,
+            suggestions: [
+              'Use MetaMask XRPL Snap to get XRPL address',
+              'Call wallet_invokeSnap with method: "getAddress"',
+              'XRPL addresses start with "r" and are 25-35 characters',
+            ],
+          },
+        };
+      }
+
+      // Check if XRPL address
+      if (normalizedAddress.startsWith('r')) {
+        if (normalizedAddress.length >= 25 && normalizedAddress.length <= 35) {
+          return {
+            success: true,
+            message: 'Valid XRPL address format',
+            data: {
+              isValid: true,
+              addressType: 'xrpl',
+              formattedAddress: normalizedAddress,
+            },
+          };
+        } else {
+          return {
+            success: true,
+            message: 'XRPL address has invalid length',
+            data: {
+              isValid: false,
+              addressType: 'xrpl',
+              formattedAddress: normalizedAddress,
+              suggestions: [
+                `Expected length: 25-35 characters, got: ${normalizedAddress.length}`,
+                'Please verify the address is complete',
+              ],
+            },
+          };
+        }
+      }
+
+      // Unknown format
+      return {
+        success: true,
+        message: 'Unknown address format',
+        data: {
+          isValid: false,
+          addressType: 'invalid',
+          formattedAddress: normalizedAddress,
+          suggestions: [
+            'XRPL addresses start with "r" and are 25-35 characters',
+            'Ethereum addresses start with "0x" and are 42 characters',
+            'Make sure you are getting the XRPL address from MetaMask XRPL Snap',
+          ],
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to validate address',
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }

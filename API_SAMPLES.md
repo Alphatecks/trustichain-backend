@@ -175,6 +175,86 @@ curl -X POST https://your-api.com/api/wallet/connect \
 
 ---
 
+### Validate Wallet Address (Helper Endpoint)
+
+**Endpoint:** `POST /api/wallet/validate-address`
+
+**Description:** Validates wallet address format before attempting to connect. This is a helper endpoint that doesn't require authentication. Use this to check if an address is a valid XRPL address before calling the connect endpoint.
+
+**Headers:**
+```
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "walletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
+}
+```
+
+**Request:**
+```bash
+curl -X POST https://your-api.com/api/wallet/validate-address \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
+  }'
+```
+
+**Response (200 OK - Valid XRPL Address):**
+```json
+{
+  "success": true,
+  "message": "Valid XRPL address format",
+  "data": {
+    "isValid": true,
+    "addressType": "xrpl",
+    "formattedAddress": "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH"
+  }
+}
+```
+
+**Response (200 OK - Ethereum Address Detected):**
+```json
+{
+  "success": true,
+  "message": "This is an Ethereum address. XRPL addresses start with \"r\".",
+  "data": {
+    "isValid": false,
+    "addressType": "ethereum",
+    "formattedAddress": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+    "suggestions": [
+      "Use MetaMask XRPL Snap to get XRPL address",
+      "Call wallet_invokeSnap with method: \"getAddress\"",
+      "XRPL addresses start with \"r\" and are 25-35 characters"
+    ]
+  }
+}
+```
+
+**Response (200 OK - Invalid Format):**
+```json
+{
+  "success": true,
+  "message": "Unknown address format",
+  "data": {
+    "isValid": false,
+    "addressType": "invalid",
+    "formattedAddress": "invalid-address",
+    "suggestions": [
+      "XRPL addresses start with \"r\" and are 25-35 characters",
+      "Ethereum addresses start with \"0x\" and are 42 characters",
+      "Make sure you are getting the XRPL address from MetaMask XRPL Snap"
+    ]
+  }
+}
+```
+
+**Use Case:** Frontend can call this endpoint before attempting to connect a wallet to provide immediate feedback to the user if they're using the wrong address format.
+
+---
+
 ### Fund Wallet (Deposit)
 
 **Endpoint:** `POST /api/wallet/fund`

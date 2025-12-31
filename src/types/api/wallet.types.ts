@@ -156,6 +156,28 @@ export interface ConnectWalletResponse {
     previousAddress?: string;
   };
   error?: string;
+  // Helpful information when validation fails
+  help?: {
+    detectedType?: 'ethereum' | 'invalid' | 'wrong_length';
+    exampleCode?: string;
+    correctFormat?: string;
+  };
+}
+
+export interface ValidateAddressRequest {
+  walletAddress: string;
+}
+
+export interface ValidateAddressResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    isValid: boolean;
+    addressType: 'xrpl' | 'ethereum' | 'invalid';
+    formattedAddress?: string;
+    suggestions?: string[];
+  };
+  error?: string;
 }
 
 export interface WalletTransactionsResponse {

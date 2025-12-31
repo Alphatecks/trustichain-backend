@@ -94,6 +94,16 @@ router.post('/connect', authenticate, asyncHandler(async (req, res) => {
   await walletController.connectWallet(req, res);
 }));
 
+/**
+ * @route   POST /api/wallet/validate-address
+ * @desc    Validate wallet address format (helper endpoint - no auth required)
+ * @access  Public
+ * @body    { walletAddress: string }
+ */
+router.post('/validate-address', asyncHandler(async (req, res) => {
+  await walletController.validateAddress(req, res);
+}));
+
 export default router;
 
 
