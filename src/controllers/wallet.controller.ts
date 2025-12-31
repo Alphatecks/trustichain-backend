@@ -18,6 +18,9 @@ import {
   ConnectXUMMRequest,
   ConnectXUMMResponse,
   ConnectXUMMStatusResponse,
+  FundXUMMRequest,
+  FundXUMMResponse,
+  FundXUMMStatusResponse,
 } from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
@@ -408,6 +411,72 @@ export class WalletController {
       }
 
       const result = await walletService.checkXUMMConnectionStatus(userId, xummUuid);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Fund wallet via XUMM (Xaman app)
+   * POST /api/wallet/fund/xumm
+   */
+  async fundWalletViaXUMM(
+    req: Request<{}, FundXUMMResponse, FundXUMMRequest>,
+    res: Response<FundXUMMResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.fundWalletViaXUMM(userId, req.body);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Check XUMM fund status
+   * GET /api/wallet/fund/xumm/status?transactionId=...&xummUuid=...
+   */
+  async checkXUMMFundStatus(
+    req: Request<{}, FundXUMMStatusResponse>,
+    res: Response<FundXUMMStatusResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const transactionId = req.query.transactionId as string;
+      const xummUuid = req.query.xummUuid as string;
+
+      if (!transactionId || !xummUuid) {
+        res.status(400).json({
+          success: false,
+          message: 'Transaction ID and XUMM UUID are required',
+          error: 'Missing required parameters',
+        });
+        return;
+      }
+
+      const result = await walletService.checkXUMMFundStatus(userId, transactionId, xummUuid);
 
       if (result.success) {
         res.status(200).json(result);

@@ -209,6 +209,40 @@ export interface ConnectXUMMStatusResponse {
   error?: string;
 }
 
+export interface FundXUMMRequest {
+  amount: number; // Amount in XRP
+}
+
+export interface FundXUMMResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    xummUrl: string;
+    xummUuid: string;
+    qrCode?: string;
+    qrUri?: string;
+    amount: number; // Amount in XRP
+    destinationAddress: string;
+    instructions: string;
+  };
+  error?: string;
+}
+
+export interface FundXUMMStatusResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    signed: boolean;
+    xummUuid: string;
+    transactionId: string;
+    status: 'pending' | 'signed' | 'submitted' | 'completed' | 'cancelled' | 'expired' | 'failed';
+    xrplTxHash?: string;
+    amount?: number;
+  };
+  error?: string;
+}
+
 export interface WalletTransactionsResponse {
   success: boolean;
   message: string;

@@ -105,6 +105,7 @@ export class WalletService {
       });
       
       let balances;
+      let accountExistsOnXrpl = false;
       
       try {
         balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
@@ -117,6 +118,40 @@ export class WalletService {
           dbBalanceUsdc: wallet.balance_usdc,
           hasAnySwaps,
         });
+        
+        // Check if account actually exists on XRPL by trying to get account info
+        // If getAllBalances returns all zeros, it might mean account doesn't exist
+        // We need to verify by checking if account exists
+        try {
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          const client = new Client(xrplServer);
+          await client.connect();
+          try {
+            await client.request({
+              command: 'account_info',
+              account: wallet.xrpl_address,
+              ledger_index: 'validated',
+            });
+            accountExistsOnXrpl = true; // Account exists on XRPL
+          } catch (accountCheckError: any) {
+            // Check if it's an account not found error
+            const isAccountNotFound = 
+              (accountCheckError?.message?.includes('actNotFound') || 
+               accountCheckError?.message?.includes('Account not found')) ||
+              accountCheckError?.data?.error === 'actNotFound' ||
+              accountCheckError?.data?.error_code === 19;
+            accountExistsOnXrpl = !isAccountNotFound;
+          } finally {
+            await client.disconnect();
+          }
+        } catch (accountCheckErr) {
+          // If we can't check, assume account exists if we got balances
+          accountExistsOnXrpl = true;
+        }
 
         // If there are any swaps, use database balances for tokens (but sync XRP from XRPL)
         // (because swaps are internal ledger swaps that don't affect XRPL)
@@ -149,15 +184,40 @@ export class WalletService {
           };
         } else {
           // Update wallet balance in database with XRPL balances (normal flow)
-          await adminClient
-            .from('wallets')
-            .update({
-              balance_xrp: balances.xrp,
-              balance_usdt: balances.usdt,
-              balance_usdc: balances.usdc,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', wallet.id);
+          // Only update if account actually exists on XRPL
+          // If account not found on XRPL, preserve existing database balances
+          // This prevents losing balances when connecting a new wallet address that hasn't been funded yet
+          if (accountExistsOnXrpl) {
+            // Account exists on XRPL - sync balances from XRPL (even if 0)
+            await adminClient
+              .from('wallets')
+              .update({
+                balance_xrp: balances.xrp,
+                balance_usdt: balances.usdt,
+                balance_usdc: balances.usdc,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', wallet.id);
+          } else {
+            // Account not found on XRPL - preserve existing database balances
+            // This happens when user connects a new wallet address that hasn't been funded yet
+            console.log('[DEBUG] wallet.service.getBalance: Account not found on XRPL, preserving existing database balances', {
+              userId,
+              xrplAddress: wallet.xrpl_address,
+              existingBalances: {
+                xrp: wallet.balance_xrp,
+                usdt: wallet.balance_usdt,
+                usdc: wallet.balance_usdc,
+              },
+              note: 'User may have connected a new wallet address. Preserving existing balances until new address is funded.',
+            });
+            // Use existing database balances instead of overwriting with 0
+            balances = {
+              xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
+              usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
+              usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
+            };
+          }
         }
       } catch (balanceError) {
         console.error('[ERROR] wallet.service.getBalance: Failed to fetch balances from XRPL', {
@@ -442,11 +502,17 @@ const xrplAddress = xrplResponse.address || xrplResponse;`
 
       // Update existing wallet
       const previousAddress = currentWallet.xrpl_address;
+      
+      // If address is changing, preserve existing balances (don't reset to 0)
+      // Balances will be synced from XRPL when getBalance is called
+      // But we preserve them here to avoid showing 0 immediately after connection
       const { error: updateError } = await adminClient
         .from('wallets')
         .update({
           xrpl_address: walletAddress,
           updated_at: new Date().toISOString(),
+          // Don't update balances here - preserve existing balances
+          // They will be synced from XRPL when getBalance is called
         })
         .eq('user_id', userId);
 
@@ -531,6 +597,316 @@ const xrplAddress = xrplResponse.address || xrplResponse;`
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to create XUMM connection request',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Fund wallet via XUMM (Xaman app)
+   * Creates a XUMM payload for the user to sign a payment transaction
+   * This will debit XRP from the user's Xaman wallet to their connected wallet address
+   */
+  async fundWalletViaXUMM(userId: string, request: { amount: number }): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      transactionId: string;
+      xummUrl: string;
+      xummUuid: string;
+      qrCode?: string;
+      qrUri?: string;
+      amount: number;
+      destinationAddress: string;
+      instructions: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get user's wallet
+      const { data: wallet } = await adminClient
+        .from('wallets')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (!wallet) {
+        return {
+          success: false,
+          message: 'Wallet not found. Please connect your Xaman wallet first.',
+          error: 'Wallet not found',
+        };
+      }
+
+      // Validate amount
+      if (!request.amount || request.amount <= 0) {
+        return {
+          success: false,
+          message: 'Amount must be greater than 0',
+          error: 'Invalid amount',
+        };
+      }
+
+      // Prepare payment transaction (from user's Xaman wallet to their connected wallet)
+      const preparedTx = await xrplWalletService.preparePaymentTransaction(
+        wallet.xrpl_address, // Destination: user's connected wallet address
+        request.amount,
+        'XRP'
+      );
+
+      // Create XUMM payload
+      const xummPayload = await xummService.createPayload(preparedTx.transaction);
+
+      // Create transaction record
+      const { data: transaction, error: txError } = await adminClient
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'deposit',
+          amount_xrp: request.amount,
+          amount_usd: 0, // Will be calculated later if needed
+          status: 'pending',
+          description: `XUMM deposit ${request.amount} XRP | XUMM_UUID:${xummPayload.uuid}`,
+        })
+        .select()
+        .single();
+
+      if (txError || !transaction) {
+        return {
+          success: false,
+          message: 'Failed to create transaction record',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'XUMM payment request created. Please scan the QR code with Xaman app to approve the payment.',
+        data: {
+          transactionId: transaction.id,
+          xummUrl: xummPayload.next.always,
+          xummUuid: xummPayload.uuid,
+          qrCode: xummPayload.refs.qr_png,
+          qrUri: xummPayload.refs.qr_uri,
+          amount: request.amount,
+          destinationAddress: wallet.xrpl_address,
+          instructions: `Sign this transaction in Xaman app to deposit ${request.amount} XRP to your wallet`,
+        },
+      };
+    } catch (error) {
+      console.error('Error creating XUMM fund request:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create XUMM fund request',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Check XUMM fund status and submit transaction when signed
+   */
+  async checkXUMMFundStatus(userId: string, transactionId: string, xummUuid: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      signed: boolean;
+      xummUuid: string;
+      transactionId: string;
+      status: 'pending' | 'signed' | 'submitted' | 'completed' | 'cancelled' | 'expired' | 'failed';
+      xrplTxHash?: string;
+      amount?: number;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get transaction
+      const { data: transaction } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('id', transactionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!transaction) {
+        return {
+          success: false,
+          message: 'Transaction not found',
+          error: 'Transaction not found',
+        };
+      }
+
+      // Get payload status from XUMM
+      const payloadStatus = await xummService.getPayloadStatus(xummUuid);
+
+      // Check if cancelled or expired
+      if (payloadStatus.meta.cancelled) {
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'cancelled',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transactionId);
+
+        return {
+          success: true,
+          message: 'XUMM payment request was cancelled',
+          data: {
+            signed: false,
+            xummUuid,
+            transactionId,
+            status: 'cancelled',
+          },
+        };
+      }
+
+      if (payloadStatus.meta.expired) {
+        await adminClient
+          .from('transactions')
+          .update({
+            status: 'cancelled',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transactionId);
+
+        return {
+          success: true,
+          message: 'XUMM payment request has expired',
+          data: {
+            signed: false,
+            xummUuid,
+            transactionId,
+            status: 'expired',
+          },
+        };
+      }
+
+      // Check if signed
+      if (!payloadStatus.meta.signed) {
+        return {
+          success: true,
+          message: 'Waiting for user to sign payment in Xaman app',
+          data: {
+            signed: false,
+            xummUuid,
+            transactionId,
+            status: 'pending',
+          },
+        };
+      }
+
+      // Transaction is signed - submit to XRPL
+      if (payloadStatus.response?.hex) {
+        // Submit signed transaction to XRPL
+        const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
+
+        const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
+
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: submitResult.hash,
+            status: status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transactionId);
+
+        // Update wallet balance if successful
+        if (status === 'completed') {
+          const { data: wallet } = await adminClient
+            .from('wallets')
+            .select('xrpl_address')
+            .eq('user_id', userId)
+            .single();
+
+          if (wallet) {
+            const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+            await adminClient
+              .from('wallets')
+              .update({
+                balance_xrp: balances.xrp,
+                balance_usdt: balances.usdt,
+                balance_usdc: balances.usdc,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', userId);
+          }
+        }
+
+        return {
+          success: true,
+          message: status === 'completed' 
+            ? 'Payment completed successfully. XRP has been debited from your Xaman wallet.'
+            : 'Payment transaction failed',
+          data: {
+            signed: true,
+            xummUuid,
+            transactionId,
+            status: status === 'completed' ? 'completed' : 'failed',
+            xrplTxHash: submitResult.hash,
+            amount: transaction.amount_xrp,
+          },
+        };
+      } else if (payloadStatus.response?.txid) {
+        // XUMM auto-submitted the transaction
+        await adminClient
+          .from('transactions')
+          .update({
+            xrpl_tx_hash: payloadStatus.response.txid,
+            status: 'completed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', transactionId);
+
+        // Update wallet balance
+        const { data: wallet } = await adminClient
+          .from('wallets')
+          .select('xrpl_address')
+          .eq('user_id', userId)
+          .single();
+
+        if (wallet) {
+          const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+          await adminClient
+            .from('wallets')
+            .update({
+              balance_xrp: balances.xrp,
+              balance_usdt: balances.usdt,
+              balance_usdc: balances.usdc,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId);
+        }
+
+        return {
+          success: true,
+          message: 'Payment completed successfully. XRP has been debited from your Xaman wallet.',
+          data: {
+            signed: true,
+            xummUuid,
+            transactionId,
+            status: 'completed',
+            xrplTxHash: payloadStatus.response.txid,
+            amount: transaction.amount_xrp,
+          },
+        };
+      } else {
+        return {
+          success: false,
+          message: 'Transaction signed but no transaction data available',
+          error: 'Missing transaction data',
+        };
+      }
+    } catch (error) {
+      console.error('Error checking XUMM fund status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to check XUMM fund status',
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
