@@ -188,16 +188,63 @@ export class WalletService {
           // If account not found on XRPL, preserve existing database balances
           // This prevents losing balances when connecting a new wallet address that hasn't been funded yet
           if (accountExistsOnXrpl) {
-            // Account exists on XRPL - sync balances from XRPL (even if 0)
-            await adminClient
-              .from('wallets')
-              .update({
-                balance_xrp: balances.xrp,
-                balance_usdt: balances.usdt,
-                balance_usdc: balances.usdc,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', wallet.id);
+            // Check if user has any completed deposit transactions
+            // If deposits exist but XRPL shows 0, preserve database balance (deposits may be pending or there's a sync issue)
+            const { data: completedDeposits } = await adminClient
+              .from('transactions')
+              .select('id, amount_xrp, xrpl_tx_hash')
+              .eq('user_id', userId)
+              .eq('type', 'deposit')
+              .eq('status', 'completed')
+              .not('xrpl_tx_hash', 'is', null)
+              .limit(1);
+
+            const hasCompletedDeposits = completedDeposits && completedDeposits.length > 0;
+            const xrplHasBalance = balances.xrp > 0 || balances.usdt > 0 || balances.usdc > 0;
+
+            // Only sync from XRPL if:
+            // 1. XRPL has a positive balance (source of truth), OR
+            // 2. No completed deposits exist (new user, safe to sync 0)
+            // If deposits exist but XRPL is 0, preserve database balance (may be pending sync or different address)
+            if (xrplHasBalance || !hasCompletedDeposits) {
+              // Sync balances from XRPL (either positive balance or no deposits to preserve)
+              await adminClient
+                .from('wallets')
+                .update({
+                  balance_xrp: balances.xrp,
+                  balance_usdt: balances.usdt,
+                  balance_usdc: balances.usdc,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', wallet.id);
+              console.log('[DEBUG] wallet.service.getBalance: Synced balances from XRPL', {
+                userId,
+                xrplAddress: wallet.xrpl_address,
+                xrplBalances: balances,
+                reason: xrplHasBalance ? 'XRPL has positive balance' : 'No completed deposits found',
+              });
+            } else {
+              // Has completed deposits but XRPL shows 0 - preserve database balance
+              // This could mean deposits are still syncing, or there's an address mismatch
+              console.log('[DEBUG] wallet.service.getBalance: Preserving database balances despite XRPL 0 balance', {
+                userId,
+                xrplAddress: wallet.xrpl_address,
+                xrplBalances: balances,
+                dbBalances: {
+                  xrp: wallet.balance_xrp,
+                  usdt: wallet.balance_usdt,
+                  usdc: wallet.balance_usdc,
+                },
+                completedDepositsCount: completedDeposits?.length || 0,
+                note: 'User has completed deposits but XRPL shows 0. Preserving database balances.',
+              });
+              // Use existing database balances instead of overwriting with 0
+              balances = {
+                xrp: parseFloat((wallet.balance_xrp || 0).toFixed(6)),
+                usdt: parseFloat((wallet.balance_usdt || 0).toFixed(6)),
+                usdc: parseFloat((wallet.balance_usdc || 0).toFixed(6)),
+              };
+            }
           } else {
             // Account not found on XRPL - preserve existing database balances
             // This happens when user connects a new wallet address that hasn't been funded yet
