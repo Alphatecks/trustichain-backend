@@ -288,14 +288,54 @@ export class WalletService {
   }> {
     try {
       const adminClient = supabaseAdmin || supabase;
-      const { walletAddress } = request;
+      let { walletAddress } = request;
+
+      // Trim whitespace and convert to string
+      if (walletAddress) {
+        walletAddress = String(walletAddress).trim();
+      }
+
+      // Log the received address for debugging
+      console.log('[Connect Wallet] Received address:', {
+        original: request.walletAddress,
+        trimmed: walletAddress,
+        type: typeof request.walletAddress,
+        length: walletAddress?.length,
+        startsWithR: walletAddress?.startsWith('r'),
+        firstChar: walletAddress?.[0],
+      });
 
       // Validate XRPL address format
       // XRPL addresses start with 'r' and are 25-35 characters
-      if (!walletAddress || !walletAddress.startsWith('r') || walletAddress.length < 25 || walletAddress.length > 35) {
+      if (!walletAddress) {
         return {
           success: false,
-          message: 'Invalid XRPL wallet address format. XRPL addresses must start with "r" and be 25-35 characters long.',
+          message: 'Wallet address is required',
+          error: 'Missing wallet address',
+        };
+      }
+
+      // Check if it's an Ethereum address (starts with 0x)
+      if (walletAddress.startsWith('0x')) {
+        return {
+          success: false,
+          message: 'Invalid address format: This appears to be an Ethereum address (starts with 0x). Please provide an XRPL address (starts with "r"). If you are using MetaMask with XRPL Snap, make sure you are getting the XRPL address, not the Ethereum address.',
+          error: 'Ethereum address detected',
+        };
+      }
+
+      if (!walletAddress.startsWith('r')) {
+        return {
+          success: false,
+          message: `Invalid XRPL wallet address format. XRPL addresses must start with "r". Received: "${walletAddress.substring(0, 10)}..." (length: ${walletAddress.length})`,
+          error: 'Invalid wallet address format',
+        };
+      }
+
+      if (walletAddress.length < 25 || walletAddress.length > 35) {
+        return {
+          success: false,
+          message: `Invalid XRPL wallet address length. XRPL addresses must be 25-35 characters long. Received: "${walletAddress}" (length: ${walletAddress.length})`,
           error: 'Invalid wallet address format',
         };
       }
