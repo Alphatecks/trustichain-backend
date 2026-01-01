@@ -204,10 +204,12 @@ export class WalletService {
 
             // Only sync from XRPL if:
             // 1. XRPL has a positive balance (source of truth), OR
-            // 2. No completed deposits exist (new user, safe to sync 0)
-            // If deposits exist but XRPL is 0, preserve database balance (may be pending sync or different address)
-            if (xrplHasBalance || !hasCompletedDeposits) {
-              // Sync balances from XRPL (either positive balance or no deposits to preserve)
+            // 2. No completed deposits exist AND the existing database balances are all zero
+            //    (this indicates a new/empty account and it's safe to sync 0). If the DB already
+            //    has non-zero balances, preserve them to avoid wiping user funds when they
+            //    connect a new empty wallet address.
+            if (xrplHasBalance || (!hasCompletedDeposits && ((wallet.balance_xrp || 0) === 0 && (wallet.balance_usdt || 0) === 0 && (wallet.balance_usdc || 0) === 0))) {
+              // Sync balances from XRPL (either positive balance or safe-to-sync zero for a new account)
               await adminClient
                 .from('wallets')
                 .update({
@@ -221,7 +223,7 @@ export class WalletService {
                 userId,
                 xrplAddress: wallet.xrpl_address,
                 xrplBalances: balances,
-                reason: xrplHasBalance ? 'XRPL has positive balance' : 'No completed deposits found',
+                reason: xrplHasBalance ? 'XRPL has positive balance' : 'No completed deposits and DB balances are zero - safe to sync',
               });
             } else {
               // Has completed deposits but XRPL shows 0 - preserve database balance
