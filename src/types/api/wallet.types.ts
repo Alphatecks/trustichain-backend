@@ -164,6 +164,15 @@ export interface ConnectWalletResponse {
   };
 }
 
+export interface DisconnectWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    previousAddress?: string;
+  };
+  error?: string;
+}
+
 export interface ValidateAddressRequest {
   walletAddress: string;
 }

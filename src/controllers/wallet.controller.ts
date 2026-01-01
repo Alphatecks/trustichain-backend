@@ -337,6 +337,33 @@ export class WalletController {
   }
 
   /**
+   * Disconnect user's connected XRPL wallet (e.g., Xaman/XUMM)
+   * POST /api/wallet/disconnect
+   */
+  async disconnectWallet(
+    req: Request,
+    res: Response<DisconnectWalletResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await walletService.disconnectWallet(userId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Validate wallet address format
    * POST /api/wallet/validate-address
    */

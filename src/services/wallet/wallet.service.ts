@@ -455,6 +455,85 @@ const xrplAddress = xrplResponse.address || xrplResponse; // This is r...`
         };
       }
 
+  }
+
+  /**
+   * Disconnect user's connected XRPL wallet (e.g., Xaman/XUMM)
+   */
+  async disconnectWallet(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      previousAddress?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get user's current wallet
+      const { data: currentWallet, error: walletError } = await adminClient
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', userId)
+        .single();
+
+      if (walletError || !currentWallet) {
+        return {
+          success: false,
+          message: 'Wallet not found',
+          error: 'Wallet not found',
+        };
+      }
+
+      const previousAddress = currentWallet.xrpl_address;
+
+      // Clear the xrpl_address but preserve balances
+      const { error: updateError } = await adminClient
+        .from('wallets')
+        .update({ xrpl_address: null, updated_at: new Date().toISOString() })
+        .eq('user_id', userId);
+
+      if (updateError) {
+        console.error('Error disconnecting wallet:', updateError);
+        return {
+          success: false,
+          message: 'Failed to disconnect wallet',
+          error: 'Database update failed',
+        };
+      }
+
+      // Create a transaction record for auditing (best-effort)
+      try {
+        await adminClient
+          .from('transactions')
+          .insert({
+            user_id: userId,
+            type: 'wallet_disconnect',
+            status: 'completed',
+            description: `Disconnected XRPL wallet ${previousAddress}`,
+          });
+      } catch (txErr) {
+        // Ignore auditing errors
+      }
+
+      return {
+        success: true,
+        message: 'Wallet disconnected successfully',
+        data: {
+          previousAddress: previousAddress || undefined,
+        },
+      };
+    } catch (error) {
+      console.error('Error disconnecting wallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to disconnect wallet',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
       if (!walletAddress.startsWith('r')) {
         return {
           success: false,

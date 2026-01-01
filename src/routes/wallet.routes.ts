@@ -95,6 +95,15 @@ router.post('/connect', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/wallet/disconnect
+ * @desc    Disconnect user's connected XRPL wallet (e.g., Xaman/XUMM)
+ * @access  Private
+ */
+router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
+  await walletController.disconnectWallet(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/validate-address
  * @desc    Validate wallet address format (helper endpoint - no auth required)
  * @access  Public
