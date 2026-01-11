@@ -43,12 +43,18 @@ export const validateRegister = (
   try {
     registerSchema.parse(req.body);
     next();
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof ZodError) {
-      const firstError = error.errors[0];
+      const firstError = error.issues[0];
       res.status(400).json({
         success: false,
         message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else if (error && typeof error === 'object' && 'message' in error) {
+      res.status(400).json({
+        success: false,
+        message: (error as any).message || 'Invalid request data',
         error: 'Validation failed',
       });
     } else {
@@ -75,12 +81,18 @@ export const validateLogin = (
   try {
     loginSchema.parse(req.body);
     next();
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof ZodError) {
-      const firstError = error.errors[0];
+      const firstError = error.issues[0];
       res.status(400).json({
         success: false,
         message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else if (error && typeof error === 'object' && 'message' in error) {
+      res.status(400).json({
+        success: false,
+        message: (error as any).message || 'Invalid request data',
         error: 'Validation failed',
       });
     } else {
