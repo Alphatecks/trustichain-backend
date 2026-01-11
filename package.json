@@ -23,9 +23,12 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.22.1",
+    "fs": "^0.0.1-security",
     "multer": "^2.0.2",
-    "resend": "^3.2.0",
+    "path": "^0.12.7",
+    "resend": "^3.5.0",
     "ripple-keypairs": "^2.0.0",
+    "uuid": "^13.0.0",
     "xrpl": "^4.5.0",
     "zod": "^4.3.5"
   },
