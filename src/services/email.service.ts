@@ -41,7 +41,7 @@ export class EmailService {
       console.log(`Using Resend from: ${process.env.RESEND_FROM_EMAIL}`);
       console.log(`Backend URL: ${backendUrl}`);
 
-      const { data, error } = await resend.emails.send({
+      const { data, error } = await (resend as any).emails.send({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: 'Verify Your TrustiChain Account',

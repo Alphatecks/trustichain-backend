@@ -32,7 +32,7 @@ export class EscrowService {
       .select('id, full_name')
       .in('id', userIds);
 
-    return (users || []).reduce((acc, user) => {
+    return (users || []).reduce((acc: Record<string, string>, user: { id: string; full_name: string }) => {
       acc[user.id] = user.full_name;
       return acc;
     }, {} as Record<string, string>);
@@ -53,7 +53,7 @@ export class EscrowService {
       return [];
     }
 
-    return milestones.map(m => ({
+    return milestones.map((m: any) => ({
       id: m.id,
       milestoneDetails: m.milestone_details,
       milestoneAmount: parseFloat(m.milestone_amount),
@@ -95,7 +95,7 @@ export class EscrowService {
       }
 
       const count = escrows?.length || 0;
-      const lockedAmount = escrows?.reduce((sum, escrow) => sum + parseFloat(escrow.amount_usd), 0) || 0;
+      const lockedAmount = escrows?.reduce((sum: number, escrow: { amount_usd: string | number }) => sum + parseFloat(String(escrow.amount_usd)), 0) || 0;
 
       return {
         success: true,
@@ -143,7 +143,7 @@ export class EscrowService {
         };
       }
 
-      const totalEscrowed = escrows?.reduce((sum, escrow) => sum + parseFloat(escrow.amount_usd), 0) || 0;
+      const totalEscrowed = escrows?.reduce((sum: number, escrow: { amount_usd: string | number }) => sum + parseFloat(String(escrow.amount_usd)), 0) || 0;
 
       return {
         success: true,
@@ -773,7 +773,7 @@ export class EscrowService {
 
       // Get all unique user IDs (both initiators and counterparties)
       const userIds = new Set<string>();
-      (escrows || []).forEach(escrow => {
+      (escrows || []).forEach((escrow: any) => {
         if (escrow.user_id) userIds.add(escrow.user_id);
         if (escrow.counterparty_id) userIds.add(escrow.counterparty_id);
       });
@@ -782,7 +782,7 @@ export class EscrowService {
       const partyNames = await this.getPartyNames(Array.from(userIds));
 
       // Format escrows with all metadata
-      const formattedEscrows: Escrow[] = (escrows || []).map(escrow => {
+      const formattedEscrows: Escrow[] = (escrows || []).map((escrow: any) => {
         const year = new Date(escrow.created_at).getFullYear();
         const escrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
 
@@ -1135,7 +1135,7 @@ export class EscrowService {
               ? 'wss://xrplcluster.com'
               : 'wss://s.altnet.rippletest.net:51233';
             
-            const client = new Client(xrplServer);
+            const client: any = new Client(xrplServer);
             await client.connect();
 
             try {
@@ -1224,7 +1224,7 @@ export class EscrowService {
               ? 'wss://xrplcluster.com'
               : 'wss://s.altnet.rippletest.net:51233';
             
-            const client = new Client(xrplServer);
+            const client: any = new Client(xrplServer);
             await client.connect();
             
             try {
@@ -2291,10 +2291,10 @@ export class EscrowService {
       }
 
       // Get unique industries
-      const industries = [...new Set((escrows || [])
-        .map(e => e.industry)
-        .filter((ind): ind is string => ind !== null && ind !== undefined)
-        .sort())];
+      const industries: string[] = [...new Set((escrows || [])
+        .map((e: any) => e.industry)
+        .filter((ind: string | null | undefined): ind is string => ind !== null && ind !== undefined)
+        .sort())] as string[];
 
       return {
         success: true,

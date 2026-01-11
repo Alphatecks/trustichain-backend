@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { walletController } from '../controllers/wallet.controller';
+import { walletController } from '../controllers/walletControllerExport';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 

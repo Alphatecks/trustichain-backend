@@ -2,7 +2,7 @@
  * Escrow API Types
  */
 
-
+import type { TransactionType } from './transaction.types';
 
 export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
 

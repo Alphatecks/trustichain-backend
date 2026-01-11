@@ -181,7 +181,7 @@ export class SavingsService {
           .from('savings_wallets')
           .select('id, name')
           .in('id', walletIds);
-        categoryMap = (wallets || []).reduce((acc, w) => {
+        categoryMap = (wallets || []).reduce((acc: Record<string, { name: string }>, w: { id: string; name: string }) => {
           acc[w.id] = { name: w.name };
           return acc;
         }, {} as Record<string, { name: string }>);
@@ -341,7 +341,7 @@ export class SavingsService {
         };
       }
 
-      const walletIds = (wallets || []).map(w => w.id);
+      const walletIds = (wallets || []).map((w: { id: string }) => w.id);
 
       let totalsByWallet = new Map<string, number>();
       if (walletIds.length > 0) {
@@ -362,7 +362,7 @@ export class SavingsService {
 
       const totalUsd = Array.from(totalsByWallet.values()).reduce((sum, v) => sum + v, 0);
 
-      const items = (wallets || []).map(w => {
+      const items = (wallets || []).map((w: { id: string; name: string; created_at: string; target_amount_usd?: string | number | null }) => {
         const amountUsd = totalsByWallet.get(w.id) || 0;
         const percentage = totalUsd > 0 ? (amountUsd / totalUsd) * 100 : 0;
 
@@ -371,7 +371,7 @@ export class SavingsService {
           name: w.name,
           amountUsd,
           percentage: parseFloat(percentage.toFixed(2)),
-          targetAmountUsd: w.target_amount_usd ? parseFloat(w.target_amount_usd) : undefined,
+          targetAmountUsd: w.target_amount_usd ? parseFloat(String(w.target_amount_usd)) : undefined,
         };
       });
 
@@ -511,7 +511,7 @@ export class SavingsService {
       const txRows = rows || [];
 
       // Filter by direction in-memory (simpler than complex DB filters)
-      const filtered = txRows.filter(row => {
+      const filtered = txRows.filter((row: any) => {
         const dir = this.getDirection(row.type as TransactionType);
         if (direction === 'all') return true;
         return dir === direction;
@@ -519,7 +519,7 @@ export class SavingsService {
 
       // Get wallet names
       const walletIds = Array.from(
-        new Set<string>(filtered.map(r => r.savings_wallet_id).filter(Boolean))
+        new Set<string>(filtered.map((r: any) => r.savings_wallet_id).filter(Boolean))
       );
 
       let walletNameMap: Record<string, string> = {};
@@ -528,13 +528,13 @@ export class SavingsService {
           .from('savings_wallets')
           .select('id, name')
           .in('id', walletIds);
-        walletNameMap = (wallets || []).reduce((acc, w) => {
+        walletNameMap = (wallets || []).reduce((acc: Record<string, string>, w: { id: string; name: string }) => {
           acc[w.id] = w.name;
           return acc;
         }, {} as Record<string, string>);
       }
 
-      const items = filtered.map(row => {
+      const items = filtered.map((row: any) => {
         const dir = this.getDirection(row.type as TransactionType);
         const label = dir === 'received' ? 'Received' : 'Spent';
         const createdDate = row.created_at

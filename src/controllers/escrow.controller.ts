@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import '../../types/express';
 import {
-  CreateEscrowRequest,
   CreateEscrowResponse,
   EscrowListResponse,
   ActiveEscrowsResponse,
@@ -14,8 +13,8 @@ import {
   CancelEscrowResponse,
   GetIndustriesResponse,
   GetEscrowListRequest,
-  TransactionType,
 } from '../types/api/escrow.types';
+import type { TransactionType } from '../types/api/transaction.types';
 import { escrowService } from '../services/escrow/escrow.service';
 
 export class EscrowController {

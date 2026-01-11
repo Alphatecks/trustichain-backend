@@ -4,7 +4,6 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import type { TransactionType } from '../../types/api/transaction.types';
 
 export class PortfolioService {
   /**
@@ -62,9 +61,9 @@ export class PortfolioService {
       }
 
       // Format data for chart
-      const formattedData = portfolioData.map(item => ({
+      const formattedData = portfolioData.map((item: { period: string; value_usd: string | number }) => ({
         period: this.formatPeriod(item.period, timeframe),
-        value: parseFloat(item.value_usd),
+        value: parseFloat(String(item.value_usd)),
       }));
 
       return {

@@ -149,7 +149,7 @@ export class TrustiscoreService {
         .eq('user_id', userId)
         .eq('status', 'completed');
 
-      const transactionVolume = transactions?.reduce((sum, tx) => sum + parseFloat(tx.amount_usd), 0) || 0;
+      const transactionVolume = transactions?.reduce((sum: number, tx: { amount_usd: string | number }) => sum + parseFloat(String(tx.amount_usd)), 0) || 0;
 
       // Calculate score (0-100)
       // Factors and weights:

@@ -97,7 +97,7 @@ export class StorageService {
       throw new Error('Failed to check storage buckets');
     }
 
-    const bucketExists = buckets?.some((bucket) => bucket.name === this.BUCKET_NAME);
+    const bucketExists = buckets?.some((bucket: { name: string }) => bucket.name === this.BUCKET_NAME);
 
     if (!bucketExists) {
       // Create bucket if it doesn't exist

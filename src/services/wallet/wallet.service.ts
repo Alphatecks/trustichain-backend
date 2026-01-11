@@ -13,7 +13,6 @@ import {
   SwapExecuteRequest,
   SwapExecuteResponse,
 } from '../../types/api/wallet.types';
-import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
 import { exchangeService } from '../exchange/exchange.service';
@@ -25,14 +24,55 @@ export class WalletService {
   /**
    * Get wallet balance for a user
    */
-  async getBalance(userId: string): Promise<{ balance_xrp: number; balance_usdt: number; balance_usdc: number }> {
-    // TODO: Implement actual logic to fetch balances from DB or XRPL
-    // Placeholder implementation to allow compilation
-    return {
-      balance_xrp: 0,
-      balance_usdt: 0,
-      balance_usdc: 0
+  async getBalance(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      balance: {
+        xrp: number;
+        usdt: number;
+        usdc: number;
+        usd: number;
+      };
     };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      const { data: wallet, error } = await adminClient
+        .from('wallets')
+        .select('balance_xrp, balance_usdt, balance_usdc')
+        .eq('user_id', userId)
+        .single();
+
+      if (error || !wallet) {
+        return {
+          success: false,
+          message: 'Wallet not found',
+          error: 'Wallet not found',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Balance retrieved successfully',
+        data: {
+          balance: {
+            xrp: wallet.balance_xrp ?? 0,
+            usdt: wallet.balance_usdt ?? 0,
+            usdc: wallet.balance_usdc ?? 0,
+            usd: 0, // TODO: Calculate USD equivalent if needed
+          },
+        },
+      };
+    } catch (error) {
+      console.error('Error getting wallet balance:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get wallet balance',
+        error: error instanceof Error ? error.message : 'Failed to get wallet balance',
+      };
+    }
   }
 
   /**
@@ -2394,7 +2434,7 @@ export class WalletService {
         // ...existing code...
         // #endregion
         // Update transaction status to failed if XRPL submission fails
-        const updateResult = await adminClient
+        await adminClient
           .from('transactions')
           .update({
             status: 'failed',
@@ -2671,7 +2711,7 @@ export class WalletService {
             ? 'wss://xrplcluster.com'
             : 'wss://s.altnet.rippletest.net:51233';
           
-          const client = new Client(xrplServer);
+          const client: any = new Client(xrplServer);
           await client.connect();
 
           try {
@@ -2793,7 +2833,7 @@ export class WalletService {
         };
       }
 
-      const formattedTransactions: WalletTransaction[] = (transactions || []).map(tx => ({
+      const formattedTransactions: WalletTransaction[] = (transactions || []).map((tx: any) => ({
         id: tx.id,
         type: tx.type,
         amount: {
