@@ -2,18 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/supabase';
 import { asyncHandler } from '../utils/asyncHandler';
 
-// Extend Express Request to include user ID
-declare global {
-  namespace Express {
-    interface Request {
-      userId?: string;
-      user?: {
-        id: string;
-        email: string;
-      };
-    }
-  }
-}
 
 /**
  * Authentication middleware to verify Supabase JWT token

@@ -30,15 +30,20 @@ export class DisputeService {
     if (userIds.length === 0) return {};
 
     const adminClient = supabaseAdmin || supabase;
+    interface UserName {
+      id: string;
+      full_name: string;
+    }
+
     const { data: users } = await adminClient
       .from('users')
       .select('id, full_name')
       .in('id', userIds);
 
-    return (users || []).reduce((acc, user) => {
+    return (users || []).reduce<Record<string, string>>((acc: Record<string, string>, user: UserName) => {
       acc[user.id] = user.full_name;
       return acc;
-    }, {} as Record<string, string>);
+    }, {});
   }
 
   /**
@@ -246,7 +251,7 @@ export class DisputeService {
         new Set(
           rows.flatMap((d: any) => [d.initiator_user_id, d.respondent_user_id]).filter(Boolean)
         )
-      );
+      ).map(String) as string[];
       const partyNames = await this.getPartyNames(userIds);
 
       const now = new Date();

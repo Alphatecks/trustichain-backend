@@ -4,6 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import type { TransactionType } from '../../types/api/transaction.types';
 
 export class PortfolioService {
   /**

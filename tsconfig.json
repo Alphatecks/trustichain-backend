@@ -1,27 +1,31 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2020",
     "module": "commonjs",
-    "lib": ["ES2022"],
+    "lib": ["ES2020", "DOM"],
     "outDir": "./dist",
     "rootDir": "./src",
+
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
+
+    
+
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["node", "jest"]
+    "downlevelIteration": true
   },
-  "include": ["src/**/*","dist/**/*"],
-  "exclude": ["node_modules", "tests"]
+  "include": ["src/**/*.ts", "src/express/**/*.d.ts", "src/types/global.d.ts", "src/types/express.d.ts", "src/types/index.d.ts", "src/types/express-serve-static-core/index.d.ts"],
+  "files": ["src/types/global.d.ts", "src/types/express.d.ts", "src/types/index.d.ts", "src/types/express-serve-static-core/index.d.ts"],
+  "exclude": ["node_modules", "tests", "dist"]
 }
-
-

@@ -2,7 +2,7 @@
  * Escrow API Types
  */
 
-export type TransactionType = 'freelance' | 'product_purchase' | 'real_estate' | 'custom';
+
 
 export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
 

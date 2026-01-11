@@ -1,3 +1,4 @@
+import type { TransactionType } from './transaction.types';
 /**
  * Wallet API Types
  */
@@ -133,7 +134,7 @@ export interface WithdrawWalletResponse {
 
 export interface WalletTransaction {
   id: string;
-  type: 'deposit' | 'withdrawal' | 'escrow_create' | 'escrow_release' | 'escrow_cancel' | 'transfer' | 'swap';
+  type: TransactionType;
   amount: {
     usd: number;
     xrp: number;

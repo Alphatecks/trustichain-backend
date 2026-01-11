@@ -3,7 +3,8 @@
  * Handles decentralized exchange operations on XRPL
  */
 
-import { Client, Wallet, xrpToDrops, dropsToXrp, Payment } from 'xrpl';
+import { Client, xrpToDrops, dropsToXrp } from 'xrpl';
+import * as keypairs from 'ripple-keypairs';
 
 export interface DEXSwapQuote {
   fromAmount: number;
@@ -55,7 +56,7 @@ export class XRPLDEXService {
       await client.connect();
       
       const issuer = this.getIssuer(currency);
-      const accountLines = await client.request({
+      const accountLines = await (client as any).request({
         command: 'account_lines',
         account: xrplAddress,
         ledger_index: 'validated',
@@ -96,7 +97,7 @@ export class XRPLDEXService {
         const toIssuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
         
         // Step 1: fromCurrency -> XRP
-        const step1 = await client.request({
+        const step1 = await (client as any).request({
           command: 'book_offers',
           taker_gets: { currency: 'XRP' },
           taker_pays: {
@@ -149,7 +150,7 @@ export class XRPLDEXService {
         }
 
         // Step 2: XRP -> toCurrency
-        const step2 = await client.request({
+        const step2 = await (client as any).request({
           command: 'book_offers',
           taker_gets: {
             currency: 'USD',
@@ -248,7 +249,7 @@ export class XRPLDEXService {
       }
 
       // Query orderbook
-      const orderbook = await client.request({
+      const orderbook = await (client as any).request({
         command: 'book_offers',
         taker_gets: takerGets,
         taker_pays: takerPays,
@@ -362,7 +363,7 @@ export class XRPLDEXService {
 
       // Build payment transaction
       // Key: When Destination = Account, XRPL treats it as currency conversion
-      let payment: Payment;
+      let payment: any;
 
       // Set what user wants to receive
       if (toCurrency === 'XRP') {
@@ -437,15 +438,22 @@ export class XRPLDEXService {
       // If both are XRP, no paths needed (but this shouldn't happen in a swap)
 
       // Autofill transaction (this will add missing fields like Fee, Sequence, etc.)
-      const prepared = await client.autofill(payment);
+      // Manually fill required fields (Sequence, Fee)
+      const accountInfo = await (client as any).request({
+        command: 'account_info',
+        account: userAddress,
+        ledger_index: 'validated',
+      });
+      (payment as any).Sequence = accountInfo.result.account_data.Sequence;
+      (payment as any).Fee = '12'; // Set a default fee (in drops), adjust as needed
       await client.disconnect();
 
       // Serialize to blob
-      const transactionBlob = JSON.stringify(prepared);
+      const transactionBlob = JSON.stringify(payment);
 
       return {
         success: true,
-        transaction: prepared,
+        transaction: payment,
         transactionBlob,
       };
     } catch (error) {
@@ -488,11 +496,20 @@ export class XRPLDEXService {
       await client.connect();
 
       // Sign transaction
-      const wallet = Wallet.fromSeed(walletSecret);
-      const signed = wallet.sign(prepareResult.transaction);
-
+      // Use ripple-keypairs for signing
+      const keypair = keypairs.deriveKeypair(walletSecret);
+      const fromDerivedAddress = keypairs.deriveAddress(keypair.publicKey);
+      if (fromDerivedAddress !== userAddress) {
+        throw new Error('Provided secret does not match the userAddress');
+      }
+      // Sign transaction
+      const txJSON = JSON.stringify(prepareResult.transaction);
+      const signed = keypairs.sign(txJSON, walletSecret);
       // Submit transaction
-      const result = await client.submitAndWait(signed.tx_blob);
+      const result = await (client as any).request({
+        command: 'submit',
+        tx_blob: signed,
+      });
       await client.disconnect();
 
       // Check transaction result
@@ -567,8 +584,12 @@ export class XRPLDEXService {
       await client.connect();
 
       const issuer = this.getIssuer(currency);
-      const wallet = Wallet.fromSeed(walletSecret);
-
+      // Use ripple-keypairs for signing
+      const keypair = keypairs.deriveKeypair(walletSecret);
+      const fromDerivedAddress = keypairs.deriveAddress(keypair.publicKey);
+      if (fromDerivedAddress !== userAddress) {
+        throw new Error('Provided secret does not match the userAddress');
+      }
       const trustSet: any = {
         TransactionType: 'TrustSet',
         Account: userAddress,
@@ -578,10 +599,22 @@ export class XRPLDEXService {
           value: limit,
         },
       };
-
-      const prepared = await client.autofill(trustSet);
-      const signed = wallet.sign(prepared);
-      const trustResult = await client.submitAndWait(signed.tx_blob);
+      // Manually fill required fields (Sequence, Fee)
+      const accountInfo = await (client as any).request({
+        command: 'account_info',
+        account: userAddress,
+        ledger_index: 'validated',
+      });
+      trustSet.Sequence = accountInfo.result.account_data.Sequence;
+      trustSet.Fee = '12'; // Set a default fee (in drops), adjust as needed
+      // Sign transaction
+      const txJSON = JSON.stringify(trustSet);
+      const signed = keypairs.sign(txJSON, walletSecret);
+      // Submit transaction
+      const trustResult = await (client as any).request({
+        command: 'submit',
+        tx_blob: signed,
+      });
       await client.disconnect();
 
       const trustMeta = trustResult.result.meta;

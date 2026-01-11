@@ -1,3 +1,4 @@
+import type { TransactionType } from './transaction.types';
 /**
  * Savings API Types
  */

@@ -4,6 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+
 import {
   SavingsSummaryResponse,
   SavingsCashflowResponse,
@@ -11,14 +12,7 @@ import {
   SavingsTransactionsResponse,
   SavingsTransactionDirection,
 } from '../../types/api/savings.types';
-
-type TransactionType =
-  | 'deposit'
-  | 'withdrawal'
-  | 'escrow_create'
-  | 'escrow_release'
-  | 'escrow_cancel'
-  | 'transfer';
+import type { TransactionType } from '../../types/api/transaction.types';
 
 export class SavingsService {
   /**

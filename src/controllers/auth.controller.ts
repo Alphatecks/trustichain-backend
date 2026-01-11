@@ -7,7 +7,7 @@ export class AuthController {
    * Register a new user
    * POST /api/auth/register
    */
-  async register(req: Request<{}, RegisterResponse, RegisterRequest>, res: Response<RegisterResponse>): Promise<void> {
+  async register(req: Request, res: Response<RegisterResponse>): Promise<void> {
     try {
       const registerData: RegisterRequest = req.body;
       const result = await authService.register(registerData);
@@ -31,7 +31,7 @@ export class AuthController {
    * Login a user
    * POST /api/auth/login
    */
-  async login(req: Request<{}, LoginResponse, LoginRequest>, res: Response<LoginResponse>): Promise<void> {
+  async login(req: Request, res: Response<LoginResponse>): Promise<void> {
     try {
       const controllerStartTime = Date.now();
       const loginData: LoginRequest = req.body;
@@ -98,7 +98,7 @@ export class AuthController {
    * Verify user email
    * POST /api/auth/verify-email
    */
-  async verifyEmail(req: Request<{}, VerifyEmailResponse, VerifyEmailRequest>, res: Response<VerifyEmailResponse>): Promise<void> {
+  async verifyEmail(req: Request, res: Response<VerifyEmailResponse>): Promise<void> {
     try {
       const verifyData: VerifyEmailRequest = req.body;
       const result = await authService.verifyEmail(verifyData);
@@ -581,7 +581,7 @@ export class AuthController {
    * Logout a user
    * POST /api/auth/logout
    */
-  async logout(req: Request<{}, LogoutResponse>, res: Response<LogoutResponse>): Promise<void> {
+  async logout(req: Request, res: Response<LogoutResponse>): Promise<void> {
     try {
       // Get token from Authorization header
       const authHeader = req.headers.authorization;

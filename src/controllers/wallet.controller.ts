@@ -1,48 +1,29 @@
 import { Request, Response } from 'express';
-import {
-  WalletBalanceResponse,
-  FundWalletRequest,
-  FundWalletResponse,
-  WithdrawWalletRequest,
-  WithdrawWalletResponse,
-  WalletTransactionsResponse,
-  XUMMPayloadStatusResponse,
-  SwapQuoteRequest,
-  SwapQuoteResponse,
-  SwapExecuteRequest,
-  SwapExecuteResponse,
-  ConnectWalletRequest,
-  ConnectWalletResponse,
-  ValidateAddressRequest,
-  ValidateAddressResponse,
-  ConnectXUMMRequest,
-  ConnectXUMMResponse,
-  ConnectXUMMStatusResponse,
-  FundXUMMRequest,
-  FundXUMMResponse,
-  FundXUMMStatusResponse,
-} from '../types/api/wallet.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
 
+
 export class WalletController {
-  /**
-   * Get wallet balance
-   * GET /api/wallet/balance
-   */
-  async getBalance(req: Request, res: Response<WalletBalanceResponse>): Promise<void> {
+  async getBalance(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
-      const result = await walletService.getBalance(userId);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      const userId = (req as Request & { userId?: string }).userId!;
+      const data = await walletService.getBalance(userId);
+      res.json({
+        success: true,
+        message: 'Wallet balance fetched successfully',
+        data: {
+          balance: {
+            xrp: data.balance_xrp ?? 0,
+            usdt: data.balance_usdt ?? 0,
+            usdc: data.balance_usdc ?? 0,
+            usd: 0, // TODO: Calculate USD equivalent if needed
+          },
+          xrplAddress: '', // TODO: Add address if available from data
+        },
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -50,26 +31,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Get swap quote between XRP, USDT, and USDC
-   * POST /api/wallet/swap/quote
-   */
-  async getSwapQuote(
-    req: Request<{}, SwapQuoteResponse, SwapQuoteRequest>,
-    res: Response<SwapQuoteResponse>
-  ): Promise<void> {
+  async getSwapQuote(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.getSwapQuote(userId, req.body);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -77,26 +46,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Execute a swap between XRP, USDT, and USDC
-   * POST /api/wallet/swap
-   */
-  async executeSwap(
-    req: Request<{}, SwapExecuteResponse, SwapExecuteRequest>,
-    res: Response<SwapExecuteResponse>
-  ): Promise<void> {
+  async executeSwap(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.executeSwap(userId, req.body);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -104,58 +61,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Fund wallet (deposit)
-   * POST /api/wallet/fund
-   */
-  async fundWallet(req: Request<{}, FundWalletResponse, FundWalletRequest>, res: Response<FundWalletResponse>): Promise<void> {
-    try {
-      const userId = req.userId!;
-      const result = await walletService.fundWallet(userId, req.body);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
-        success: false,
-        message: errorMessage,
-        error: 'Internal server error',
-      });
-    }
-  }
-
-  /**
-   * Submit signed deposit transaction (for browser wallets)
-   * POST /api/wallet/fund/submit
-   */
   async submitSignedDeposit(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const { transactionId, signedTxBlob, signedTransaction, txBlob, signedTx } = req.body;
-
-      // Support multiple field names for flexibility
       const txId = transactionId;
       const signedBlob = signedTxBlob || signedTransaction || txBlob || signedTx;
-
-      // Log received data for debugging
-      console.log('Submit signed deposit request:', {
-        userId,
-        transactionId: txId,
-        hasSignedBlob: !!signedBlob,
-        signedBlobType: typeof signedBlob,
-        signedBlobPreview: typeof signedBlob === 'string' 
-          ? signedBlob.substring(0, 200) 
-          : JSON.stringify(signedBlob).substring(0, 200),
-        bodyKeys: Object.keys(req.body),
-        fullBody: req.body,
-      });
-
       if (!txId || !signedBlob) {
-        res.status(400).json({
+        (res as Response<any>).json({
           success: false,
           message: 'Transaction ID and signed transaction blob are required',
           error: 'Missing required fields',
@@ -163,55 +76,33 @@ export class WalletController {
             received: {
               transactionId: !!txId,
               signedTxBlob: !!signedBlob,
-              bodyKeys: Object.keys(req.body),
+              bodyKeys: req.body ? Object.keys(req.body) : [],
             },
             expected: ['transactionId', 'signedTxBlob'],
           },
         });
         return;
       }
-
-      // Validate signed transaction format early to catch common mistakes (especially UUIDs)
       const formatValidation = validateSignedTransactionFormat(signedBlob);
-      if (!formatValidation.valid) {
-        // Only reject if it's clearly a UUID or obviously invalid
-        // For other cases, let the XRPL service handle validation
-        if (formatValidation.detectedFormat === 'uuid') {
-          res.status(400).json({
-            success: false,
-            message: formatValidation.error || 'Invalid signed transaction format',
-            error: 'Invalid transaction format',
-            details: {
-              detectedFormat: formatValidation.detectedFormat,
-              hint: 'You are sending a transaction ID instead of the signed transaction. Please send the actual signed transaction returned by MetaMask/XRPL Snap.',
-              receivedValue: typeof signedBlob === 'string' 
-                ? signedBlob.substring(0, 100) 
-                : JSON.stringify(signedBlob).substring(0, 100),
-            },
-          });
-          return;
-        }
-        // For other invalid formats, log but let it through to get more specific error from XRPL service
-        console.warn('Transaction format validation warning:', {
-          detectedFormat: formatValidation.detectedFormat,
-          error: formatValidation.error,
-          valuePreview: typeof signedBlob === 'string' 
-            ? signedBlob.substring(0, 200) 
-            : JSON.stringify(signedBlob).substring(0, 200),
+      if (!formatValidation.valid && formatValidation.detectedFormat === 'uuid') {
+        (res as Response<any>).json({
+          success: false,
+          message: formatValidation.error || 'Invalid signed transaction format',
+          error: 'Invalid transaction format',
+          details: {
+            detectedFormat: formatValidation.detectedFormat,
+            hint: 'You are sending a transaction ID instead of the signed transaction. Please send the actual signed transaction returned by MetaMask/XRPL Snap.',
+            receivedValue: typeof signedBlob === 'string' 
+              ? signedBlob.substring(0, 100) : undefined,
+          },
         });
+        return;
       }
-
       const result = await walletService.submitSignedDeposit(userId, txId, signedBlob);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      (res as Response<any>).json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      console.error('Error submitting signed deposit:', error);
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -219,38 +110,23 @@ export class WalletController {
     }
   }
 
-  /**
-   * Get XUMM payload status
-   * GET /api/wallet/fund/status?transactionId=...
-   */
-  async getXUMMPayloadStatus(req: Request, res: Response<XUMMPayloadStatusResponse>): Promise<void> {
+  async getXUMMPayloadStatus(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const transactionId = req.query.transactionId as string;
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.controller.ts:161',message:'getXUMMPayloadStatus: Endpoint called',data:{userId,transactionId,hasTransactionId:!!transactionId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       if (!transactionId) {
-        res.status(400).json({
+        (res as Response<any>).json({
           success: false,
           message: 'Transaction ID is required',
           error: 'Transaction ID is required',
         });
         return;
       }
-
       const result = await walletService.getXUMMPayloadStatus(userId, transactionId);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      (res as Response<any>).json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -258,50 +134,16 @@ export class WalletController {
     }
   }
 
-  /**
-   * Withdraw from wallet
-   * POST /api/wallet/withdraw
-   */
-  async withdrawWallet(req: Request<{}, WithdrawWalletResponse, WithdrawWalletRequest>, res: Response<WithdrawWalletResponse>): Promise<void> {
+  async getTransactions(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
-      const result = await walletService.withdrawWallet(userId, req.body);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
-        success: false,
-        message: errorMessage,
-        error: 'Internal server error',
-      });
-    }
-  }
-
-  /**
-   * Get wallet transactions
-   * GET /api/wallet/transactions?limit=50&offset=0
-   */
-  async getTransactions(req: Request, res: Response<WalletTransactionsResponse>): Promise<void> {
-    try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
-
       const result = await walletService.getTransactions(userId, limit, offset);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -309,26 +151,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Connect MetaMask wallet
-   * POST /api/wallet/connect
-   */
-  async connectWallet(
-    req: Request<{}, ConnectWalletResponse, ConnectWalletRequest>,
-    res: Response<ConnectWalletResponse>
-  ): Promise<void> {
+  async connectWallet(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.connectWallet(userId, req.body);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -336,26 +166,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Disconnect user's connected XRPL wallet (e.g., Xaman/XUMM)
-   * POST /api/wallet/disconnect
-   */
-  async disconnectWallet(
-    req: Request,
-    res: Response<DisconnectWalletResponse>
-  ): Promise<void> {
+  async disconnectWallet(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.disconnectWallet(userId);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -363,25 +181,13 @@ export class WalletController {
     }
   }
 
-  /**
-   * Validate wallet address format
-   * POST /api/wallet/validate-address
-   */
-  async validateAddress(
-    req: Request<{}, ValidateAddressResponse, ValidateAddressRequest>,
-    res: Response<ValidateAddressResponse>
-  ): Promise<void> {
+  async validateAddress(req: Request, res: Response): Promise<void> {
     try {
       const result = await walletService.validateAddress(req.body.walletAddress);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -389,26 +195,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Connect wallet via XUMM
-   * POST /api/wallet/connect/xumm
-   */
-  async connectWalletViaXUMM(
-    req: Request<{}, ConnectXUMMResponse, ConnectXUMMRequest>,
-    res: Response<ConnectXUMMResponse>
-  ): Promise<void> {
+  async connectWalletViaXUMM(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.connectWalletViaXUMM(userId);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      res.json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -416,37 +210,23 @@ export class WalletController {
     }
   }
 
-  /**
-   * Check XUMM connection status
-   * GET /api/wallet/connect/xumm/status?xummUuid=...
-   */
-  async checkXUMMConnectionStatus(
-    req: Request<{}, ConnectXUMMStatusResponse>,
-    res: Response<ConnectXUMMStatusResponse>
-  ): Promise<void> {
+  async checkXUMMConnectionStatus(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const xummUuid = req.query.xummUuid as string;
-
       if (!xummUuid) {
-        res.status(400).json({
+        (res as Response<any>).json({
           success: false,
           message: 'XUMM UUID is required',
           error: 'Missing xummUuid parameter',
         });
         return;
       }
-
       const result = await walletService.checkXUMMConnectionStatus(userId, xummUuid);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      (res as Response<any>).json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -454,26 +234,14 @@ export class WalletController {
     }
   }
 
-  /**
-   * Fund wallet via XUMM (Xaman app)
-   * POST /api/wallet/fund/xumm
-   */
-  async fundWalletViaXUMM(
-    req: Request<{}, FundXUMMResponse, FundXUMMRequest>,
-    res: Response<FundXUMMResponse>
-  ): Promise<void> {
+  async fundWalletViaXUMM(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.fundWalletViaXUMM(userId, req.body);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      (res as Response<any>).json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      (res as Response<any>).json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -481,38 +249,24 @@ export class WalletController {
     }
   }
 
-  /**
-   * Check XUMM fund status
-   * GET /api/wallet/fund/xumm/status?transactionId=...&xummUuid=...
-   */
-  async checkXUMMFundStatus(
-    req: Request<{}, FundXUMMStatusResponse>,
-    res: Response<FundXUMMStatusResponse>
-  ): Promise<void> {
+  async checkXUMMFundStatus(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.userId!;
+      const userId = (req as Request & { userId?: string }).userId!;
       const transactionId = req.query.transactionId as string;
       const xummUuid = req.query.xummUuid as string;
-
       if (!transactionId || !xummUuid) {
-        res.status(400).json({
+        (res as Response<any>).json({
           success: false,
           message: 'Transaction ID and XUMM UUID are required',
           error: 'Missing required parameters',
         });
         return;
       }
-
       const result = await walletService.checkXUMMFundStatus(userId, transactionId, xummUuid);
-
-      if (result.success) {
-        res.status(200).json(result);
-      } else {
-        res.status(400).json(result);
-      }
+      (res as Response<any>).json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.status(500).json({
+      (res as Response<any>).json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',
@@ -521,6 +275,5 @@ export class WalletController {
   }
 }
 
-export const walletController = new WalletController();
-
-
+  
+    

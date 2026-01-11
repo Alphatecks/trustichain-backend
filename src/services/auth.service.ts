@@ -1,7 +1,7 @@
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse, LogoutResponse } from '../types/api/auth.types';
 import { emailService } from './email.service';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 export class AuthService {
   /**

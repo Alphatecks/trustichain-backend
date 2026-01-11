@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import '../../types/express';
 import {
   CreateEscrowRequest,
   CreateEscrowResponse,
@@ -70,7 +71,7 @@ export class EscrowController {
    * Create a new escrow
    * POST /api/escrow/create
    */
-  async createEscrow(req: Request<{}, CreateEscrowResponse, CreateEscrowRequest>, res: Response<CreateEscrowResponse>): Promise<void> {
+  async createEscrow(req: Request, res: Response<CreateEscrowResponse>): Promise<void> {
     try {
       const userId = req.userId!;
       const result = await escrowService.createEscrow(userId, req.body);

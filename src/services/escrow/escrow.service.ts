@@ -4,7 +4,8 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import { CreateEscrowRequest, CreateEscrowResponse, Escrow, GetEscrowListRequest, TransactionType, Milestone, ReleaseType } from '../../types/api/escrow.types';
+import { CreateEscrowRequest, CreateEscrowResponse, Escrow, GetEscrowListRequest, Milestone, ReleaseType } from '../../types/api/escrow.types';
+import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { exchangeService } from '../exchange/exchange.service';
