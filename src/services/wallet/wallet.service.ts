@@ -41,7 +41,7 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: wallet, error } = await adminClient
         .from('wallets')
-        .select('balance_xrp, balance_usdt, balance_usdc')
+        .select('balance_xrp, balance_usdt, balance_usdc, xrpl_address')
         .eq('user_id', userId)
         .single();
 
@@ -53,6 +53,7 @@ export class WalletService {
         };
       }
 
+      // Always return the wallet and balance, even if xrpl_address is null
       return {
         success: true,
         message: 'Balance retrieved successfully',
@@ -63,6 +64,7 @@ export class WalletService {
             usdc: wallet.balance_usdc ?? 0,
             usd: 0, // TODO: Calculate USD equivalent if needed
           },
+          xrpl_address: wallet.xrpl_address ?? null,
         },
       };
     } catch (error) {
