@@ -4,6 +4,32 @@ import { validateSignedTransactionFormat } from '../utils/transactionValidation'
 
 
 export class WalletController {
+    async getAllWallets(req: Request, res: Response): Promise<void> {
+      try {
+        const userId = (req as Request & { userId?: string }).userId!;
+        const result = await walletService.getAllWallets(userId);
+        if (result.success && result.data) {
+          res.json({
+            success: true,
+            message: result.message,
+            wallets: result.data,
+          });
+        } else {
+          res.json({
+            success: false,
+            message: result.message,
+            error: result.error || 'Failed to fetch wallets',
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        res.json({
+          success: false,
+          message: errorMessage,
+          error: 'Internal server error',
+        });
+      }
+    }
   async getBalance(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as Request & { userId?: string }).userId!;

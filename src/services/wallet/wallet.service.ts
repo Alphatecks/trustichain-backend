@@ -21,6 +21,57 @@ import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 
 export class WalletService {
+    /**
+     * Get all wallet addresses and balances for a user
+     */
+    async getAllWallets(userId: string): Promise<{
+      success: boolean;
+      message: string;
+      data?: Array<{
+        xrpl_address: string;
+        is_active: boolean;
+        balance: {
+          xrp: number;
+          usdt: number;
+          usdc: number;
+          usd: number;
+        };
+      }>;
+      error?: string;
+    }> {
+      try {
+        const adminClient = supabaseAdmin || supabase;
+        const { data: addresses, error } = await adminClient
+          .from('wallet_addresses')
+          .select('xrpl_address, is_active')
+          .eq('user_id', userId);
+
+        if (error || !addresses) {
+          return { success: false, message: 'No wallet addresses found', error: 'Not found' };
+        }
+
+        // Fetch balances for each address (pseudo-code, replace with actual logic)
+        const wallets = await Promise.all(addresses.map(async (addr: any) => {
+          // Replace with actual balance fetch logic
+          // For demo, use zeros
+          const balance = {
+            xrp: 0,
+            usdt: 0,
+            usdc: 0,
+            usd: 0,
+          };
+          return {
+            xrpl_address: addr.xrpl_address,
+            is_active: addr.is_active,
+            balance,
+          };
+        }));
+
+        return { success: true, message: 'Wallets retrieved', data: wallets };
+      } catch (error) {
+        return { success: false, message: 'Error fetching wallets', error: error instanceof Error ? error.message : String(error) };
+      }
+    }
   /**
    * Get wallet balance for a user
    */

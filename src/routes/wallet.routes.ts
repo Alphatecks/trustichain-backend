@@ -1,9 +1,19 @@
+
 import { Router } from 'express';
 import { walletController } from '../controllers/walletControllerExport';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
+
+/**
+ * @route   GET /api/wallet/all
+ * @desc    Get all wallet addresses and balances for the user
+ * @access  Private
+ */
+router.get('/all', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getAllWallets(req, res);
+}));
 
 /**
  * @route   GET /api/wallet/balance
