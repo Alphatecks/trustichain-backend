@@ -14,8 +14,8 @@ export class WalletController {
           message: result.message,
           data: {
             balance: result.data.balance,
-            xrplAddress: '', // TODO: Add address if available from data
           },
+          xrplAddress: result.data.xrpl_address ?? '',
         });
       } else {
         res.json({
