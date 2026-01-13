@@ -1,7 +1,4 @@
-/**
- * Wallet Service
- * Handles wallet operations including balance, funding, and withdrawals
- */
+
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import {
@@ -21,6 +18,57 @@ import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 
 export class WalletService {
+
+  /**
+   * Create a new custodial XRPL wallet for the user
+   */
+  async createWallet(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: { xrpl_address: string };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      // Check if user already has a wallet
+      const { data: existing, error: existingError } = await adminClient
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (existing && existing.xrpl_address) {
+        return {
+          success: true,
+          message: 'Wallet already exists',
+          data: { xrpl_address: existing.xrpl_address },
+        };
+      }
+      // Generate a new XRPL wallet
+      const { address, secret } = await xrplWalletService.generateWallet();
+      // Optionally encrypt secret here if storing
+      const { error: insertError } = await adminClient
+        .from('wallets')
+        .insert({ user_id: userId, xrpl_address: address, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
+      if (insertError) {
+        return {
+          success: false,
+          message: 'Failed to create wallet',
+          error: insertError.message || 'Database insert failed',
+        };
+      }
+      return {
+        success: true,
+        message: 'Wallet created successfully',
+        data: { xrpl_address: address },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create wallet',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
     /**
      * Get all wallet addresses and balances for a user
      */
@@ -187,13 +235,20 @@ export class WalletService {
         .eq('user_id', userId)
         .single();
       if (walletError || !currentWallet) {
-        const { error: createError } = await adminClient
-          .from('wallets')
-          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
-        if (createError) {
-          return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
-        }
-        return { success: true, message: 'MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.', data: { walletAddress } };
+          const { error: createError } = await adminClient
+            .from('wallets')
+            .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
+          if (createError) {
+            return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
+          }
+          // Always include walletAddress in response
+          return {
+            success: true,
+            message: 'MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.',
+            data: {
+              walletAddress,
+            },
+          };
       }
       const previousAddress = currentWallet.xrpl_address;
       const { error: updateError } = await adminClient
@@ -203,7 +258,15 @@ export class WalletService {
       if (updateError) {
         return { success: false, message: 'Failed to update wallet address', error: 'Database update failed' };
       }
-      return { success: true, message: 'MetaMask wallet connected successfully. Your wallet address has been updated.', data: { walletAddress, previousAddress: previousAddress !== walletAddress ? previousAddress : undefined } };
+        // Always include walletAddress in response
+        return {
+          success: true,
+          message: 'MetaMask wallet connected successfully. Your wallet address has been updated.',
+          data: {
+            walletAddress,
+            previousAddress: previousAddress !== walletAddress ? previousAddress : undefined,
+          },
+        };
     } catch (error) {
       return { success: false, message: error instanceof Error ? error.message : 'Failed to connect wallet', error: error instanceof Error ? error.message : 'Unknown error' };
     }

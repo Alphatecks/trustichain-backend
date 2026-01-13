@@ -4,7 +4,33 @@ import { validateSignedTransactionFormat } from '../utils/transactionValidation'
 
 
 export class WalletController {
-    async getAllWallets(req: Request, res: Response): Promise<void> {
+  async createWallet(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const result = await walletService.createWallet(userId);
+      if (result.success && result.data) {
+        res.json({
+          success: true,
+          message: result.message,
+          data: result.data,
+        });
+      } else {
+        res.json({
+          success: false,
+          message: result.message,
+          error: result.error || 'Failed to create wallet',
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+  async getAllWallets(req: Request, res: Response): Promise<void> {
       try {
         const userId = (req as Request & { userId?: string }).userId!;
         const result = await walletService.getAllWallets(userId);
