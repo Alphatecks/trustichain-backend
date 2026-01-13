@@ -89,33 +89,29 @@ export class WalletService {
     }> {
       try {
         const adminClient = supabaseAdmin || supabase;
-        const { data: addresses, error } = await adminClient
-          .from('wallet_addresses')
-          .select('xrpl_address, is_active')
+        // Fetch all wallets for the user from the 'wallets' table
+        const { data: wallets, error } = await adminClient
+          .from('wallets')
+          .select('xrpl_address, balance_xrp, balance_usdt, balance_usdc, is_active')
           .eq('user_id', userId);
 
-        if (error || !addresses) {
-          return { success: false, message: 'No wallet addresses found', error: 'Not found' };
+        if (error || !wallets) {
+          return { success: false, message: 'No wallets found', error: 'Not found' };
         }
 
-        // Fetch balances for each address (pseudo-code, replace with actual logic)
-        const wallets = await Promise.all(addresses.map(async (addr: any) => {
-          // Replace with actual balance fetch logic
-          // For demo, use zeros
-          const balance = {
-            xrp: 0,
-            usdt: 0,
-            usdc: 0,
-            usd: 0,
-          };
-          return {
-            xrpl_address: addr.xrpl_address,
-            is_active: addr.is_active,
-            balance,
-          };
+        // Map wallets to the expected response format
+        const result = wallets.map((wallet: any) => ({
+          xrpl_address: wallet.xrpl_address,
+          is_active: wallet.is_active ?? true,
+          balance: {
+            xrp: wallet.balance_xrp ?? 0,
+            usdt: wallet.balance_usdt ?? 0,
+            usdc: wallet.balance_usdc ?? 0,
+            usd: 0, // Optionally calculate USD equivalent
+          },
         }));
 
-        return { success: true, message: 'Wallets retrieved', data: wallets };
+        return { success: true, message: 'Wallets retrieved', data: result };
       } catch (error) {
         return { success: false, message: 'Error fetching wallets', error: error instanceof Error ? error.message : String(error) };
       }

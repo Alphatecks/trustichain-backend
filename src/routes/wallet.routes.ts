@@ -1,6 +1,3 @@
-
-
-
 import { Router } from 'express';
 import { walletController } from '../controllers/walletControllerExport';
 import { authenticate } from '../middleware/auth';
@@ -170,6 +167,15 @@ router.post('/create', authenticate, asyncHandler(async (req, res) => {
  */
 router.get('/fund/xumm/status', authenticate, asyncHandler(async (req, res) => {
   await walletController.checkXUMMFundStatus(req, res);
+}));
+
+/**
+ * @route   POST /api/wallet/create
+ * @desc    Create a new custodial wallet for the user
+ * @access  Private
+ */
+router.post('/create', authenticate, asyncHandler(async (req, res) => {
+  await walletController.createWallet(req, res);
 }));
 
 export default router;
