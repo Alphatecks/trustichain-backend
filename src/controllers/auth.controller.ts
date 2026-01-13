@@ -33,7 +33,6 @@ export class AuthController {
    */
   async login(req: Request, res: Response<LoginResponse>): Promise<void> {
     try {
-      const controllerStartTime = Date.now();
       const loginData: LoginRequest = req.body;
 
     
@@ -41,7 +40,6 @@ export class AuthController {
 
       const result = await authService.login(loginData);
 
-      const controllerDurationMs = Date.now() - controllerStartTime;
 
       // #region agent log
       

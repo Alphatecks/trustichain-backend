@@ -31,7 +31,7 @@ export class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
       // Check if user already has a wallet
-      const { data: existing, error: existingError } = await adminClient
+      const { data: existing } = await adminClient
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
@@ -44,7 +44,7 @@ export class WalletService {
         };
       }
       // Generate a new XRPL wallet
-      const { address, secret } = await xrplWalletService.generateWallet();
+      const { address } = await xrplWalletService.generateWallet();
       // Optionally encrypt secret here if storing
       const { error: insertError } = await adminClient
         .from('wallets')
