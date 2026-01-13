@@ -135,13 +135,12 @@ export class WalletService {
   }> {
     try {
       const adminClient = supabaseAdmin || supabase;
-      const { data: wallet, error } = await adminClient
+      const { data: wallets, error } = await adminClient
         .from('wallets')
         .select('balance_xrp, balance_usdt, balance_usdc, xrpl_address')
-        .eq('user_id', userId)
-        .single();
+        .eq('user_id', userId);
 
-      if (error || !wallet) {
+      if (error || !wallets || wallets.length === 0) {
         return {
           success: false,
           message: 'Wallet not found',
@@ -149,7 +148,8 @@ export class WalletService {
         };
       }
 
-      // Always return the wallet and balance, even if xrpl_address is null
+      const wallet = wallets[0];
+
       return {
         success: true,
         message: 'Balance retrieved successfully',
