@@ -2777,6 +2777,21 @@ class WalletService {
       // #region agent log
       // ...existing code...
       // #endregion
+
+      // Forced update: ensure sender's withdrawal status is 'completed' (regardless of previous value)
+      const { error: forceUpdateError } = await adminClient
+        .from('transactions')
+        .update({
+          status: 'completed',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transaction.id);
+      if (forceUpdateError) {
+        console.error('[Withdrawal] Forced status update to completed failed:', forceUpdateError);
+      } else {
+        console.log('[Withdrawal] Forced status update to completed succeeded for transaction', transaction.id);
+      }
+
       return {
         success: true,
         message: 'Withdrawal completed successfully',
