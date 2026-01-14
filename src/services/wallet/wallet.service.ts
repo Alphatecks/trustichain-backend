@@ -112,12 +112,13 @@ class WalletService {
           data: { xrpl_address: existing.xrpl_address },
         };
       }
-      // Generate a new XRPL wallet
-      const { address } = await xrplWalletService.generateWallet();
-      // Optionally encrypt secret here if storing
+      // Generate a new XRPL wallet (address + secret)
+      const { address, secret } = await xrplWalletService.generateWallet();
+      // Encrypt the secret for storage
+      const encryptedSecret = encryptionService.encrypt(secret);
       const { error: insertError } = await adminClient
         .from('wallets')
-        .insert({ user_id: userId, xrpl_address: address, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
+        .insert({ user_id: userId, xrpl_address: address, encrypted_wallet_secret: encryptedSecret, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
       if (insertError) {
         return {
           success: false,
