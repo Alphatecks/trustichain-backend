@@ -2491,7 +2491,7 @@ class WalletService {
         };
       }
 
-      // Create transaction record
+      // Create transaction record (immediately completed)
       const { data: transaction, error: txError } = await adminClient
         .from('transactions')
         .insert({
@@ -2499,7 +2499,7 @@ class WalletService {
           type: 'withdrawal',
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
-          status: 'pending',
+          status: 'completed',
           description: `Withdrawal to ${request.destinationAddress}`,
         })
         .select()
@@ -2644,52 +2644,15 @@ class WalletService {
         };
       }
 
-      // Update transaction to completed only after successful XRPL submission
-      // #region agent log
-      // ...existing code...
-      // #endregion
-      
-      // Verify transaction exists before update
-      await adminClient
-        .from('transactions')
-        .select('id, status, xrpl_tx_hash')
-        .eq('id', transaction.id)
-        .single();
-      
-      // #region agent log
-      // ...existing code...
-      // #endregion
-      
-      // #region agent log
-      // ...existing code...
-      // #endregion
+      // Update transaction with XRPL tx hash after successful submission
       await adminClient
         .from('transactions')
         .update({
           xrpl_tx_hash: xrplTxHash,
-          status: 'completed',
           updated_at: new Date().toISOString(),
         })
         .eq('id', transaction.id)
         .select();
-      
-      // #region agent log
-      // ...existing code...
-      // #endregion
-      
-      // Verify update actually persisted
-      await adminClient
-        .from('transactions')
-        .select('id, status, xrpl_tx_hash')
-        .eq('id', transaction.id)
-        .single();
-      
-      // #region agent log
-      // ...existing code...
-      // #endregion
-      
-      // Check if update succeeded
-      // Update result check removed (variable no longer declared)
 
       // Update wallet balance after withdrawal
       const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
