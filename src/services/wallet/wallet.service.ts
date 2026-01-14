@@ -2860,6 +2860,7 @@ class WalletService {
    * This fixes the issue where receivers don't have transaction records for incoming payments
    */
   private async syncPendingDeposits(userId: string): Promise<void> {
+
     try {
       const adminClient = supabaseAdmin || supabase;
 
@@ -2872,102 +2873,88 @@ class WalletService {
 
       if (!wallet) return;
 
-      // Find all completed withdrawal transactions with xrpl_tx_hash
-      // that might have sent to this user's address
-      const { data: withdrawals } = await adminClient
-        .from('transactions')
-        .select('*')
-        .eq('type', 'withdrawal')
-        .eq('status', 'completed')
-        .not('xrpl_tx_hash', 'is', null);
+      // Query XRPL for all incoming Payment transactions to this wallet address
+      const { Client, dropsToXrp } = await import('xrpl');
+      const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+      const xrplServer = xrplNetwork === 'mainnet'
+        ? 'wss://xrplcluster.com'
+        : 'wss://s.altnet.rippletest.net:51233';
+      const client: any = new Client(xrplServer);
+      await client.connect();
 
-      if (!withdrawals || withdrawals.length === 0) return;
+      try {
+        // Get account transactions (limit to last 1000 for performance)
+        const txsResponse = await client.request({
+          command: 'account_tx',
+          account: wallet.xrpl_address,
+          ledger_index_min: -1,
+          ledger_index_max: -1,
+          limit: 1000,
+        });
+        const txs = txsResponse.result.transactions || [];
 
-      // Check each withdrawal transaction on XRPL to see if destination matches this user
-      for (const withdrawal of withdrawals) {
-        // Skip if we already created a deposit for this tx hash
-        const { data: existingDeposit } = await adminClient
-          .from('transactions')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('xrpl_tx_hash', withdrawal.xrpl_tx_hash)
-          .eq('type', 'deposit')
-          .maybeSingle();
+        for (const txObj of txs) {
+          const tx = txObj.tx;
+          const meta = txObj.meta;
+          // Only process validated Payment transactions where this address is the destination
+          if (tx.TransactionType === 'Payment' && tx.Destination === wallet.xrpl_address && meta?.TransactionResult === 'tesSUCCESS') {
+            // Check if already recorded in DB
+            const { data: existingDeposit } = await adminClient
+              .from('transactions')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('xrpl_tx_hash', tx.hash)
+              .eq('type', 'deposit')
+              .maybeSingle();
+            if (existingDeposit) continue;
 
-        if (existingDeposit) continue;
-
-        // Query XRPL to get transaction details
-        try {
-          const { Client } = await import('xrpl');
-          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
-          const xrplServer = xrplNetwork === 'mainnet'
-            ? 'wss://xrplcluster.com'
-            : 'wss://s.altnet.rippletest.net:51233';
-          
-          const client: any = new Client(xrplServer);
-          await client.connect();
-
-          try {
-            const txResponse = await client.request({
-              command: 'tx',
-              transaction: withdrawal.xrpl_tx_hash,
-            });
-
-            const txResult = txResponse.result as any;
-            const destination = txResult.Destination;
-
-            // If this withdrawal sent to this user's address, create deposit record
-            if (destination === wallet.xrpl_address && txResult.TransactionType === 'Payment') {
-              // Get amount from transaction
-              const { dropsToXrp } = await import('xrpl');
-              const amountDrops = txResult.Amount;
-              const amountXrp = parseFloat((dropsToXrp as any)(String(amountDrops)));
-
-              // Calculate USD amount (use the same rate as withdrawal if available, or fetch current)
-              let amountUsd = withdrawal.amount_usd;
-              if (amountXrp !== withdrawal.amount_xrp) {
-                // Amounts don't match, recalculate USD
-                const exchangeRates = await exchangeService.getLiveExchangeRates();
-                if (exchangeRates.success && exchangeRates.data) {
-                  const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-                  if (usdRate && usdRate > 0) {
-                    amountUsd = amountXrp * usdRate;
-                  }
-                }
-              }
-
-              // Create deposit transaction for this user
-              await adminClient
-                .from('transactions')
-                .insert({
-                  user_id: userId,
-                  type: 'deposit',
-                  amount_xrp: amountXrp,
-                  amount_usd: amountUsd,
-                  xrpl_tx_hash: withdrawal.xrpl_tx_hash,
-                  status: 'completed',
-                  description: `Deposit from ${txResult.Account}`,
-                });
-
-              // Update wallet balance
-              const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-              await adminClient
-                .from('wallets')
-                .update({
-                  balance_xrp: balances.xrp,
-                  balance_usdt: balances.usdt,
-                  balance_usdc: balances.usdc,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('user_id', userId);
+            // Get amount in XRP
+            let amountXrp = 0;
+            if (typeof tx.Amount === 'string') {
+              amountXrp = parseFloat(dropsToXrp(tx.Amount));
+            } else if (typeof tx.Amount === 'object' && tx.Amount.currency === 'XRP') {
+              amountXrp = parseFloat(tx.Amount.value);
             }
-          } finally {
-            await client.disconnect();
+
+            // Get USD conversion
+            let amountUsd = amountXrp;
+            const exchangeRates = await exchangeService.getLiveExchangeRates();
+            if (exchangeRates.success && exchangeRates.data) {
+              const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+              if (usdRate && usdRate > 0) {
+                amountUsd = amountXrp * usdRate;
+              }
+            }
+
+            // Create deposit transaction for this user
+            await adminClient
+              .from('transactions')
+              .insert({
+                user_id: userId,
+                type: 'deposit',
+                amount_xrp: amountXrp,
+                amount_usd: amountUsd,
+                xrpl_tx_hash: tx.hash,
+                status: 'completed',
+                description: `Deposit from ${tx.Account}`,
+                created_at: tx.date ? new Date(tx.date * 1000).toISOString() : new Date().toISOString(),
+              });
           }
-        } catch (txError) {
-          // Skip if transaction not found or other error
-          console.warn(`[Sync] Could not fetch XRPL transaction ${withdrawal.xrpl_tx_hash}:`, txError);
         }
+
+        // Update wallet balance after syncing
+        const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+        await adminClient
+          .from('wallets')
+          .update({
+            balance_xrp: balances.xrp,
+            balance_usdt: balances.usdt,
+            balance_usdc: balances.usdc,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId);
+      } finally {
+        await client.disconnect();
       }
     } catch (error) {
       // Don't throw - this is a background sync, shouldn't break the main flow
