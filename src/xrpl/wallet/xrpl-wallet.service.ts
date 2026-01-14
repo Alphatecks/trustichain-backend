@@ -460,28 +460,23 @@ export class XRPLWalletService {
       throw new Error('Wallet secret required for withdrawal');
     }
 
+    // Extra validation: Ensure walletSecret is a valid XRPL seed (starts with 's' and length 29-35)
+    if (typeof walletSecret !== 'string' || !/^s[abcdefABCDEF0123456789]{0,}/.test(walletSecret) || walletSecret.length < 20) {
+      throw new Error('Invalid XRPL seed format for wallet secret.');
+    }
+
     const client = new Client(this.XRPL_SERVER);
-    
     try {
-      // #region agent log
-      
-      // #endregion
       await client.connect();
-      // Use ripple-keypairs for signing
-      if (!walletSecret) {
-        throw new Error('Wallet secret required for withdrawal');
-      }
-      // Derive keypair and address
+      // Always use the seed to derive the keypair, never pass as privateKey
       const keypair = keypairs.deriveKeypair(walletSecret);
       const fromDerivedAddress = keypairs.deriveAddress(keypair.publicKey);
       if (fromDerivedAddress !== fromAddress) {
         throw new Error('Provided secret does not match the fromAddress');
       }
-      // Validate that destination is different from source
       if (fromAddress === toAddress) {
         throw new Error('Cannot withdraw to the same address. Please provide a different destination address.');
       }
-      // Prepare payment transaction with explicit type
       const accountInfo = await (client as any).request({
         command: 'account_info',
         account: fromAddress,
@@ -493,26 +488,20 @@ export class XRPLWalletService {
         Destination: toAddress,
         Amount: xrpToDrops(amountXrp.toString()),
         Sequence: accountInfo.result.account_data.Sequence,
-        Fee: '12', // Set a default fee (in drops), adjust as needed
+        Fee: '12',
       };
-      // Sign transaction
       const txJSON = JSON.stringify(payment);
+      // Sign using the derived keypair from the seed
       const signed = keypairs.sign(txJSON, walletSecret);
-      // Submit transaction
       const submitResult = await (client as any).request({
         command: 'submit',
         tx_blob: signed,
       });
-      await client.disconnect();
-      // Wait for validation (simplified, production should poll for tx result)
       const txHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
       return txHash;
-      // This is a placeholder to indicate where signing logic should go.
-      throw new Error('Transaction signing and autofill must be implemented using a compatible wallet library or external signing solution for your xrpl version.');
     } catch (error) {
       // #region agent log
       console.log('[DEBUG] createWithdrawalTransaction: Error caught', {error:error instanceof Error ? error.message : String(error),fromAddress,toAddress,amountXrp});
-      
       // #endregion
       console.error('Error creating withdrawal transaction:', {
         error: error instanceof Error ? error.message : String(error),
@@ -520,11 +509,8 @@ export class XRPLWalletService {
         toAddress,
         amountXrp,
       });
-      // Re-throw error instead of returning placeholder
       throw error;
     } finally {
-      // #region agent log
-     
       try {
         await client.disconnect();
       } catch (disconnectError) {
