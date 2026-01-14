@@ -1,23 +1,92 @@
-
-
+import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
+import { FundWalletRequest } from '../../types/api/wallet.types';
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
+import { xummService } from '../xumm/xumm.service';
+import { exchangeService } from '../exchange/exchange.service';
+import { notificationService } from '../notification/notification.service';
+import { encryptionService } from '../encryption/encryption.service';
 import {
-  FundWalletRequest,
-  WithdrawWalletRequest,
   WalletTransaction,
+  WithdrawWalletRequest,
   SwapQuoteRequest,
   SwapQuoteResponse,
   SwapExecuteRequest,
-  SwapExecuteResponse,
+  SwapExecuteResponse
 } from '../../types/api/wallet.types';
-import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
-import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
-import { exchangeService } from '../exchange/exchange.service';
-import { encryptionService } from '../encryption/encryption.service';
-import { xummService } from '../xumm/xumm.service';
-import { notificationService } from '../notification/notification.service';
+class WalletService {
 
-export class WalletService {
+  /**
+   * Get only escrow-related transactions for a user
+   */
+  async getEscrowTransactions(
+    userId: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      transactions: WalletTransaction[];
+      total: number;
+    };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      // Only escrow-related types
+      const escrowTypes = ['escrow_create', 'escrow_release', 'escrow_cancel'];
+      const { data: transactions, error: txError } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .in('type', escrowTypes)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      const { count } = await adminClient
+        .from('transactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .in('type', escrowTypes);
+
+      if (txError) {
+        return {
+          success: false,
+          message: 'Failed to fetch escrow transactions',
+          error: 'Failed to fetch transactions',
+        };
+      }
+
+      const formattedTransactions: WalletTransaction[] = (transactions || []).map((tx: any) => ({
+        id: tx.id,
+        type: tx.type,
+        amount: {
+          usd: parseFloat(tx.amount_usd),
+          xrp: parseFloat(tx.amount_xrp),
+        },
+        status: tx.status,
+        xrplTxHash: tx.xrpl_tx_hash || undefined,
+        description: tx.description || undefined,
+        createdAt: tx.created_at,
+      }));
+
+      return {
+        success: true,
+        message: 'Escrow transactions retrieved successfully',
+        data: {
+          transactions: formattedTransactions,
+          total: count || 0,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch escrow transactions',
+        error: error instanceof Error ? error.message : 'Failed to fetch escrow transactions',
+      };
+    }
+  }
 
   /**
    * Create a new custodial XRPL wallet for the user

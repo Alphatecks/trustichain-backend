@@ -4,6 +4,24 @@ import { validateSignedTransactionFormat } from '../utils/transactionValidation'
 
 
 export class WalletController {
+    // ...existing methods...
+
+    async getEscrowTransactions(req: Request, res: Response): Promise<void> {
+      try {
+        const userId = (req as Request & { userId?: string }).userId!;
+        const limit = parseInt(req.query.limit as string) || 50;
+        const offset = parseInt(req.query.offset as string) || 0;
+        const result = await walletService.getEscrowTransactions(userId, limit, offset);
+        res.json(result);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        res.json({
+          success: false,
+          message: errorMessage,
+          error: 'Internal server error',
+        });
+      }
+    }
   async createWallet(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as Request & { userId?: string }).userId!;

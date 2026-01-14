@@ -1,9 +1,19 @@
+
 import { Router } from 'express';
 import { walletController } from '../controllers/walletControllerExport';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
+
+/**
+ * @route   GET /api/wallet/escrow-transactions
+ * @desc    Get only escrow-related transactions for the user
+ * @access  Private
+ */
+router.get('/escrow-transactions', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getEscrowTransactions(req, res);
+}));
 
 /**
  * @route   GET /api/wallet/all
