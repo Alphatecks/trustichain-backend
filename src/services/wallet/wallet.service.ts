@@ -2894,8 +2894,14 @@ class WalletService {
         for (const txObj of txs) {
           const tx = txObj.tx;
           const meta = txObj.meta;
-          // Only process validated Payment transactions where this address is the destination
-          if (tx.TransactionType === 'Payment' && tx.Destination === wallet.xrpl_address && meta?.TransactionResult === 'tesSUCCESS') {
+          // Defensive: ensure tx and TransactionType exist
+          if (
+            tx &&
+            typeof tx.TransactionType === 'string' &&
+            tx.TransactionType === 'Payment' &&
+            tx.Destination === wallet.xrpl_address &&
+            meta?.TransactionResult === 'tesSUCCESS'
+          ) {
             // Check if already recorded in DB
             const { data: existingDeposit } = await adminClient
               .from('transactions')
