@@ -5,6 +5,7 @@ import * as keypairs from 'ripple-keypairs';
  */
 
 import { Client, xrpToDrops, dropsToXrp } from 'xrpl';
+import { Wallet } from 'xrpl/dist/npm/Wallet';
 import { looksLikeTransactionId } from '../../utils/transactionValidation';
 
 export class XRPLWalletService {
@@ -468,10 +469,9 @@ export class XRPLWalletService {
     const client = new Client(this.XRPL_SERVER);
     try {
       await client.connect();
-      // Always use the seed to derive the keypair, never pass as privateKey
-      const keypair = keypairs.deriveKeypair(walletSecret);
-      const fromDerivedAddress = keypairs.deriveAddress(keypair.publicKey);
-      if (fromDerivedAddress !== fromAddress) {
+      // Use xrpl.Wallet to sign with a seed
+      const wallet = Wallet.fromSeed(walletSecret);
+      if (wallet.classicAddress !== fromAddress) {
         throw new Error('Provided secret does not match the fromAddress');
       }
       if (fromAddress === toAddress) {
@@ -490,12 +490,12 @@ export class XRPLWalletService {
         Sequence: accountInfo.result.account_data.Sequence,
         Fee: '12',
       };
-      const txJSON = JSON.stringify(payment);
-      // Sign using the derived keypair from the seed
-      const signed = keypairs.sign(txJSON, walletSecret);
+      // Sign the payment transaction
+      const signed = wallet.sign(payment);
+      // Submit the signed transaction using the legacy submit flow
       const submitResult = await (client as any).request({
         command: 'submit',
-        tx_blob: signed,
+        tx_blob: signed.tx_blob,
       });
       const txHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
       return txHash;
