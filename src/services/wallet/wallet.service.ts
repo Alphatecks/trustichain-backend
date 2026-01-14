@@ -137,7 +137,7 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: wallets, error } = await adminClient
         .from('wallets')
-        .select('balance_xrp, balance_usdt, balance_usdc, xrpl_address')
+        .select('xrpl_address')
         .eq('user_id', userId);
 
       if (error || !wallets || wallets.length === 0) {
@@ -149,18 +149,29 @@ export class WalletService {
       }
 
       const wallet = wallets[0];
+      if (!wallet.xrpl_address) {
+        return {
+          success: false,
+          message: 'XRPL address not found for user',
+          error: 'XRPL address not found',
+        };
+      }
+
+      // Fetch live balance from XRPL
+      const xrp = await xrplWalletService.getBalance(wallet.xrpl_address);
+      // Optionally, fetch live balances for usdt/usdc if needed
 
       return {
         success: true,
-        message: 'Balance retrieved successfully',
+        message: 'Live balance retrieved from XRPL',
         data: {
           balance: {
-            xrp: wallet.balance_xrp ?? 0,
-            usdt: wallet.balance_usdt ?? 0,
-            usdc: wallet.balance_usdc ?? 0,
-            usd: 0, // TODO: Calculate USD equivalent if needed
+            xrp: xrp ?? 0,
+            usdt: 0, // Optionally fetch live if needed
+            usdc: 0, // Optionally fetch live if needed
+            usd: 0, // Optionally calculate USD equivalent
           },
-          xrpl_address: wallet.xrpl_address ?? null,
+          xrpl_address: wallet.xrpl_address,
         },
       };
     } catch (error) {
