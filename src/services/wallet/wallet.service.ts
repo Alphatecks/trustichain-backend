@@ -2703,6 +2703,7 @@ class WalletService {
         })
         .eq('id', wallet.id);
 
+
       // Create transaction record for the receiver (if destination is a TrustiChain user)
       try {
         const { data: receiverWallet } = await adminClient
@@ -2757,6 +2758,16 @@ class WalletService {
           } catch (notifyError) {
             console.warn('Failed to create receiver deposit notification:', notifyError);
           }
+
+          // Fallback: Ensure sender's withdrawal status is completed if XRPL tx succeeded
+          await adminClient
+            .from('transactions')
+            .update({
+              status: 'completed',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', transaction.id)
+            .eq('status', 'pending');
         }
       } catch (receiverError) {
         // Log but don't fail the withdrawal if receiver transaction creation fails
