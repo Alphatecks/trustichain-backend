@@ -2332,20 +2332,17 @@ class WalletService {
       // #region agent log
       // ...existing code...
       // #endregion
-      let { data: wallet } = await adminClient
+
+      // Fetch all wallets for the user and use the first one (consistent with balance check)
+
+      const { data: wallets } = await adminClient
         .from('wallets')
         .select('*')
-        .eq('user_id', userId)
-        .single();
-      
-      // #region agent log
-      // ...existing code...
-      // #endregion
+        .eq('user_id', userId);
+
+      let wallet = wallets && wallets.length > 0 ? wallets[0] : null;
 
       if (!wallet) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
         return {
           success: false,
           message: 'Wallet not found',
