@@ -1763,7 +1763,6 @@ class WalletService {
       // Convert amounts based on currency
       let amountXrp = request.amount;
       let amountUsd = request.amount;
-      let amountToken: number = request.amount; // For USDT/USDC
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
@@ -1788,7 +1787,6 @@ class WalletService {
       } else if (request.currency === 'USDT' || request.currency === 'USDC') {
         // For USDT/USDC, amount is already in USD value
         amountUsd = request.amount;
-        amountToken = request.amount;
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         if (!exchangeRates.success || !exchangeRates.data) {
           throw new Error('Failed to fetch exchange rates for currency conversion');
@@ -1822,95 +1820,19 @@ class WalletService {
         };
       }
 
-      // Determine wallet flow based on currency:
-      // - XRP → Use Xaman/XUMM (mobile app)
-      // - USDT/USDC → Use MetaMask+XRPL Snap (browser wallet)
-      const currency = request.currency === 'USD' ? 'XRP' : request.currency;
-      const amount = currency === 'XRP' ? amountXrp : amountToken;
-      
-      const preparedTx = await xrplWalletService.preparePaymentTransaction(
-        wallet.xrpl_address,
-        amount,
-        currency as 'XRP' | 'USDT' | 'USDC'
-      );
-
-      // XRP: Use Xaman/XUMM flow
-      // USDT/USDC: Use MetaMask flow (no XUMM)
-      let xummPayload = null;
-      let xummError = null;
-      
-      if (currency === 'XRP') {
-        // For XRP, try to create XUMM payload (Xaman mobile app)
-        try {
-          xummPayload = await xummService.createPayload(preparedTx.transaction);
-        } catch (error) {
-          xummError = error instanceof Error ? error.message : 'XUMM not configured';
-          console.log('XUMM not configured or error:', xummError);
-        }
-      } else {
-        // For USDT/USDC, use MetaMask (no XUMM)
-        console.log(`Using MetaMask flow for ${currency} deposit`);
-      }
-
-      // Store transaction info
-      const description = xummPayload 
-        ? `Deposit ${request.amount} ${request.currency} | XUMM_UUID:${xummPayload.uuid}`
-        : `Deposit ${request.amount} ${request.currency} | Direct signing`;
-      
-      await adminClient
-        .from('transactions')
-        .update({
-          description: description,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', transaction.id);
-
-      // Determine wallet type and message
-      const walletType = currency === 'XRP' ? 'Xaman' : 'MetaMask';
-      const message = xummPayload 
-        ? `Transaction prepared. Please sign in ${walletType} app.`
-        : currency === 'XRP'
-        ? 'Transaction prepared. Please sign with your XRPL wallet (Xaman, Crossmark, etc.).'
-        : `Transaction prepared. Please sign with MetaMask (XRPL Snap) for ${currency} deposit.`;
-
       return {
         success: true,
-        message: message,
+        message: 'Deposit transaction created successfully',
         data: {
           transactionId: transaction.id,
           amount: {
             usd: parseFloat(amountUsd.toFixed(2)),
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
-          currency: currency,
-          // XUMM-specific fields (only for XRP, if XUMM is available)
-          ...(xummPayload && {
-            xummUrl: xummPayload.next.always,
-            xummUuid: xummPayload.uuid,
-            walletType: 'xaman',
-          }),
-          // Transaction for wallet signing (always present)
-          transaction: preparedTx.transaction,
-          transactionBlob: preparedTx.transactionBlob,
-          destinationAddress: wallet.xrpl_address,
-          amountXrp: parseFloat(amountXrp.toFixed(6)),
-          amountToken: currency !== 'XRP' ? parseFloat(amountToken.toFixed(6)) : undefined,
           status: 'pending',
-          // Wallet type indicator
-          ...(!xummPayload && {
-            walletType: currency === 'XRP' ? 'browser' : 'metamask',
-            note: currency === 'XRP' 
-              ? 'XUMM not available, use browser wallet instead'
-              : `Use MetaMask with XRPL Snap to sign ${currency} transaction`,
-          }),
-          // Include XUMM error info if XUMM failed (for debugging)
-          ...(xummError && {
-            xummError: xummError,
-          }),
         },
       };
     } catch (error) {
-      console.error('Error funding wallet:', error);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fund wallet',
@@ -1973,13 +1895,13 @@ class WalletService {
       // Get payload status from XUMM
       const payloadStatus = await xummService.getPayloadStatus(xummUuid);
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:346',message:'getXUMMPayloadStatus: Received XUMM payload status',data:{signed:payloadStatus.meta.signed,submit:payloadStatus.meta.submit,hasHex:!!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,txid:payloadStatus.response?.txid,hexLength:payloadStatus.response?.hex?.length,responseKeys:payloadStatus.response?Object.keys(payloadStatus.response):null,metaKeys:Object.keys(payloadStatus.meta)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #region agent log (removed for build)
+      // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:346',message:'getXUMMPayloadStatus: Received XUMM payload status',data:{signed:payloadStatus.meta.signed,submit:payloadStatus.meta.submit,hasHex:!!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,txid:payloadStatus.response?.txid,hexLength:payloadStatus.response?.hex?.length,responseKeys:payloadStatus.response?Object.keys(payloadStatus.response):null,metaKeys:Object.keys(payloadStatus.meta)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
       // #endregion
 
       // If signed, submit to XRPL and update transaction
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:350',message:'getXUMMPayloadStatus: Checking if transaction needs processing',data:{signed:payloadStatus.meta.signed,hasHex:!!payloadStatus.response?.hex,willProcess:payloadStatus.meta.signed && !!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,autoSubmitted:payloadStatus.meta.submit && !!payloadStatus.response?.txid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #region agent log (removed for build)
+      // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:350',message:'getXUMMPayloadStatus: Checking if transaction needs processing',data:{signed:payloadStatus.meta.signed,hasHex:!!payloadStatus.response?.hex,willProcess:payloadStatus.meta.signed && !!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,autoSubmitted:payloadStatus.meta.submit && !!payloadStatus.response?.txid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
       // #endregion
       
       // Handle two cases:
@@ -1987,13 +1909,13 @@ class WalletService {
       // 2. Transaction signed and auto-submitted by XUMM (has txid, no hex) - already on XRPL, just update DB
       if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
         // Case 1: Submit signed transaction to XRPL
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:352',message:'getXUMMPayloadStatus: Submitting signed transaction to XRPL',data:{hasHex:!!payloadStatus.response?.hex,hexLength:payloadStatus.response?.hex?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #region agent log (removed for build)
+        // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:352',message:'getXUMMPayloadStatus: Submitting signed transaction to XRPL',data:{hasHex:!!payloadStatus.response?.hex,hexLength:payloadStatus.response?.hex?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
 
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:355',message:'getXUMMPayloadStatus: XRPL submit result',data:{hash:submitResult.hash,status:submitResult.status,isSuccess:submitResult.status === 'tesSUCCESS'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #region agent log (removed for build)
+        // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:355',message:'getXUMMPayloadStatus: XRPL submit result',data:{hash:submitResult.hash,status:submitResult.status,isSuccess:submitResult.status === 'tesSUCCESS'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
 
         // Update transaction status
