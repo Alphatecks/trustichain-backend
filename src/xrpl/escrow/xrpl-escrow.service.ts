@@ -4,7 +4,7 @@
  */
 
 import { Client, xrpToDrops, dropsToXrp } from 'xrpl';
-import * as keypairs from 'ripple-keypairs';
+import { Wallet } from 'xrpl/dist/npm/Wallet';
 
 export class XRPLEscrowService {
   private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
@@ -57,16 +57,14 @@ export class XRPLEscrowService {
         
         // Trim secret before using it
         const trimmedSecret = params.walletSecret.trim();
-        // Use ripple-keypairs for signing
-        const keypair = keypairs.deriveKeypair(trimmedSecret);
-        const fromDerivedAddress = keypairs.deriveAddress(keypair.publicKey);
-        if (fromDerivedAddress !== params.fromAddress) {
+        const wallet = Wallet.fromSeed(trimmedSecret);
+        if (wallet.classicAddress !== params.fromAddress) {
           throw new Error('Provided secret does not match the fromAddress');
         }
-        
+
         const escrowCreate: any = {
           TransactionType: 'EscrowCreate',
-          Account: params.fromAddress,
+          Account: wallet.classicAddress,
           Destination: params.toAddress,
           Amount: xrpToDrops(params.amountXrp.toString()),
         };
@@ -84,18 +82,19 @@ export class XRPLEscrowService {
         // Manually fill required fields (Sequence, Fee)
         const accountInfo = await (client as any).request({
           command: 'account_info',
-          account: params.fromAddress,
+          account: wallet.classicAddress,
           ledger_index: 'validated',
         });
         escrowCreate.Sequence = accountInfo.result.account_data.Sequence;
         escrowCreate.Fee = '12'; // Set a default fee (in drops), adjust as needed
-        // Sign transaction
-        const txJSON = JSON.stringify(escrowCreate);
-        const signed = keypairs.sign(txJSON, trimmedSecret);
+
+        // Sign transaction using xrpl.Wallet
+        const { tx_blob } = wallet.sign(escrowCreate);
+
         // Submit transaction
         const submitResult = await (client as any).request({
           command: 'submit',
-          tx_blob: signed,
+          tx_blob,
         });
         await client.disconnect();
         // Wait for validation (simplified, production should poll for tx result)
@@ -135,19 +134,18 @@ export class XRPLEscrowService {
       await client.connect();
 
       try {
-        // Use ripple-keypairs for signing
-        const keypair = keypairs.deriveKeypair(params.walletSecret);
-        const fromDerivedAddress = keypairs.deriveAddress(keypair.publicKey);
-        if (fromDerivedAddress !== params.ownerAddress) {
+        const trimmedSecret = params.walletSecret.trim();
+        const wallet = Wallet.fromSeed(trimmedSecret);
+        if (wallet.classicAddress !== params.ownerAddress) {
           throw new Error(
-            `Wallet address ${fromDerivedAddress} does not match owner address ${params.ownerAddress}`
+            `Wallet address ${wallet.classicAddress} does not match owner address ${params.ownerAddress}`
           );
         }
 
         const escrowFinish: any = {
           TransactionType: 'EscrowFinish',
-          Account: params.ownerAddress,
-          Owner: params.ownerAddress,
+          Account: wallet.classicAddress,
+          Owner: wallet.classicAddress,
           OfferSequence: params.escrowSequence,
         };
 
@@ -172,18 +170,19 @@ export class XRPLEscrowService {
         // Manually fill required fields (Sequence, Fee)
         const accountInfo = await (client as any).request({
           command: 'account_info',
-          account: params.ownerAddress,
+          account: wallet.classicAddress,
           ledger_index: 'validated',
         });
         escrowFinish.Sequence = accountInfo.result.account_data.Sequence;
         escrowFinish.Fee = '12'; // Set a default fee (in drops), adjust as needed
-        // Sign transaction
-        const txJSON = JSON.stringify(escrowFinish);
-        const signed = keypairs.sign(txJSON, params.walletSecret);
+
+        // Sign transaction using xrpl.Wallet
+        const { tx_blob } = wallet.sign(escrowFinish);
+
         // Submit transaction
         const submitResult = await (client as any).request({
           command: 'submit',
-          tx_blob: signed,
+          tx_blob,
         });
         await client.disconnect();
         // Wait for validation (simplified, production should poll for tx result)

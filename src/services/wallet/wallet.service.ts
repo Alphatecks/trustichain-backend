@@ -1895,28 +1895,18 @@ class WalletService {
       // Get payload status from XUMM
       const payloadStatus = await xummService.getPayloadStatus(xummUuid);
 
-      // #region agent log (removed for build)
-      // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:346',message:'getXUMMPayloadStatus: Received XUMM payload status',data:{signed:payloadStatus.meta.signed,submit:payloadStatus.meta.submit,hasHex:!!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,txid:payloadStatus.response?.txid,hexLength:payloadStatus.response?.hex?.length,responseKeys:payloadStatus.response?Object.keys(payloadStatus.response):null,metaKeys:Object.keys(payloadStatus.meta)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       // If signed, submit to XRPL and update transaction
-      // #region agent log (removed for build)
-      // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:350',message:'getXUMMPayloadStatus: Checking if transaction needs processing',data:{signed:payloadStatus.meta.signed,hasHex:!!payloadStatus.response?.hex,willProcess:payloadStatus.meta.signed && !!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,autoSubmitted:payloadStatus.meta.submit && !!payloadStatus.response?.txid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       
       // Handle two cases:
       // 1. Transaction signed but not yet submitted (has hex) - submit to XRPL
       // 2. Transaction signed and auto-submitted by XUMM (has txid, no hex) - already on XRPL, just update DB
       if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
-        // Case 1: Submit signed transaction to XRPL
-        // #region agent log (removed for build)
-        // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:352',message:'getXUMMPayloadStatus: Submitting signed transaction to XRPL',data:{hasHex:!!payloadStatus.response?.hex,hexLength:payloadStatus.response?.hex?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
+      
+        
         const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
 
-        // #region agent log (removed for build)
-        // fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:355',message:'getXUMMPayloadStatus: XRPL submit result',data:{hash:submitResult.hash,status:submitResult.status,isSuccess:submitResult.status === 'tesSUCCESS'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
+    
 
         // Update transaction status
         const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
@@ -1931,9 +1921,8 @@ class WalletService {
 
         // Update wallet balance if successful
         if (status === 'completed') {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:366',message:'getXUMMPayloadStatus: About to update wallet balance',data:{userId,status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
+   
+        
           const { data: wallet } = await adminClient
             .from('wallets')
             .select('xrpl_address')
@@ -1941,13 +1930,11 @@ class WalletService {
             .single();
 
           if (wallet) {
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:372',message:'getXUMMPayloadStatus: Fetching balances from XRPL',data:{xrplAddress:wallet.xrpl_address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
+     
+         
             const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:373',message:'getXUMMPayloadStatus: Got balances from XRPL',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
+        
+           
             await adminClient
               .from('wallets')
               .update({
@@ -1957,9 +1944,8 @@ class WalletService {
                 updated_at: new Date().toISOString(),
               })
               .eq('user_id', userId);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:381',message:'getXUMMPayloadStatus: Updated wallet balance in DB',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
+            
+           
           }
         }
 
@@ -1976,17 +1962,10 @@ class WalletService {
         };
       } else if (payloadStatus.meta.signed && payloadStatus.meta.submit && payloadStatus.response?.txid) {
         // Case 2: XUMM auto-submitted the transaction (already on XRPL)
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:433',message:'getXUMMPayloadStatus: XUMM auto-submitted transaction, updating DB',data:{txid:payloadStatus.response.txid,submit:payloadStatus.meta.submit},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
+   
+       
         
-        console.log('[XUMM Fix] Auto-submitted transaction detected:', {
-          transactionId,
-          userId,
-          txid: payloadStatus.response.txid,
-          signed: payloadStatus.meta.signed,
-          submit: payloadStatus.meta.submit,
-        });
+       
         
         // Transaction is already on XRPL, just update database
         await adminClient
@@ -1999,9 +1978,8 @@ class WalletService {
           .eq('id', transactionId);
 
         // Update wallet balance
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:444',message:'getXUMMPayloadStatus: About to update wallet balance (auto-submitted)',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
+      
+        
         const { data: wallet } = await adminClient
           .from('wallets')
           .select('xrpl_address')
@@ -2009,13 +1987,11 @@ class WalletService {
           .single();
 
         if (wallet) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:450',message:'getXUMMPayloadStatus: Fetching balances from XRPL (auto-submitted)',data:{xrplAddress:wallet.xrpl_address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
+          
+       
           const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:451',message:'getXUMMPayloadStatus: Got balances from XRPL (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
+          
+       
           await adminClient
             .from('wallets')
             .update({
@@ -2025,9 +2001,8 @@ class WalletService {
               updated_at: new Date().toISOString(),
             })
             .eq('user_id', userId);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:459',message:'getXUMMPayloadStatus: Updated wallet balance in DB (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
+          
+         
           
           console.log('[XUMM Fix] Balance updated successfully for auto-submitted transaction:', {
             transactionId,
@@ -2052,9 +2027,6 @@ class WalletService {
         };
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:400',message:'getXUMMPayloadStatus: Returning status without processing',data:{signed:payloadStatus.meta.signed,hasHex:!!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,txid:payloadStatus.response?.txid,submit:payloadStatus.meta.submit,reason:'No hex or not signed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return {
         success: true,
         message: 'Payload status retrieved',
@@ -2245,16 +2217,10 @@ class WalletService {
       error?: string;
     }
   > {
-    // #region agent log
-    // ...existing code...
-    // #endregion
     try {
       const adminClient = supabaseAdmin || supabase;
 
       // Get wallet
-      // #region agent log
-      // ...existing code...
-      // #endregion
 
       // Fetch all wallets for the user and use the first one (consistent with balance check)
 
@@ -2377,11 +2343,8 @@ class WalletService {
 
       // Check balance
       const balance = await this.getBalance(userId);
-      // #region agent log
-      // ...existing code...
-      // #endregion
       if (!balance.success || !balance.data) {
-        // #region agent log
+        
         // ...existing code...
         // #endregion
         return {
@@ -2398,12 +2361,9 @@ class WalletService {
       const minimumRequired = BASE_RESERVE + ESTIMATED_FEE;
       const availableBalance = Math.max(0, balance.data.balance.xrp - minimumRequired);
       
-      // #region agent log
-      // ...existing code...
-      // #endregion
       
       if (availableBalance < amountXrp) {
-        // #region agent log
+        
         // ...existing code...
         // #endregion
         return {
@@ -2427,11 +2387,8 @@ class WalletService {
         .select()
         .single();
 
-      // #region agent log
-      // ...existing code...
-      // #endregion
       if (txError || !transaction) {
-        // #region agent log
+        
         // ...existing code...
         // #endregion
         return {
@@ -2441,17 +2398,13 @@ class WalletService {
         };
       }
 
-      // #region agent log
-      // ...existing code...
-      // #endregion
 
       // Get and decrypt wallet secret for signing withdrawal
       // If wallet doesn't have a secret (old wallet created before encrypted_wallet_secret feature),
       // we cannot migrate if the old address has funds (we can't access them without the secret)
       if (!wallet.encrypted_wallet_secret) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
+        
+     
         
         // Check if old wallet address has balance
         let oldBalance = 0;
@@ -2465,9 +2418,7 @@ class WalletService {
         // If old address has funds, we cannot migrate (funds would become inaccessible)
         // Return error explaining the situation
         if (oldBalance > 0) {
-          // #region agent log
-          // ...existing code...
-          // #endregion
+         
           
           return {
             success: false,
@@ -2494,9 +2445,7 @@ class WalletService {
           .single();
         
         if (updateError || !updatedWallet) {
-          // #region agent log
-          // ...existing code...
-          // #endregion
+        
           return {
             success: false,
             message: 'Failed to migrate wallet. Please contact support.',
@@ -2504,9 +2453,7 @@ class WalletService {
           };
         }
         
-        // #region agent log
-        // ...existing code...
-        // #endregion
+       
         
         // Update wallet reference to use the new wallet
         wallet = updatedWallet;
@@ -2529,9 +2476,6 @@ class WalletService {
 
       // Create XRPL withdrawal transaction with wallet secret
       let xrplTxHash: string;
-      // #region agent log
-      // ...existing code...
-      // #endregion
       try {
         xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
           wallet.xrpl_address,
@@ -2539,13 +2483,9 @@ class WalletService {
           amountXrp,
           walletSecret
         );
-        // #region agent log
-        // ...existing code...
-        // #endregion
+      
       } catch (xrplError) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
+   
         // Update transaction status to failed if XRPL submission fails
         await adminClient
           .from('transactions')
@@ -2555,9 +2495,7 @@ class WalletService {
             description: `Withdrawal failed: ${xrplError instanceof Error ? xrplError.message : 'Unknown error'}`,
           })
           .eq('id', transaction.id);
-        // #region agent log
-        // ...existing code...
-        // #endregion
+      
 
         return {
           success: false,
@@ -2659,9 +2597,6 @@ class WalletService {
         console.warn('[Withdrawal] Failed to create transaction for receiver:', receiverError);
       }
 
-      // #region agent log
-      // ...existing code...
-      // #endregion
 
       // Forced update: ensure sender's withdrawal status is 'completed' (regardless of previous value)
       const { error: forceUpdateError } = await adminClient
@@ -2691,9 +2626,6 @@ class WalletService {
         },
       };
     } catch (error) {
-      // #region agent log
-      // ...existing code...
-      // #endregion
       console.error('Error withdrawing from wallet:', error);
       return {
         success: false,
@@ -2711,9 +2643,7 @@ class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // #region agent log
-      // ...existing code...
-      // #endregion
+     
 
       // Find pending withdrawal transactions that have an xrpl_tx_hash
       // These should be marked as completed since they have a transaction hash
@@ -2725,22 +2655,16 @@ class WalletService {
         .eq('status', 'pending')
         .not('xrpl_tx_hash', 'is', null);
 
-      // #region agent log
-      // ...existing code...
-      // #endregion
+   
 
       if (!pendingWithdrawals || pendingWithdrawals.length === 0) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
+   
         return;
       }
 
       // Update all pending withdrawals with xrpl_tx_hash to completed
       for (const withdrawal of pendingWithdrawals) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
+      
         
         await adminClient
           .from('transactions')
@@ -2750,17 +2674,12 @@ class WalletService {
           })
           .eq('id', withdrawal.id)
           .select();
-        
-        // #region agent log
-        // ...existing code...
-        // #endregion
+       
       }
     } catch (error) {
       // Don't throw - this is a background sync
       console.warn('[Sync] Error syncing pending withdrawals:', error);
-      // #region agent log
-      // ...existing code...
-      // #endregion
+   
     }
   }
 
@@ -2898,9 +2817,7 @@ class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // #region agent log
-      // ...existing code...
-      // #endregion
+    
 
       // Sync pending transactions in the background (don't wait for it)
       this.syncPendingWithdrawals(userId).catch(() => {});
