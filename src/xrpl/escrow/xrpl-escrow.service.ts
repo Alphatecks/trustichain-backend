@@ -418,57 +418,63 @@ export class XRPLEscrowService {
           type: 'escrow',
         });
 
-        // Find the escrow object matching this transaction hash
+        // Find the escrow object matching this transaction hash and account
         const escrowObjects = accountObjectsResponse.result.account_objects || [];
         console.log(`[XRPL] Found ${escrowObjects.length} escrow objects for account ${ownerAddress}`);
-        
-        // Match by PreviousTxnID (the transaction hash that created the escrow)
-        const escrowObject = escrowObjects.find(
-          (obj: any) => (obj as any).PreviousTxnID === txHash
+
+        // Match by PreviousTxnID and Account
+        let escrowObject = escrowObjects.find(
+          (obj: any) => (obj as any).PreviousTxnID === txHash && (obj as any).Account === ownerAddress
         ) as any;
 
         if (!escrowObject) {
-          console.warn('[XRPL] Escrow object not found in account_objects. Available escrows:', escrowObjects.map((obj: any) => ({
-            PreviousTxnID: (obj as any).PreviousTxnID,
-            Sequence: (obj as any).Sequence,
-            Destination: (obj as any).Destination,
-          })));
-          console.warn('[XRPL] Looking for escrow with PreviousTxnID:', txHash);
-          console.warn('[XRPL] Escrow object not found - escrow may have been finished or cancelled');
-          
-          // Check transaction history to see if escrow was finished/cancelled
-          try {
-            const accountTxResponse = await (client as any).request({
-              command: 'account_tx',
-              account: ownerAddress,
-              ledger_index_min: -1,
-              ledger_index_max: -1,
-              limit: 100,
-            });
-            
-            const transactions = accountTxResponse.result.transactions || [];
-            // Look for EscrowFinish or EscrowCancel transactions that reference this escrow
-            const relatedTx = transactions.find((txData: any) => {
-              const tx = txData.tx || txData;
-              return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
-                     (tx as any).Owner === ownerAddress &&
-                     (tx as any).OfferSequence === escrowSequence;
-            });
-            
-            if (relatedTx) {
-              const tx = (relatedTx as any).tx || relatedTx;
-              const txType = (tx as any).TransactionType;
-              console.warn(`[XRPL] Found ${txType} transaction for this escrow. Escrow was already ${txType === 'EscrowFinish' ? 'finished' : 'cancelled'}.`);
-              // Return null but we'll handle this in the calling code with a better error message
-              return null;
+          // Fallback: try matching by Destination and Amount if PreviousTxnID is missing
+          const txResult = txResponse.result as any;
+          escrowObject = escrowObjects.find(
+            (obj: any) =>
+              (obj as any).Destination === txResult.Destination &&
+              (obj as any).Amount === txResult.Amount &&
+              (obj as any).Account === ownerAddress
+          ) as any;
+          if (!escrowObject) {
+            console.warn('[XRPL] Escrow object not found in account_objects. Available escrows:', escrowObjects.map((obj: any) => ({
+              PreviousTxnID: (obj as any).PreviousTxnID,
+              Sequence: (obj as any).Sequence,
+              Destination: (obj as any).Destination,
+            })));
+            console.warn('[XRPL] Looking for escrow with PreviousTxnID:', txHash);
+            console.warn('[XRPL] Escrow object not found - escrow may have been finished or cancelled');
+            // Check transaction history to see if escrow was finished/cancelled
+            try {
+              const accountTxResponse = await (client as any).request({
+                command: 'account_tx',
+                account: ownerAddress,
+                ledger_index_min: -1,
+                ledger_index_max: -1,
+                limit: 100,
+              });
+              const transactions = accountTxResponse.result.transactions || [];
+              // Look for EscrowFinish or EscrowCancel transactions that reference this escrow
+              const relatedTx = transactions.find((txData: any) => {
+                const tx = txData.tx || txData;
+                return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
+                       (tx as any).Owner === ownerAddress &&
+                       (tx as any).OfferSequence === escrowSequence;
+              });
+              if (relatedTx) {
+                const tx = (relatedTx as any).tx || relatedTx;
+                const txType = (tx as any).TransactionType;
+                console.warn(`[XRPL] Found ${txType} transaction for this escrow. Escrow was already ${txType === 'EscrowFinish' ? 'finished' : 'cancelled'}.`);
+                // Return null but we'll handle this in the calling code with a better error message
+                return null;
+              }
+            } catch (historyError) {
+              console.warn('[XRPL] Could not check transaction history:', historyError);
             }
-          } catch (historyError) {
-            console.warn('[XRPL] Could not check transaction history:', historyError);
+            // Escrow object doesn't exist and we couldn't verify it was finished - return null
+            // The calling code should handle this with a helpful error message
+            return null;
           }
-          
-          // Escrow object doesn't exist and we couldn't verify it was finished - return null
-          // The calling code should handle this with a helpful error message
-          return null;
         }
 
         console.log('[XRPL] Found matching escrow object:', {
