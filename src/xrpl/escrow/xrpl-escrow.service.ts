@@ -337,9 +337,7 @@ export class XRPLEscrowService {
     condition?: string;
   } | null> {
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:253',message:'getEscrowDetailsByTxHash: Entry',data:{txHash,txHashLength:txHash.length,ownerAddress,network:this.XRPL_NETWORK,isValidFormat:/^[a-f0-9]{64}$/i.test(txHash)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
+    
       const client = new Client(this.XRPL_SERVER);
       await client.connect();
 
@@ -355,9 +353,8 @@ export class XRPLEscrowService {
           const errorData = requestError?.data;
           const errorCode = errorData?.error;
 
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:txCatch',message:'getEscrowDetailsByTxHash: tx query threw error',data:{txHash,error:errorCode,errorData,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
+
+        
 
           // Handle common "txnNotFound" error gracefully by letting caller
           // fall back to alternative lookup strategies (e.g., account_objects).
@@ -370,16 +367,13 @@ export class XRPLEscrowService {
           throw requestError;
         }
 
-        // #region agent log
-        const txResponseAny = txResponse as any;
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:264',message:'getEscrowDetailsByTxHash: XRPL tx query response',data:{txHash,hasResult:!!txResponseAny?.result,error:txResponseAny?.result?.error,errorCode:txResponseAny?.result?.error_code,errorMessage:txResponseAny?.result?.error_message,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
+     
+     
 
         if (!txResponse || !txResponse.result) {
           console.error('[XRPL] Transaction not found:', txHash);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:266',message:'getEscrowDetailsByTxHash: Transaction not found - trying fallback',data:{txHash,network:this.XRPL_NETWORK,reason:'txResponse or result is null'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
+      
+        
           
           // Cannot proceed without transaction hash - EscrowFinish requires transaction sequence
           // The escrow object sequence is different from the transaction sequence needed for OfferSequence

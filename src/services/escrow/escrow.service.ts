@@ -1073,15 +1073,17 @@ export class EscrowService {
         };
       }
 
-      // Get platform wallet credentials from environment variables
-      const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
+
+      // Use the actual escrow creator's XRPL address as the owner for XRPL operations
+      // Fallback to platform address if not available (for legacy escrows)
+      const escrowOwnerAddress = escrow.xrpl_owner_address || process.env.XRPL_PLATFORM_ADDRESS;
       const platformSecret = process.env.XRPL_PLATFORM_SECRET;
 
-      if (!platformAddress || !platformSecret) {
+      if (!escrowOwnerAddress || !platformSecret) {
         return {
           success: false,
-          message: 'Platform wallet not configured. XRPL_PLATFORM_ADDRESS and XRPL_PLATFORM_SECRET must be set.',
-          error: 'Platform wallet not configured',
+          message: 'Escrow owner address or platform secret not configured. XRPL_PLATFORM_ADDRESS, XRPL_PLATFORM_SECRET, and escrow.xrpl_owner_address must be set.',
+          error: 'Escrow owner address or platform secret not configured',
         };
       }
 
@@ -1097,15 +1099,15 @@ export class EscrowService {
 
       try {
         // Get escrow details from XRPL to retrieve the sequence number
-        // The escrow owner is the platform wallet (since escrows are created using platform wallet)
+        // The escrow owner is the actual creator (xrpl_owner_address)
         console.log('[Escrow Release] Retrieving escrow details from XRPL:', {
           txHash: escrow.xrpl_escrow_id,
-          ownerAddress: platformAddress,
+          ownerAddress: escrowOwnerAddress,
         });
 
         let escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
           escrow.xrpl_escrow_id,
-          platformAddress
+          escrowOwnerAddress
         );
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
@@ -1159,7 +1161,7 @@ export class EscrowService {
 
               const accountObjectsResponse = await client.request({
                 command: 'account_objects',
-                account: platformAddress,
+                account: escrowOwnerAddress,
                 type: 'escrow',
               });
 
@@ -1238,19 +1240,19 @@ export class EscrowService {
                 const txSequence = (txResponse.result as any).Sequence;
                 
                 // Check account transaction history for EscrowFinish/EscrowCancel
-                const accountTxResponse = await client.request({
-                  command: 'account_tx',
-                  account: platformAddress,
-                  ledger_index_min: -1,
-                  ledger_index_max: -1,
-                  limit: 200,
-                });
+                  const accountTxResponse = await client.request({
+                    command: 'account_tx',
+                    account: escrowOwnerAddress,
+                    ledger_index_min: -1,
+                    ledger_index_max: -1,
+                    limit: 200,
+                  });
                 
                 const transactions = accountTxResponse.result.transactions || [];
                 const relatedTx = transactions.find((txData: any) => {
                   const tx = txData.tx || txData;
                   return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
-                         (tx as any).Owner === platformAddress &&
+                         (tx as any).Owner === escrowOwnerAddress &&
                          (tx as any).OfferSequence === txSequence;
                 });
                 
@@ -1303,7 +1305,7 @@ export class EscrowService {
           amount: escrowDetails.amount,
           destination: escrowDetails.destination,
           txHash: escrow.xrpl_escrow_id,
-          platformAddress: platformAddress,
+          escrowOwnerAddress: escrowOwnerAddress,
         });
 
         // Check if escrow has a condition that requires fulfillment
@@ -1320,21 +1322,22 @@ export class EscrowService {
         // Finish escrow on XRPL using platform wallet (sign directly, no XUMM)
         console.log('[Escrow Release] Finishing escrow on XRPL using platform wallet:', {
           escrowSequence: escrowDetails.sequence,
-          ownerAddress: platformAddress,
+          ownerAddress: escrowOwnerAddress,
         });
+
 
         let finishTxHash: string;
         try {
           finishTxHash = await xrplEscrowService.finishEscrow({
-            ownerAddress: platformAddress,
-          escrowSequence: escrowDetails.sequence,
-          condition: escrowDetails.condition,
-          fulfillment: undefined, // TODO: Implement fulfillment if condition exists
+            ownerAddress: escrowOwnerAddress,
+            escrowSequence: escrowDetails.sequence,
+            condition: escrowDetails.condition,
+            fulfillment: undefined, // TODO: Implement fulfillment if condition exists
             walletSecret: platformSecret,
-        });
+          });
           console.log('[Escrow Release] Escrow finished on XRPL:', {
             txHash: finishTxHash,
-          escrowSequence: escrowDetails.sequence,
+            escrowSequence: escrowDetails.sequence,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
