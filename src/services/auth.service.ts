@@ -1,3 +1,9 @@
+import { supabase, supabaseAdmin } from '../config/supabase';
+import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse, LogoutResponse } from '../types/api/auth.types';
+import { emailService } from './email.service';
+import * as crypto from 'crypto';
+
+export class AuthService {
   /**
    * Forgot Password - generate OTP and send via Resend
    */
@@ -91,12 +97,6 @@
       return { success: false, message: errorMessage, error: 'Internal server error' };
     }
   }
-import { supabase, supabaseAdmin } from '../config/supabase';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse, LogoutResponse } from '../types/api/auth.types';
-import { emailService } from './email.service';
-import * as crypto from 'crypto';
-
-export class AuthService {
   /**
    * Register a new user
    * @param registerData - User registration data

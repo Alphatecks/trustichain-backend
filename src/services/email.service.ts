@@ -1,3 +1,14 @@
+dotenv.config();
+import { Resend } from 'resend';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+// Initialize Resend client
+const resend = process.env.RESEND_API_KEY 
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+export class EmailService {
   /**
    * Send password reset OTP
    * @param email - User email address
@@ -20,7 +31,7 @@
         console.error(errorMsg);
         throw new Error(errorMsg);
       }
-      const { data, error } = await (resend as any).emails.send({
+      const { error } = await (resend as any).emails.send({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: 'Your TrustiChain Password Reset OTP',
@@ -47,17 +58,7 @@
       return { success: false, error: errorMessage };
     }
   }
-import { Resend } from 'resend';
-import * as dotenv from 'dotenv';
 
-dotenv.config();
-
-// Initialize Resend client
-const resend = process.env.RESEND_API_KEY 
-  ? new Resend(process.env.RESEND_API_KEY)
-  : null;
-
-export class EmailService {
   /**
    * Send email verification link
    * @param email - User email address
@@ -166,6 +167,8 @@ export class EmailService {
     }
   }
 }
+
+
 
 export const emailService = new EmailService();
 
