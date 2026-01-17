@@ -4,6 +4,59 @@ import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyE
 
 export class AuthController {
   /**
+   * Forgot Password - send OTP to user's email
+   * POST /api/auth/forgot-password
+   */
+  async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ success: false, message: 'Email is required.' });
+        return;
+      }
+      const result = await authService.forgotPassword(email);
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Reset Password - verify OTP and set new password
+   * POST /api/auth/reset-password
+   */
+  async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, otp, newPassword } = req.body;
+      if (!email || !otp || !newPassword) {
+        res.status(400).json({ success: false, message: 'Email, OTP, and new password are required.' });
+        return;
+      }
+      const result = await authService.resetPassword(email, otp, newPassword);
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+  /**
    * Register a new user
    * POST /api/auth/register
    */

@@ -1,3 +1,96 @@
+  /**
+   * Forgot Password - generate OTP and send via Resend
+   */
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string; error?: string }> {
+    try {
+      const normalizedEmail = email.toLowerCase();
+      // Check if user exists
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id, email, full_name')
+        .eq('email', normalizedEmail)
+        .single();
+      if (userError || !user) {
+        return { success: false, message: 'No account found with that email.', error: 'User not found' };
+      }
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min expiry
+      // Store OTP in password_reset_tokens
+      const { error: insertError } = await supabase
+        .from('password_reset_tokens')
+        .insert({
+          user_id: user.id,
+          email: normalizedEmail,
+          otp,
+          expires_at: expiresAt.toISOString(),
+          used: false,
+        });
+      if (insertError) {
+        return { success: false, message: 'Failed to generate OTP.', error: insertError.message };
+      }
+      // Send OTP via Resend
+      const emailResult = await emailService.sendPasswordResetOTP(normalizedEmail, otp, user.full_name || 'User');
+      if (!emailResult.success) {
+        return { success: false, message: 'Failed to send OTP email.', error: emailResult.error };
+      }
+      return { success: true, message: 'OTP sent to your email.' };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return { success: false, message: errorMessage, error: 'Internal server error' };
+    }
+  }
+
+  /**
+   * Reset Password - verify OTP and set new password
+   */
+  async resetPassword(email: string, otp: string, newPassword: string): Promise<{ success: boolean; message: string; error?: string }> {
+    try {
+      const normalizedEmail = email.toLowerCase();
+      // Find valid OTP
+      const { data: token, error: tokenError } = await supabase
+        .from('password_reset_tokens')
+        .select('id, user_id, expires_at, used')
+        .eq('email', normalizedEmail)
+        .eq('otp', otp)
+        .eq('used', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (tokenError || !token) {
+        return { success: false, message: 'Invalid or expired OTP.', error: 'OTP not found' };
+      }
+      if (new Date(token.expires_at) < new Date()) {
+        return { success: false, message: 'OTP has expired.', error: 'OTP expired' };
+      }
+      // Update password in Supabase Auth
+      if (!supabaseAdmin) {
+        return { success: false, message: 'Password reset not supported in this environment.', error: 'No admin client' };
+      }
+      // Get user email from users table
+      const { data: user } = await supabase
+        .from('users')
+        .select('id, email')
+        .eq('id', token.user_id)
+        .single();
+      if (!user) {
+        return { success: false, message: 'User not found.', error: 'User not found' };
+      }
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(token.user_id, { password: newPassword });
+      if (updateError) {
+        return { success: false, message: 'Failed to reset password.', error: updateError.message };
+      }
+      // Mark OTP as used
+      await supabase
+        .from('password_reset_tokens')
+        .update({ used: true })
+        .eq('id', token.id);
+      return { success: true, message: 'Password reset successful. You can now log in.' };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return { success: false, message: errorMessage, error: 'Internal server error' };
+    }
+  }
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse, LogoutResponse } from '../types/api/auth.types';
 import { emailService } from './email.service';

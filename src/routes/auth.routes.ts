@@ -112,6 +112,25 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
   await authController.logout(req, res);
 }));
 
+/**
+ * @route   POST /api/auth/forgot-password
+ * @desc    Send OTP to user's email for password reset
+ * @access  Public
+ * @body    { email }
+ */
+router.post('/forgot-password', asyncHandler(async (req, res) => {
+  await authController.forgotPassword(req, res);
+}));
+
+/**
+ * @route   POST /api/auth/reset-password
+ * @desc    Reset user's password using OTP
+ * @access  Public
+ * @body    { email, otp, newPassword }
+ */
+router.post('/reset-password', asyncHandler(async (req, res) => {
+  await authController.resetPassword(req, res);
+}));
 export default router;
 
 
