@@ -1191,8 +1191,16 @@ export class EscrowService {
                       command: 'tx',
                       transaction: escrow.xrpl_escrow_id,
                     });
-                    if (txResponse.result && typeof txResponse.result.Sequence === 'number') {
-                      sequenceToUse = txResponse.result.Sequence;
+                    let foundSequence: number | undefined = undefined;
+                    if (txResponse.result) {
+                      if (typeof txResponse.result.Sequence === 'number') {
+                        foundSequence = txResponse.result.Sequence;
+                      } else if (txResponse.result.tx_json && typeof txResponse.result.tx_json.Sequence === 'number') {
+                        foundSequence = txResponse.result.tx_json.Sequence;
+                      }
+                    }
+                    if (typeof foundSequence === 'number') {
+                      sequenceToUse = foundSequence;
                       console.log('[Escrow Release][FALLBACK][AUTO] Fetched Sequence from EscrowCreate tx:', sequenceToUse);
                     } else {
                       console.warn('[Escrow Release][FALLBACK][AUTO] Could not extract Sequence from EscrowCreate tx response:', txResponse.result);
