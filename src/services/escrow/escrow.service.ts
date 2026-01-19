@@ -1076,16 +1076,25 @@ export class EscrowService {
 
       // Use the actual escrow creator's XRPL address as the owner for XRPL operations
       // Fallback to platform address if not available (for legacy escrows)
-      const escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
-      console.log('[Escrow Release][CHECK 1] Using platform address for escrowOwnerAddress:', escrowOwnerAddress);
+      let escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
+      let escrowOwnerSecret = process.env.XRPL_PLATFORM_SECRET;
+      let escrowOwnerType = 'platform';
+      // If the escrow has a specific owner address and secret, use those
+      if (escrow.xrpl_owner_address && escrow.xrpl_owner_secret) {
+        escrowOwnerAddress = escrow.xrpl_owner_address;
+        escrowOwnerSecret = escrow.xrpl_owner_secret;
+        escrowOwnerType = 'escrow_record';
+      }
+      console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Type:', escrowOwnerType);
+      console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Address:', escrowOwnerAddress);
+      console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Secret Provided:', !!escrowOwnerSecret);
       console.log('[Escrow Release][CHECK 3] Escrow XRPL transaction hash (xrpl_escrow_id):', escrow.xrpl_escrow_id);
-      const platformSecret = process.env.XRPL_PLATFORM_SECRET;
 
-      if (!escrowOwnerAddress || !platformSecret) {
+      if (!escrowOwnerAddress || !escrowOwnerSecret) {
         return {
           success: false,
-          message: 'Escrow owner address or platform secret not configured. XRPL_PLATFORM_ADDRESS, XRPL_PLATFORM_SECRET, and escrow.xrpl_owner_address must be set.',
-          error: 'Escrow owner address or platform secret not configured',
+          message: 'Escrow owner address or secret not configured. XRPL_PLATFORM_ADDRESS, XRPL_PLATFORM_SECRET, and escrow.xrpl_owner_address/secret must be set.',
+          error: 'Escrow owner address or secret not configured',
         };
       }
 
@@ -1370,32 +1379,32 @@ export class EscrowService {
           };
         }
 
-        // Finish escrow on XRPL using platform wallet (sign directly, no XUMM)
-        console.log('[Escrow Release] Finishing escrow on XRPL using platform wallet:');
+        // Finish escrow on XRPL using the determined wallet (sign directly, no XUMM)
+        console.log('[Escrow Release][DIAGNOSTICS] Finishing escrow on XRPL using wallet:');
         console.log('  EscrowCreate Transaction Hash (xrpl_escrow_id):', escrow.xrpl_escrow_id);
         console.log('  EscrowCreate Sequence (OfferSequence):', escrowDetails.sequence, '| Type:', typeof escrowDetails.sequence);
         console.log('  Owner Address:', escrowOwnerAddress, '| Type:', typeof escrowOwnerAddress);
+        console.log('  Owner Secret Provided:', !!escrowOwnerSecret);
+        console.log('  Owner Type:', escrowOwnerType);
         console.log('  Destination:', escrowDetails.destination);
         console.log('  Amount (drops):', escrowDetails.amount);
         console.log('  Condition:', escrowDetails.condition);
         console.log('  Fulfillment:', undefined);
-        console.log('  Platform Wallet Secret Provided:', !!platformSecret);
-
 
         let finishTxHash: string;
         try {
-          console.log('[Escrow Release] About to call xrplEscrowService.finishEscrow with:');
+          console.log('[Escrow Release][DIAGNOSTICS] About to call xrplEscrowService.finishEscrow with:');
           console.log('  ownerAddress:', escrowOwnerAddress);
           console.log('  escrowSequence:', escrowDetails.sequence);
           console.log('  condition:', escrowDetails.condition);
           console.log('  fulfillment:', undefined);
-          console.log('  walletSecret provided:', !!platformSecret);
+          console.log('  walletSecret provided:', !!escrowOwnerSecret);
           finishTxHash = await xrplEscrowService.finishEscrow({
             ownerAddress: escrowOwnerAddress,
             escrowSequence: escrowDetails.sequence,
             condition: escrowDetails.condition,
             fulfillment: undefined, // TODO: Implement fulfillment if condition exists
-            walletSecret: platformSecret,
+            walletSecret: escrowOwnerSecret,
           });
           console.log('[Escrow Release] Escrow finished on XRPL:', {
             txHash: finishTxHash,
