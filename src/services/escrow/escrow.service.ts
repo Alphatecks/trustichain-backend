@@ -1091,6 +1091,9 @@ export class EscrowService {
           escrowOwnerAddress = creatorWallet.xrpl_address;
           escrowOwnerSecret = encryptionService.decrypt(creatorWallet.encrypted_wallet_secret);
           escrowOwnerType = 'creator_wallet';
+          console.log('[Escrow Release][OWNER] Using escrow creator XRPL address for all XRPL operations:', escrowOwnerAddress);
+        } else {
+          console.warn('[Escrow Release][OWNER] Creator wallet not found or missing secret for user_id:', escrow.user_id);
         }
       } catch (err) {
         console.warn('[Escrow Release][DIAGNOSTICS] Failed to fetch or decrypt creator wallet secret:', err);
@@ -1160,7 +1163,8 @@ export class EscrowService {
               transaction: escrow.xrpl_escrow_id,
             });
             console.log('[Escrow Release][DIAGNOSTICS] XRPL tx response:', JSON.stringify(txResponse, null, 2));
-            // Log account_objects response
+            // Log account_objects response using the escrow creator's address
+            console.log('[Escrow Release][OWNER] Querying account_objects with owner address:', escrowOwnerAddress);
             const accountObjectsResponse = await client.request({
               command: 'account_objects',
               account: escrowOwnerAddress,
