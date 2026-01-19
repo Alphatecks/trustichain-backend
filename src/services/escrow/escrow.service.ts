@@ -1081,23 +1081,79 @@ export class EscrowService {
       let escrowOwnerSecret = null;
       let escrowOwnerType = 'unknown';
       // Try to fetch the escrow creator's wallet and secret
-      try {
-        const { data: creatorWallet } = await adminClient
-          .from('wallets')
-          .select('xrpl_address, encrypted_wallet_secret')
-          .eq('user_id', escrow.user_id)
-          .single();
-        if (creatorWallet && creatorWallet.xrpl_address && creatorWallet.encrypted_wallet_secret) {
-          escrowOwnerAddress = creatorWallet.xrpl_address;
-          escrowOwnerSecret = encryptionService.decrypt(creatorWallet.encrypted_wallet_secret);
-          escrowOwnerType = 'creator_wallet';
-          console.log('[Escrow Release][OWNER] Using escrow creator XRPL address for all XRPL operations:', escrowOwnerAddress);
-        } else {
-          console.warn('[Escrow Release][OWNER] Creator wallet not found or missing secret for user_id:', escrow.user_id);
+      // Deep fix: Always use the escrow creator's XRPL address (from escrow.xrpl_owner_address if present, else fallback to Account in EscrowCreate tx)
+      let escrowOwnerAddressFromTx = null;
+      // 1. Prefer escrow.xrpl_owner_address if present
+      if (escrow.xrpl_owner_address) {
+        escrowOwnerAddress = escrow.xrpl_owner_address;
+        escrowOwnerType = 'escrow_record';
+        // Try to get secret from wallets table
+        try {
+          const { data: walletRow } = await adminClient
+            .from('wallets')
+            .select('xrpl_address, encrypted_wallet_secret')
+            .eq('xrpl_address', escrow.xrpl_owner_address)
+            .single();
+          if (walletRow && walletRow.encrypted_wallet_secret) {
+            escrowOwnerSecret = encryptionService.decrypt(walletRow.encrypted_wallet_secret);
+          }
+        } catch (err) {
+          console.warn('[Escrow Release][OWNER] Could not fetch/decrypt secret for escrow.xrpl_owner_address:', err);
         }
-      } catch (err) {
-        console.warn('[Escrow Release][DIAGNOSTICS] Failed to fetch or decrypt creator wallet secret:', err);
+        console.log('[Escrow Release][OWNER] Using escrow.xrpl_owner_address for all XRPL operations:', escrowOwnerAddress);
+      } else {
+        // 2. Fallback: Try to get Account from EscrowCreate tx on XRPL
+        try {
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          const client: any = new Client(xrplServer);
+          await client.connect();
+          const txResponse = await client.request({
+            command: 'tx',
+            transaction: escrow.xrpl_escrow_id,
+          });
+          if (txResponse.result && txResponse.result.tx_json && txResponse.result.tx_json.Account) {
+            escrowOwnerAddressFromTx = txResponse.result.tx_json.Account;
+            escrowOwnerAddress = escrowOwnerAddressFromTx;
+            escrowOwnerType = 'xrpl_tx_fallback';
+            // Try to get secret from wallets table
+            try {
+              const { data: walletRow } = await adminClient
+                .from('wallets')
+                .select('xrpl_address, encrypted_wallet_secret')
+                .eq('xrpl_address', escrowOwnerAddressFromTx)
+                .single();
+              if (walletRow && walletRow.encrypted_wallet_secret) {
+                escrowOwnerSecret = encryptionService.decrypt(walletRow.encrypted_wallet_secret);
+              }
+            } catch (err) {
+              console.warn('[Escrow Release][OWNER] Could not fetch/decrypt secret for fallback Account:', err);
+            }
+            console.log('[Escrow Release][OWNER] Fallback: Using Account from EscrowCreate tx for all XRPL operations:', escrowOwnerAddressFromTx);
+          } else {
+            console.error('[Escrow Release][OWNER] Could not determine escrow creator address from EscrowCreate tx.');
+          }
+          await client.disconnect();
+        } catch (err) {
+          console.error('[Escrow Release][OWNER] Error fetching EscrowCreate tx for fallback owner address:', err);
+        }
       }
+      // 3. If still not found, fallback to platform
+      if (!escrowOwnerAddress) {
+        escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
+        escrowOwnerSecret = process.env.XRPL_PLATFORM_SECRET;
+        escrowOwnerType = 'platform';
+        console.warn('[Escrow Release][OWNER] Fallback: Using platform address for XRPL operations:', escrowOwnerAddress);
+      }
+      // 4. Log and warn if secret is missing
+      if (!escrowOwnerSecret) {
+        console.error('[Escrow Release][OWNER] No secret found for escrow owner address:', escrowOwnerAddress);
+      }
+      // 5. Log final owner address and type
+      console.log('[Escrow Release][OWNER][FINAL] XRPL owner address used for all XRPL operations:', escrowOwnerAddress, '| Type:', escrowOwnerType);
       // Fallback to platform wallet if missing
       if (!escrowOwnerAddress || !escrowOwnerSecret) {
         escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
