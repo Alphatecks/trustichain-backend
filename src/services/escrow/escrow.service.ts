@@ -1322,12 +1322,24 @@ export class EscrowService {
         // Finish escrow on XRPL using platform wallet (sign directly, no XUMM)
         console.log('[Escrow Release] Finishing escrow on XRPL using platform wallet:', {
           escrowSequence: escrowDetails.sequence,
+          escrowSequenceType: typeof escrowDetails.sequence,
           ownerAddress: escrowOwnerAddress,
+          ownerAddressType: typeof escrowOwnerAddress,
+          txHash: escrow.xrpl_escrow_id,
+          destination: escrowDetails.destination,
+          amount: escrowDetails.amount,
         });
 
 
         let finishTxHash: string;
         try {
+          console.log('[Escrow Release] Calling xrplEscrowService.finishEscrow with:', {
+            ownerAddress: escrowOwnerAddress,
+            escrowSequence: escrowDetails.sequence,
+            condition: escrowDetails.condition,
+            fulfillment: undefined,
+            walletSecret: platformSecret ? '[HIDDEN]' : undefined,
+          });
           finishTxHash = await xrplEscrowService.finishEscrow({
             ownerAddress: escrowOwnerAddress,
             escrowSequence: escrowDetails.sequence,
