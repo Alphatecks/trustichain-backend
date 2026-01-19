@@ -1179,8 +1179,35 @@ export class EscrowService {
                 const matchesAmount = objAmount && Math.abs(parseInt(String(objAmount)) - parseInt(String(targetAmountDrops))) < 1000; // Allow small difference for fees
                 // If we have a transaction hash, also try to match by PreviousTxnID
                 const matchesTxHash = !escrow.xrpl_escrow_id || (obj as any).PreviousTxnID === escrow.xrpl_escrow_id;
-                return matchesDestination && matchesAmount && (transactionSequence !== null || matchesTxHash);
+                return matchesDestination && matchesAmount && matchesTxHash;
               }) as any;
+              if (escrowObject) {
+                // Try to get the sequence from the fallback escrow object if not found from tx hash
+                let sequenceToUse = transactionSequence;
+                if (!sequenceToUse && escrowObject && escrowObject.hasOwnProperty('PreviousTxnLgrSeq')) {
+                  // PreviousTxnLgrSeq is the ledger sequence, not the transaction sequence, but log it for debugging
+                  console.log('[Escrow Release][FALLBACK] Escrow object found, but transaction sequence missing. Escrow object index:', escrowObject.index);
+                  console.log('[Escrow Release][FALLBACK] Escrow object PreviousTxnLgrSeq (ledger seq):', escrowObject.PreviousTxnLgrSeq);
+                  // Log all fields for manual inspection
+                  console.log('[Escrow Release][FALLBACK] Full escrow object:', escrowObject);
+                }
+                if (typeof sequenceToUse !== 'number') {
+                  console.error('[Escrow Release] Fallback method cannot determine transaction sequence - cannot proceed');
+                  console.error('[Escrow Release][FALLBACK] You must manually look up the EscrowCreate transaction sequence ("Sequence") for this escrow.');
+                  console.error('[Escrow Release][FALLBACK] Use the XRPL explorer and search for the EscrowCreate transaction hash: ', escrow.xrpl_escrow_id);
+                  console.error('[Escrow Release][FALLBACK] The Sequence field in the transaction is required for EscrowFinish.');
+                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish. Please look up the Sequence for the EscrowCreate transaction hash and provide it.');
+                }
+                escrowDetails = {
+                  sequence: sequenceToUse,
+                  amount: parseFloat(dropsToXrp(String(escrowObject.Amount) || '0') as any),
+                  destination: escrowObject.Destination || '',
+                  finishAfter: escrowObject.FinishAfter ? (escrowObject.FinishAfter as number) : undefined,
+                  cancelAfter: escrowObject.CancelAfter ? (escrowObject.CancelAfter as number) : undefined,
+                  condition: escrowObject.Condition || undefined,
+                };
+                console.log('[Escrow Release] Fallback escrowDetails:', escrowDetails);
+              }
 
               if (escrowObject) {
                 const escrowAmount = (escrowObject as any).Amount;
@@ -1193,7 +1220,10 @@ export class EscrowService {
                 
                 if (!sequenceToUse) {
                   console.error('[Escrow Release] Fallback method cannot determine transaction sequence - cannot proceed');
-                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish');
+                  console.error('[Escrow Release][FALLBACK] You must manually look up the EscrowCreate transaction sequence ("Sequence") for this escrow.');
+                  console.error('[Escrow Release][FALLBACK] Use the XRPL explorer and search for the EscrowCreate transaction hash: ', escrow.xrpl_escrow_id);
+                  console.error('[Escrow Release][FALLBACK] The Sequence field in the transaction is required for EscrowFinish.');
+                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish. Please look up the Sequence for the EscrowCreate transaction hash and provide it.');
                 }
 
                 escrowDetails = {
