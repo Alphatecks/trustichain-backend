@@ -1126,6 +1126,13 @@ export class EscrowService {
 
       try {
         // Get escrow details from XRPL to retrieve the sequence number
+              // Log XRPL network and node URL for diagnostics
+              const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+              const xrplServer = xrplNetwork === 'mainnet'
+                ? 'wss://xrplcluster.com'
+                : 'wss://s.altnet.rippletest.net:51233';
+              console.log('[Escrow Release][DIAGNOSTICS] XRPL Network:', xrplNetwork);
+              console.log('[Escrow Release][DIAGNOSTICS] XRPL Node URL:', xrplServer);
         // The escrow owner is the actual creator (xrpl_owner_address)
         console.log('[Escrow Release] Retrieving escrow details from XRPL:', {
           txHash: escrow.xrpl_escrow_id,
@@ -1136,12 +1143,34 @@ export class EscrowService {
           escrow.xrpl_escrow_id,
           escrowOwnerAddress
         );
-        console.log('[Escrow Release][CHECK 4] Result from getEscrowDetailsByTxHash:', escrowDetails);
+        console.log('[Escrow Release][DIAGNOSTICS] getEscrowDetailsByTxHash response:', escrowDetails);
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
         // This handles escrows created with placeholder hashes
         if (!escrowDetails) {
-          console.log('[Escrow Release][CHECK 4] Transaction hash lookup failed, trying fallback: querying account_objects');
+          console.log('[Escrow Release][DIAGNOSTICS] Transaction hash lookup failed, trying fallback: querying account_objects');
+          // Directly query XRPL for tx and account_objects and log full responses
+          try {
+            const { Client } = await import('xrpl');
+            const client: any = new Client(xrplServer);
+            await client.connect();
+            // Log tx response
+            const txResponse = await client.request({
+              command: 'tx',
+              transaction: escrow.xrpl_escrow_id,
+            });
+            console.log('[Escrow Release][DIAGNOSTICS] XRPL tx response:', JSON.stringify(txResponse, null, 2));
+            // Log account_objects response
+            const accountObjectsResponse = await client.request({
+              command: 'account_objects',
+              account: escrowOwnerAddress,
+              type: 'escrow',
+            });
+            console.log('[Escrow Release][DIAGNOSTICS] XRPL account_objects response:', JSON.stringify(accountObjectsResponse, null, 2));
+            await client.disconnect();
+          } catch (xrplDiagError) {
+            console.error('[Escrow Release][DIAGNOSTICS] Error querying XRPL for diagnostics:', xrplDiagError);
+          }
           
           // Get counterparty wallet address to match destination
           let counterpartyWalletAddress: string | null = null;
