@@ -6,11 +6,17 @@
 import { Client, xrpToDrops, dropsToXrp } from 'xrpl';
 import { Wallet } from 'xrpl/dist/npm/Wallet';
 
+// XRPL network/server config (top-level for guaranteed logging)
+const XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
+const XRPL_SERVER = XRPL_NETWORK === 'mainnet'
+  ? 'wss://xrplcluster.com'
+  : 'wss://s.altnet.rippletest.net:51233';
+console.log('[XRPL] Using network:', XRPL_NETWORK);
+console.log('[XRPL] Using server:', XRPL_SERVER);
+
 export class XRPLEscrowService {
-  private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
-  private readonly XRPL_SERVER = this.XRPL_NETWORK === 'mainnet'
-    ? 'wss://xrplcluster.com'
-    : 'wss://s.altnet.rippletest.net:51233';
+  private readonly XRPL_NETWORK = XRPL_NETWORK;
+  private readonly XRPL_SERVER = XRPL_SERVER;
 
   constructor() {
     console.log('[XRPL] Using network:', this.XRPL_NETWORK);
@@ -31,16 +37,8 @@ export class XRPLEscrowService {
     walletSecret?: string; // Wallet secret for signing
   }): Promise<string> {
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-escrow.service.ts:27',message:'createEscrow: Entry',data:{fromAddress:params.fromAddress,toAddress:params.toAddress,amountXrp:params.amountXrp,hasWalletSecret:!!params.walletSecret,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       if (!params.walletSecret) {
-        // In all environments, a real wallet secret is required.
-        // User-facing escrows should use the XUMM-based user-signed EscrowCreate flow instead.
-        throw new Error(
-          'Wallet secret required for XRPL EscrowCreate. ' +
-          'For user escrows, use prepareEscrowCreateTransaction + XUMM instead of createEscrow().'
-        );
+        throw new Error('Wallet secret required for XRPL EscrowCreate. For user escrows, use prepareEscrowCreateTransaction + XUMM instead of createEscrow().');
       }
 
       const client = new Client(this.XRPL_SERVER);
@@ -129,10 +127,7 @@ export class XRPLEscrowService {
   }): Promise<string> {
     try {
       if (!params.walletSecret) {
-        throw new Error(
-          'Wallet secret required to finish escrow. ' +
-          'For user-signed transactions, use prepareEscrowFinishTransaction instead.'
-        );
+        throw new Error('Wallet secret required to finish escrow. For user-signed transactions, use prepareEscrowFinishTransaction instead.');
       }
 
       const client = new Client(this.XRPL_SERVER);
