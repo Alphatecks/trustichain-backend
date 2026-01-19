@@ -1076,7 +1076,9 @@ export class EscrowService {
 
       // Use the actual escrow creator's XRPL address as the owner for XRPL operations
       // Fallback to platform address if not available (for legacy escrows)
-      const escrowOwnerAddress = escrow.xrpl_owner_address || process.env.XRPL_PLATFORM_ADDRESS;
+      const escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
+      console.log('[Escrow Release][CHECK 1] Using platform address for escrowOwnerAddress:', escrowOwnerAddress);
+      console.log('[Escrow Release][CHECK 3] Escrow XRPL transaction hash (xrpl_escrow_id):', escrow.xrpl_escrow_id);
       const platformSecret = process.env.XRPL_PLATFORM_SECRET;
 
       if (!escrowOwnerAddress || !platformSecret) {
@@ -1109,11 +1111,12 @@ export class EscrowService {
           escrow.xrpl_escrow_id,
           escrowOwnerAddress
         );
+        console.log('[Escrow Release][CHECK 4] Result from getEscrowDetailsByTxHash:', escrowDetails);
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
         // This handles escrows created with placeholder hashes
         if (!escrowDetails) {
-          console.log('[Escrow Release] Transaction hash lookup failed, trying fallback: querying account_objects');
+          console.log('[Escrow Release][CHECK 4] Transaction hash lookup failed, trying fallback: querying account_objects');
           
           // Get counterparty wallet address to match destination
           let counterpartyWalletAddress: string | null = null;
@@ -1166,7 +1169,7 @@ export class EscrowService {
               });
 
               const escrowObjects = accountObjectsResponse.result.account_objects || [];
-              
+              console.log('[Escrow Release][CHECK 4] Fallback account_objects escrows:', escrowObjects);
               // Find escrow matching destination and approximate amount
               const targetAmountDrops = xrpToDrops(escrow.amount_xrp.toString());
               const escrowObject = escrowObjects.find((obj: any) => {
