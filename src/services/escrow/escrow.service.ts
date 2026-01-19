@@ -1184,12 +1184,22 @@ export class EscrowService {
               if (escrowObject) {
                 // Try to get the sequence from the fallback escrow object if not found from tx hash
                 let sequenceToUse = transactionSequence;
-                if (!sequenceToUse && escrowObject && escrowObject.hasOwnProperty('PreviousTxnLgrSeq')) {
-                  // PreviousTxnLgrSeq is the ledger sequence, not the transaction sequence, but log it for debugging
-                  console.log('[Escrow Release][FALLBACK] Escrow object found, but transaction sequence missing. Escrow object index:', escrowObject.index);
-                  console.log('[Escrow Release][FALLBACK] Escrow object PreviousTxnLgrSeq (ledger seq):', escrowObject.PreviousTxnLgrSeq);
-                  // Log all fields for manual inspection
-                  console.log('[Escrow Release][FALLBACK] Full escrow object:', escrowObject);
+                if (!sequenceToUse && escrowObject && escrow.xrpl_escrow_id) {
+                  // Attempt to fetch the EscrowCreate transaction and extract Sequence
+                  try {
+                    const txResponse = await client.request({
+                      command: 'tx',
+                      transaction: escrow.xrpl_escrow_id,
+                    });
+                    if (txResponse.result && typeof txResponse.result.Sequence === 'number') {
+                      sequenceToUse = txResponse.result.Sequence;
+                      console.log('[Escrow Release][FALLBACK][AUTO] Fetched Sequence from EscrowCreate tx:', sequenceToUse);
+                    } else {
+                      console.warn('[Escrow Release][FALLBACK][AUTO] Could not extract Sequence from EscrowCreate tx response:', txResponse.result);
+                    }
+                  } catch (fetchSeqError) {
+                    console.error('[Escrow Release][FALLBACK][AUTO] Error fetching EscrowCreate tx for Sequence:', fetchSeqError);
+                  }
                 }
                 if (typeof sequenceToUse !== 'number') {
                   console.error('[Escrow Release] Fallback method cannot determine transaction sequence - cannot proceed');
