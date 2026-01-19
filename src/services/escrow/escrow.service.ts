@@ -1076,14 +1076,29 @@ export class EscrowService {
 
       // Use the actual escrow creator's XRPL address as the owner for XRPL operations
       // Fallback to platform address if not available (for legacy escrows)
-      let escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
-      let escrowOwnerSecret = process.env.XRPL_PLATFORM_SECRET;
-      let escrowOwnerType = 'platform';
-      // If the escrow has a specific owner address and secret, use those
-      if (escrow.xrpl_owner_address && escrow.xrpl_owner_secret) {
-        escrowOwnerAddress = escrow.xrpl_owner_address;
-        escrowOwnerSecret = escrow.xrpl_owner_secret;
-        escrowOwnerType = 'escrow_record';
+      let escrowOwnerAddress = null;
+      let escrowOwnerSecret = null;
+      let escrowOwnerType = 'unknown';
+      // Try to fetch the escrow creator's wallet and secret
+      try {
+        const { data: creatorWallet, error: creatorWalletError } = await adminClient
+          .from('wallets')
+          .select('xrpl_address, encrypted_wallet_secret')
+          .eq('user_id', escrow.user_id)
+          .single();
+        if (creatorWallet && creatorWallet.xrpl_address && creatorWallet.encrypted_wallet_secret) {
+          escrowOwnerAddress = creatorWallet.xrpl_address;
+          escrowOwnerSecret = encryptionService.decrypt(creatorWallet.encrypted_wallet_secret);
+          escrowOwnerType = 'creator_wallet';
+        }
+      } catch (err) {
+        console.warn('[Escrow Release][DIAGNOSTICS] Failed to fetch or decrypt creator wallet secret:', err);
+      }
+      // Fallback to platform wallet if missing
+      if (!escrowOwnerAddress || !escrowOwnerSecret) {
+        escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
+        escrowOwnerSecret = process.env.XRPL_PLATFORM_SECRET;
+        escrowOwnerType = 'platform';
       }
       console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Type:', escrowOwnerType);
       console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Address:', escrowOwnerAddress);
@@ -1093,7 +1108,7 @@ export class EscrowService {
       if (!escrowOwnerAddress || !escrowOwnerSecret) {
         return {
           success: false,
-          message: 'Escrow owner address or secret not configured. XRPL_PLATFORM_ADDRESS, XRPL_PLATFORM_SECRET, and escrow.xrpl_owner_address/secret must be set.',
+          message: 'Escrow owner address or secret not configured. XRPL_PLATFORM_ADDRESS, XRPL_PLATFORM_SECRET, or creator wallet secret must be set.',
           error: 'Escrow owner address or secret not configured',
         };
       }
