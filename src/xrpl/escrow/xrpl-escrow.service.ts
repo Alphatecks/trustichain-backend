@@ -12,6 +12,11 @@ export class XRPLEscrowService {
     ? 'wss://xrplcluster.com'
     : 'wss://s.altnet.rippletest.net:51233';
 
+  constructor() {
+    console.log('[XRPL] Using network:', this.XRPL_NETWORK);
+    console.log('[XRPL] Using server:', this.XRPL_SERVER);
+  }
+
   /**
    * Create an escrow on XRPL
    * Note: Requires wallet secret key - in production, handle securely
