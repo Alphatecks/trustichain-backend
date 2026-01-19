@@ -8,6 +8,7 @@ import { CreateEscrowRequest, CreateEscrowResponse, Escrow, GetEscrowListRequest
 import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
+import { encryptionService } from '../encryption/encryption.service';
 import { exchangeService } from '../exchange/exchange.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
@@ -1081,7 +1082,7 @@ export class EscrowService {
       let escrowOwnerType = 'unknown';
       // Try to fetch the escrow creator's wallet and secret
       try {
-        const { data: creatorWallet, error: creatorWalletError } = await adminClient
+        const { data: creatorWallet } = await adminClient
           .from('wallets')
           .select('xrpl_address, encrypted_wallet_secret')
           .eq('user_id', escrow.user_id)
