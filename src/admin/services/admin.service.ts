@@ -2,6 +2,10 @@ import { supabase, supabaseAdmin } from '../../config/supabase';
 import { AdminLoginRequest, AdminLoginResponse, AdminLogoutResponse } from '../../types/api/admin.types';
 
 export class AdminService {
+  // Static admin credentials
+  private static readonly STATIC_ADMIN_EMAIL = 'admin@trustichain.com';
+  private static readonly STATIC_ADMIN_PASSWORD = 'Trustichain02@';
+
   /**
    * Login an admin user
    * @param loginData - Admin login credentials
@@ -12,24 +16,31 @@ export class AdminService {
       const { email, password } = loginData;
       const normalizedEmail = email.toLowerCase();
 
-      // First, check if this email belongs to an admin
-      const { data: adminData, error: adminError } = await supabase
-        .from('admins')
-        .select('id, email, full_name')
-        .eq('email', normalizedEmail)
-        .eq('is_active', true)
-        .single();
+      // Check static credentials first
+      const isStaticAdmin = 
+        normalizedEmail === AdminService.STATIC_ADMIN_EMAIL.toLowerCase() &&
+        password === AdminService.STATIC_ADMIN_PASSWORD;
 
-      if (adminError || !adminData) {
-        return {
-          success: false,
-          message: 'Invalid email or password',
-          error: 'Authentication failed',
-        };
+      // For static admin, authenticate directly without checking database first
+      // For other admins, verify they exist in database first
+      if (!isStaticAdmin) {
+        const { data: adminData, error: adminError } = await supabase
+          .from('admins')
+          .select('id, email, full_name')
+          .eq('email', normalizedEmail)
+          .eq('is_active', true)
+          .single();
+
+        if (adminError || !adminData) {
+          return {
+            success: false,
+            message: 'Invalid email or password',
+            error: 'Authentication failed',
+          };
+        }
       }
 
-      // Attempt to sign in with Supabase Auth
-      // Admins should be created in Supabase Auth with the same email
+      // Authenticate with Supabase Auth
       const LOGIN_TIMEOUT_MS = 8000; // 8 second timeout
       const loginPromise = supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -61,20 +72,60 @@ export class AdminService {
         };
       }
 
-      // Verify that the authenticated user is indeed an admin
-      const { data: verifyAdmin, error: verifyError } = await supabase
-        .from('admins')
-        .select('id, email, full_name')
-        .eq('id', authData.user.id)
-        .eq('is_active', true)
-        .single();
+      // For static admin, ensure admin record exists (create if needed)
+      let adminData;
+      if (isStaticAdmin) {
+        const { data: existingAdmin, error: adminError } = await supabase
+          .from('admins')
+          .select('id, email, full_name')
+          .eq('id', authData.user.id)
+          .eq('is_active', true)
+          .single();
 
-      if (verifyError || !verifyAdmin) {
-        return {
-          success: false,
-          message: 'Access denied. Admin privileges required.',
-          error: 'Unauthorized',
-        };
+        if (adminError || !existingAdmin) {
+          // Create admin record if it doesn't exist
+          const adminClient = supabaseAdmin || supabase;
+          const { data: newAdmin, error: insertError } = await adminClient
+            .from('admins')
+            .insert({
+              id: authData.user.id,
+              email: normalizedEmail,
+              full_name: 'Admin User',
+              is_active: true,
+            })
+            .select('id, email, full_name')
+            .single();
+
+          if (insertError || !newAdmin) {
+            // Fallback: use auth user data
+            adminData = {
+              id: authData.user.id,
+              email: normalizedEmail,
+              full_name: 'Admin User',
+            };
+          } else {
+            adminData = newAdmin;
+          }
+        } else {
+          adminData = existingAdmin;
+        }
+      } else {
+        // For non-static admins, verify admin record exists
+        const { data: verifyAdmin, error: verifyError } = await supabase
+          .from('admins')
+          .select('id, email, full_name')
+          .eq('id', authData.user.id)
+          .eq('is_active', true)
+          .single();
+
+        if (verifyError || !verifyAdmin) {
+          return {
+            success: false,
+            message: 'Access denied. Admin privileges required.',
+            error: 'Unauthorized',
+          };
+        }
+        adminData = verifyAdmin;
       }
 
       return {
@@ -82,9 +133,9 @@ export class AdminService {
         message: 'Admin login successful',
         data: {
           admin: {
-            id: verifyAdmin.id,
-            email: verifyAdmin.email,
-            fullName: verifyAdmin.full_name,
+            id: adminData.id,
+            email: adminData.email,
+            fullName: adminData.full_name,
           },
           accessToken: authData.session?.access_token,
           refreshToken: authData.session?.refresh_token,
