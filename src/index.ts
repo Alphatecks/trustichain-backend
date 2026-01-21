@@ -17,6 +17,7 @@ import transactionsRoutes from './routes/transactions.routes';
 import disputeRoutes from './routes/dispute.routes';
 import savingsRoutes from './routes/savings.routes';
 import notificationRoutes from './routes/notification.routes';
+import adminRoutes from './admin/routes/admin.routes';
 
 dotenv.config();
 
@@ -176,6 +177,7 @@ app.get('/debug/logs', (_req: Request, res: Response) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/escrow', escrowRoutes);

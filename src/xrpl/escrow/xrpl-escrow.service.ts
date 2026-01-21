@@ -117,10 +117,18 @@ export class XRPLEscrowService {
    * Finish (release) an escrow
    * Note: This requires wallet secret for signing. In production, handle securely.
    * For user-signed transactions, use prepareEscrowFinishTransaction instead.
+   * 
+   * @param params.ownerAddress - The original owner address from EscrowCreate (always required)
+   * @param params.escrowSequence - The sequence number from EscrowCreate transaction
+   * @param params.finisherAddress - The address finishing the escrow (Owner or Destination). Defaults to ownerAddress
+   * @param params.condition - Optional condition if escrow was created with one
+   * @param params.fulfillment - Optional fulfillment if escrow has a condition
+   * @param params.walletSecret - Secret of the finisher (Owner or Destination)
    */
   async finishEscrow(params: {
     ownerAddress: string;
     escrowSequence: number;
+    finisherAddress?: string; // Who is finishing (Owner or Destination). Defaults to ownerAddress
     condition?: string;
     fulfillment?: string;
     walletSecret?: string;
@@ -136,16 +144,24 @@ export class XRPLEscrowService {
       try {
         const trimmedSecret = params.walletSecret.trim();
         const wallet = Wallet.fromSeed(trimmedSecret);
-        if (wallet.classicAddress !== params.ownerAddress) {
+        
+        // Determine who is finishing: Owner or Destination
+        const finisherAddress = params.finisherAddress || params.ownerAddress;
+        
+        if (wallet.classicAddress !== finisherAddress) {
           throw new Error(
-            `Wallet address ${wallet.classicAddress} does not match owner address ${params.ownerAddress}`
+            `Wallet address ${wallet.classicAddress} does not match finisher address ${finisherAddress}`
           );
         }
 
+        // EscrowFinish transaction structure:
+        // - Account: The account submitting the transaction (Owner or Destination)
+        // - Owner: The original owner address from EscrowCreate (always required)
+        // - OfferSequence: The sequence from EscrowCreate transaction
         const escrowFinish: any = {
           TransactionType: 'EscrowFinish',
-          Account: wallet.classicAddress,
-          Owner: wallet.classicAddress,
+          Account: wallet.classicAddress, // Who is submitting (Owner or Destination)
+          Owner: params.ownerAddress, // Original owner from EscrowCreate (always required)
           OfferSequence: params.escrowSequence,
         };
 
@@ -159,10 +175,12 @@ export class XRPLEscrowService {
 
         console.log('[XRPL] Preparing EscrowFinish transaction:', {
           ownerAddress: params.ownerAddress,
+          finisherAddress: finisherAddress,
           escrowSequence: params.escrowSequence,
           escrowSequenceType: typeof params.escrowSequence,
           hasCondition: !!params.condition,
           hasFulfillment: !!params.fulfillment,
+          isFinishingAsDestination: finisherAddress !== params.ownerAddress,
         });
 
         console.log('[XRPL] EscrowFinish transaction before autofill:', JSON.stringify(escrowFinish, null, 2));
@@ -251,9 +269,14 @@ export class XRPLEscrowService {
   /**
    * Prepare an unsigned EscrowFinish transaction for user signing
    * Returns transaction object that can be sent to XUMM/MetaMask for signing
+   * 
+   * @param params.ownerAddress - The original owner address from EscrowCreate (always required for Owner field)
+   * @param params.finisherAddress - The address that will sign (Owner or Destination). If not provided, defaults to ownerAddress
+   * @param params.escrowSequence - The sequence number from EscrowCreate transaction
    */
   async prepareEscrowFinishTransaction(params: {
     ownerAddress: string;
+    finisherAddress?: string; // Who will sign (Owner or Destination). Defaults to ownerAddress
     escrowSequence: number;
     condition?: string;
     fulfillment?: string;
@@ -263,10 +286,15 @@ export class XRPLEscrowService {
     instructions: string;
   }> {
     try {
+      const finisherAddress = params.finisherAddress || params.ownerAddress;
+      
+      // EscrowFinish structure:
+      // - Account: The account submitting/signing (Owner or Destination)
+      // - Owner: The original owner from EscrowCreate (always required)
       const escrowFinish: any = {
         TransactionType: 'EscrowFinish',
-        Account: params.ownerAddress,
-        Owner: params.ownerAddress,
+        Account: finisherAddress, // Who is signing (will be autofilled by XUMM to match signer)
+        Owner: params.ownerAddress, // Original owner from EscrowCreate (always required)
         OfferSequence: params.escrowSequence,
       };
 
@@ -278,7 +306,7 @@ export class XRPLEscrowService {
       }
 
       // Serialize to transaction blob (unsigned)
-      // Note: User's wallet (Xaman/Xumm) will autofill Account, Sequence, Fee, etc.
+      // Note: User's wallet (Xaman/Xumm) will autofill Account (to match signer), Sequence, Fee, etc.
       const txBlob = JSON.stringify(escrowFinish);
 
       return {

@@ -1,28 +1,9 @@
-
 import { Router } from 'express';
 import { walletController } from '../controllers/walletControllerExport';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
-
-/**
- * @route   GET /api/wallet/escrow-transactions
- * @desc    Get only escrow-related transactions for the user
- * @access  Private
- */
-router.get('/escrow-transactions', authenticate, asyncHandler(async (req, res) => {
-  await walletController.getEscrowTransactions(req, res);
-}));
-
-/**
- * @route   GET /api/wallet/all
- * @desc    Get all wallet addresses and balances for the user
- * @access  Private
- */
-router.get('/all', authenticate, asyncHandler(async (req, res) => {
-  await walletController.getAllWallets(req, res);
-}));
 
 /**
  * @route   GET /api/wallet/balance
@@ -161,14 +142,7 @@ router.get('/connect/xumm/status', authenticate, asyncHandler(async (req, res) =
 router.post('/fund/xumm', authenticate, asyncHandler(async (req, res) => {
   await walletController.fundWalletViaXUMM(req, res);
 }));
-/**
- * @route   POST /api/wallet/create
- * @desc    Create a new custodial wallet for the user
- * @access  Private
- */
-router.post('/create', authenticate, asyncHandler(async (req, res) => {
-  await walletController.createWallet(req, res);
-}));
+
 /**
  * @route   GET /api/wallet/fund/xumm/status
  * @desc    Check XUMM fund status and submit transaction when signed
@@ -177,15 +151,6 @@ router.post('/create', authenticate, asyncHandler(async (req, res) => {
  */
 router.get('/fund/xumm/status', authenticate, asyncHandler(async (req, res) => {
   await walletController.checkXUMMFundStatus(req, res);
-}));
-
-/**
- * @route   POST /api/wallet/create
- * @desc    Create a new custodial wallet for the user
- * @access  Private
- */
-router.post('/create', authenticate, asyncHandler(async (req, res) => {
-  await walletController.createWallet(req, res);
 }));
 
 export default router;

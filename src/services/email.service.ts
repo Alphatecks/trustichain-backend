@@ -1,62 +1,14 @@
-import * as dotenv from 'dotenv';
-dotenv.config();
 import { Resend } from 'resend';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+
 // Initialize Resend client
 const resend = process.env.RESEND_API_KEY 
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
 export class EmailService {
-  /**
-   * Send password reset OTP
-   * @param email - User email address
-   * @param otp - One-time password
-   * @param fullName - User's full name
-   */
-  async sendPasswordResetOTP(
-    email: string,
-    otp: string,
-    fullName: string
-  ): Promise<{ success: boolean; error?: string }> {
-    try {
-      if (!resend) {
-        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-      if (!process.env.RESEND_FROM_EMAIL) {
-        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
-        console.error(errorMsg);
-        throw new Error(errorMsg);
-      }
-      const { error } = await (resend as any).emails.send({
-        from: process.env.RESEND_FROM_EMAIL,
-        to: email,
-        subject: 'Your TrustiChain Password Reset OTP',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #764ba2;">Password Reset Request</h2>
-            <p>Hi ${fullName},</p>
-            <p>We received a request to reset your TrustiChain account password. Use the OTP below to reset your password. This code is valid for 15 minutes.</p>
-            <div style="font-size: 2em; font-weight: bold; color: #667eea; margin: 20px 0;">${otp}</div>
-            <p>If you did not request a password reset, you can safely ignore this email.</p>
-            <p style="font-size: 12px; color: #999;">&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
-          </div>
-        `,
-        text: `Hi ${fullName},\n\nYour TrustiChain password reset OTP is: ${otp}\n\nThis code is valid for 15 minutes. If you did not request a password reset, you can ignore this email.`,
-      });
-      if (error) {
-        console.error('Resend email error:', error);
-        return { success: false, error: error.message || 'Failed to send OTP email via Resend' };
-      }
-      return { success: true };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to send OTP email';
-      console.error('OTP email sending error:', error);
-      return { success: false, error: errorMessage };
-    }
-  }
-
   /**
    * Send email verification link
    * @param email - User email address
@@ -165,8 +117,6 @@ export class EmailService {
     }
   }
 }
-
-
 
 export const emailService = new EmailService();
 

@@ -1,4 +1,18 @@
+import { Request } from 'express';
 
-// This file is now empty as the augmentation has been moved to index.d.ts
-// No import/export statements should be present here.
-
+declare global {
+  namespace Express {
+    interface Request {
+      userId?: string;
+      user?: {
+        id: string;
+        email: string;
+      };
+      admin?: {
+        id: string;
+        email: string;
+        fullName: string;
+      };
+    }
+  }
+}

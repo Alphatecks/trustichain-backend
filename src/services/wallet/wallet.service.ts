@@ -1,191 +1,26 @@
-import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
-import { FundWalletRequest } from '../../types/api/wallet.types';
+/**
+ * Wallet Service
+ * Handles wallet operations including balance, funding, and withdrawals
+ */
+
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
-import { xummService } from '../xumm/xumm.service';
-import { exchangeService } from '../exchange/exchange.service';
-import { notificationService } from '../notification/notification.service';
-import { encryptionService } from '../encryption/encryption.service';
 import {
-  WalletTransaction,
+  FundWalletRequest,
   WithdrawWalletRequest,
+  WalletTransaction,
   SwapQuoteRequest,
   SwapQuoteResponse,
   SwapExecuteRequest,
-  SwapExecuteResponse
+  SwapExecuteResponse,
 } from '../../types/api/wallet.types';
-class WalletService {
+import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
+import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
+import { exchangeService } from '../exchange/exchange.service';
+import { encryptionService } from '../encryption/encryption.service';
+import { xummService } from '../xumm/xumm.service';
+import { notificationService } from '../notification/notification.service';
 
-  /**
-   * Get only escrow-related transactions for a user
-   */
-  async getEscrowTransactions(
-    userId: string,
-    limit: number = 50,
-    offset: number = 0
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data?: {
-      transactions: WalletTransaction[];
-      total: number;
-    };
-    error?: string;
-  }> {
-    try {
-      const adminClient = supabaseAdmin || supabase;
-      // Only escrow-related types
-      const escrowTypes = ['escrow_create', 'escrow_release', 'escrow_cancel'];
-      const { data: transactions, error: txError } = await adminClient
-        .from('transactions')
-        .select('*')
-        .eq('user_id', userId)
-        .in('type', escrowTypes)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
-
-      const { count } = await adminClient
-        .from('transactions')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .in('type', escrowTypes);
-
-      if (txError) {
-        return {
-          success: false,
-          message: 'Failed to fetch escrow transactions',
-          error: 'Failed to fetch transactions',
-        };
-      }
-
-      const formattedTransactions: WalletTransaction[] = (transactions || []).map((tx: any) => ({
-        id: tx.id,
-        type: tx.type,
-        amount: {
-          usd: parseFloat(tx.amount_usd),
-          xrp: parseFloat(tx.amount_xrp),
-        },
-        status: tx.status,
-        xrplTxHash: tx.xrpl_tx_hash || undefined,
-        description: tx.description || undefined,
-        createdAt: tx.created_at,
-      }));
-
-      return {
-        success: true,
-        message: 'Escrow transactions retrieved successfully',
-        data: {
-          transactions: formattedTransactions,
-          total: count || 0,
-        },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to fetch escrow transactions',
-        error: error instanceof Error ? error.message : 'Failed to fetch escrow transactions',
-      };
-    }
-  }
-
-  /**
-   * Create a new custodial XRPL wallet for the user
-   */
-  async createWallet(userId: string): Promise<{
-    success: boolean;
-    message: string;
-    data?: { xrpl_address: string };
-    error?: string;
-  }> {
-    try {
-      const adminClient = supabaseAdmin || supabase;
-      // Check if user already has a wallet
-      const { data: existing } = await adminClient
-        .from('wallets')
-        .select('xrpl_address')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (existing && existing.xrpl_address) {
-        return {
-          success: true,
-          message: 'Wallet already exists',
-          data: { xrpl_address: existing.xrpl_address },
-        };
-      }
-      // Generate a new XRPL wallet (address + secret)
-      const { address, secret } = await xrplWalletService.generateWallet();
-      // Encrypt the secret for storage
-      const encryptedSecret = encryptionService.encrypt(secret);
-      const { error: insertError } = await adminClient
-        .from('wallets')
-        .insert({ user_id: userId, xrpl_address: address, encrypted_wallet_secret: encryptedSecret, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
-      if (insertError) {
-        return {
-          success: false,
-          message: 'Failed to create wallet',
-          error: insertError.message || 'Database insert failed',
-        };
-      }
-      return {
-        success: true,
-        message: 'Wallet created successfully',
-        data: { xrpl_address: address },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to create wallet',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  }
-    /**
-     * Get all wallet addresses and balances for a user
-     */
-    async getAllWallets(userId: string): Promise<{
-      success: boolean;
-      message: string;
-      data?: Array<{
-        xrpl_address: string;
-        is_active: boolean;
-        balance: {
-          xrp: number;
-          usdt: number;
-          usdc: number;
-          usd: number;
-        };
-      }>;
-      error?: string;
-    }> {
-      try {
-        const adminClient = supabaseAdmin || supabase;
-        // Fetch all wallets for the user from the 'wallets' table
-        const { data: wallets, error } = await adminClient
-          .from('wallets')
-          .select('xrpl_address, balance_xrp, balance_usdt, balance_usdc, is_active')
-          .eq('user_id', userId);
-
-        if (error || !wallets) {
-          return { success: false, message: 'No wallets found', error: 'Not found' };
-        }
-
-        // Map wallets to the expected response format
-        const result = wallets.map((wallet: any) => ({
-          xrpl_address: wallet.xrpl_address,
-          is_active: wallet.is_active ?? true,
-          balance: {
-            xrp: wallet.balance_xrp ?? 0,
-            usdt: wallet.balance_usdt ?? 0,
-            usdc: wallet.balance_usdc ?? 0,
-            usd: 0, // Optionally calculate USD equivalent
-          },
-        }));
-
-        return { success: true, message: 'Wallets retrieved', data: result };
-      } catch (error) {
-        return { success: false, message: 'Error fetching wallets', error: error instanceof Error ? error.message : String(error) };
-      }
-    }
+export class WalletService {
   /**
    * Get wallet balance for a user
    */
@@ -199,18 +34,18 @@ class WalletService {
         usdc: number;
         usd: number;
       };
-      xrpl_address?: string | null;
     };
     error?: string;
   }> {
     try {
       const adminClient = supabaseAdmin || supabase;
-      const { data: wallets, error } = await adminClient
+      const { data: wallet, error } = await adminClient
         .from('wallets')
-        .select('xrpl_address')
-        .eq('user_id', userId);
+        .select('balance_xrp, balance_usdt, balance_usdc, xrpl_address')
+        .eq('user_id', userId)
+        .single();
 
-      if (error || !wallets || wallets.length === 0) {
+      if (error || !wallet) {
         return {
           success: false,
           message: 'Wallet not found',
@@ -218,31 +53,19 @@ class WalletService {
         };
       }
 
-      const wallet = wallets[0];
-      if (!wallet.xrpl_address) {
-        return {
-          success: false,
-          message: 'XRPL address not found for user',
-          error: 'XRPL address not found',
-        };
-      }
-
-      // Fetch live balance from XRPL
-      const xrp = await xrplWalletService.getBalance(wallet.xrpl_address);
-      // Optionally, fetch live balances for usdt/usdc if needed
-
+      // Always return the wallet and balance, even if xrpl_address is null
       return {
         success: true,
-        message: 'Live balance retrieved from XRPL',
+        message: 'Balance retrieved successfully',
         data: {
           balance: {
-            xrp: xrp ?? 0,
-            usdt: 0, // Optionally fetch live if needed
-            usdc: 0, // Optionally fetch live if needed
-            usd: 0, // Optionally calculate USD equivalent
+            xrp: wallet.balance_xrp ?? 0,
+            usdt: wallet.balance_usdt ?? 0,
+            usdc: wallet.balance_usdc ?? 0,
+            usd: 0, // TODO: Calculate USD equivalent if needed
           },
-          xrpl_address: wallet.xrpl_address,
         },
+        xrpl_address: wallet.xrpl_address ?? null,
       };
     } catch (error) {
       console.error('Error getting wallet balance:', error);
@@ -312,20 +135,13 @@ class WalletService {
         .eq('user_id', userId)
         .single();
       if (walletError || !currentWallet) {
-          const { error: createError } = await adminClient
-            .from('wallets')
-            .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
-          if (createError) {
-            return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
-          }
-          // Always include walletAddress in response
-          return {
-            success: true,
-            message: 'MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.',
-            data: {
-              walletAddress,
-            },
-          };
+        const { error: createError } = await adminClient
+          .from('wallets')
+          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
+        if (createError) {
+          return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
+        }
+        return { success: true, message: 'MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.', data: { walletAddress } };
       }
       const previousAddress = currentWallet.xrpl_address;
       const { error: updateError } = await adminClient
@@ -335,15 +151,7 @@ class WalletService {
       if (updateError) {
         return { success: false, message: 'Failed to update wallet address', error: 'Database update failed' };
       }
-        // Always include walletAddress in response
-        return {
-          success: true,
-          message: 'MetaMask wallet connected successfully. Your wallet address has been updated.',
-          data: {
-            walletAddress,
-            previousAddress: previousAddress !== walletAddress ? previousAddress : undefined,
-          },
-        };
+      return { success: true, message: 'MetaMask wallet connected successfully. Your wallet address has been updated.', data: { walletAddress, previousAddress: previousAddress !== walletAddress ? previousAddress : undefined } };
     } catch (error) {
       return { success: false, message: error instanceof Error ? error.message : 'Failed to connect wallet', error: error instanceof Error ? error.message : 'Unknown error' };
     }
@@ -1763,6 +1571,7 @@ class WalletService {
       // Convert amounts based on currency
       let amountXrp = request.amount;
       let amountUsd = request.amount;
+      let amountToken: number = request.amount; // For USDT/USDC
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
@@ -1787,6 +1596,7 @@ class WalletService {
       } else if (request.currency === 'USDT' || request.currency === 'USDC') {
         // For USDT/USDC, amount is already in USD value
         amountUsd = request.amount;
+        amountToken = request.amount;
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         if (!exchangeRates.success || !exchangeRates.data) {
           throw new Error('Failed to fetch exchange rates for currency conversion');
@@ -1820,19 +1630,95 @@ class WalletService {
         };
       }
 
+      // Determine wallet flow based on currency:
+      // - XRP → Use Xaman/XUMM (mobile app)
+      // - USDT/USDC → Use MetaMask+XRPL Snap (browser wallet)
+      const currency = request.currency === 'USD' ? 'XRP' : request.currency;
+      const amount = currency === 'XRP' ? amountXrp : amountToken;
+      
+      const preparedTx = await xrplWalletService.preparePaymentTransaction(
+        wallet.xrpl_address,
+        amount,
+        currency as 'XRP' | 'USDT' | 'USDC'
+      );
+
+      // XRP: Use Xaman/XUMM flow
+      // USDT/USDC: Use MetaMask flow (no XUMM)
+      let xummPayload = null;
+      let xummError = null;
+      
+      if (currency === 'XRP') {
+        // For XRP, try to create XUMM payload (Xaman mobile app)
+        try {
+          xummPayload = await xummService.createPayload(preparedTx.transaction);
+        } catch (error) {
+          xummError = error instanceof Error ? error.message : 'XUMM not configured';
+          console.log('XUMM not configured or error:', xummError);
+        }
+      } else {
+        // For USDT/USDC, use MetaMask (no XUMM)
+        console.log(`Using MetaMask flow for ${currency} deposit`);
+      }
+
+      // Store transaction info
+      const description = xummPayload 
+        ? `Deposit ${request.amount} ${request.currency} | XUMM_UUID:${xummPayload.uuid}`
+        : `Deposit ${request.amount} ${request.currency} | Direct signing`;
+      
+      await adminClient
+        .from('transactions')
+        .update({
+          description: description,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', transaction.id);
+
+      // Determine wallet type and message
+      const walletType = currency === 'XRP' ? 'Xaman' : 'MetaMask';
+      const message = xummPayload 
+        ? `Transaction prepared. Please sign in ${walletType} app.`
+        : currency === 'XRP'
+        ? 'Transaction prepared. Please sign with your XRPL wallet (Xaman, Crossmark, etc.).'
+        : `Transaction prepared. Please sign with MetaMask (XRPL Snap) for ${currency} deposit.`;
+
       return {
         success: true,
-        message: 'Deposit transaction created successfully',
+        message: message,
         data: {
           transactionId: transaction.id,
           amount: {
             usd: parseFloat(amountUsd.toFixed(2)),
             xrp: parseFloat(amountXrp.toFixed(6)),
           },
+          currency: currency,
+          // XUMM-specific fields (only for XRP, if XUMM is available)
+          ...(xummPayload && {
+            xummUrl: xummPayload.next.always,
+            xummUuid: xummPayload.uuid,
+            walletType: 'xaman',
+          }),
+          // Transaction for wallet signing (always present)
+          transaction: preparedTx.transaction,
+          transactionBlob: preparedTx.transactionBlob,
+          destinationAddress: wallet.xrpl_address,
+          amountXrp: parseFloat(amountXrp.toFixed(6)),
+          amountToken: currency !== 'XRP' ? parseFloat(amountToken.toFixed(6)) : undefined,
           status: 'pending',
+          // Wallet type indicator
+          ...(!xummPayload && {
+            walletType: currency === 'XRP' ? 'browser' : 'metamask',
+            note: currency === 'XRP' 
+              ? 'XUMM not available, use browser wallet instead'
+              : `Use MetaMask with XRPL Snap to sign ${currency} transaction`,
+          }),
+          // Include XUMM error info if XUMM failed (for debugging)
+          ...(xummError && {
+            xummError: xummError,
+          }),
         },
       };
     } catch (error) {
+      console.error('Error funding wallet:', error);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fund wallet',
@@ -1895,18 +1781,28 @@ class WalletService {
       // Get payload status from XUMM
       const payloadStatus = await xummService.getPayloadStatus(xummUuid);
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:346',message:'getXUMMPayloadStatus: Received XUMM payload status',data:{signed:payloadStatus.meta.signed,submit:payloadStatus.meta.submit,hasHex:!!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,txid:payloadStatus.response?.txid,hexLength:payloadStatus.response?.hex?.length,responseKeys:payloadStatus.response?Object.keys(payloadStatus.response):null,metaKeys:Object.keys(payloadStatus.meta)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
 
       // If signed, submit to XRPL and update transaction
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:350',message:'getXUMMPayloadStatus: Checking if transaction needs processing',data:{signed:payloadStatus.meta.signed,hasHex:!!payloadStatus.response?.hex,willProcess:payloadStatus.meta.signed && !!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,autoSubmitted:payloadStatus.meta.submit && !!payloadStatus.response?.txid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       
       // Handle two cases:
       // 1. Transaction signed but not yet submitted (has hex) - submit to XRPL
       // 2. Transaction signed and auto-submitted by XUMM (has txid, no hex) - already on XRPL, just update DB
       if (payloadStatus.meta.signed && payloadStatus.response?.hex) {
-      
-        
+        // Case 1: Submit signed transaction to XRPL
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:352',message:'getXUMMPayloadStatus: Submitting signed transaction to XRPL',data:{hasHex:!!payloadStatus.response?.hex,hexLength:payloadStatus.response?.hex?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         const submitResult = await xrplWalletService.submitSignedTransaction(payloadStatus.response.hex);
 
-    
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:355',message:'getXUMMPayloadStatus: XRPL submit result',data:{hash:submitResult.hash,status:submitResult.status,isSuccess:submitResult.status === 'tesSUCCESS'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
 
         // Update transaction status
         const status = submitResult.status === 'tesSUCCESS' ? 'completed' : 'failed';
@@ -1921,8 +1817,9 @@ class WalletService {
 
         // Update wallet balance if successful
         if (status === 'completed') {
-   
-        
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:366',message:'getXUMMPayloadStatus: About to update wallet balance',data:{userId,status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
           const { data: wallet } = await adminClient
             .from('wallets')
             .select('xrpl_address')
@@ -1930,11 +1827,13 @@ class WalletService {
             .single();
 
           if (wallet) {
-     
-         
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:372',message:'getXUMMPayloadStatus: Fetching balances from XRPL',data:{xrplAddress:wallet.xrpl_address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
             const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-        
-           
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:373',message:'getXUMMPayloadStatus: Got balances from XRPL',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
             await adminClient
               .from('wallets')
               .update({
@@ -1944,8 +1843,9 @@ class WalletService {
                 updated_at: new Date().toISOString(),
               })
               .eq('user_id', userId);
-            
-           
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:381',message:'getXUMMPayloadStatus: Updated wallet balance in DB',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
           }
         }
 
@@ -1962,10 +1862,17 @@ class WalletService {
         };
       } else if (payloadStatus.meta.signed && payloadStatus.meta.submit && payloadStatus.response?.txid) {
         // Case 2: XUMM auto-submitted the transaction (already on XRPL)
-   
-       
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:433',message:'getXUMMPayloadStatus: XUMM auto-submitted transaction, updating DB',data:{txid:payloadStatus.response.txid,submit:payloadStatus.meta.submit},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         
-       
+        console.log('[XUMM Fix] Auto-submitted transaction detected:', {
+          transactionId,
+          userId,
+          txid: payloadStatus.response.txid,
+          signed: payloadStatus.meta.signed,
+          submit: payloadStatus.meta.submit,
+        });
         
         // Transaction is already on XRPL, just update database
         await adminClient
@@ -1978,8 +1885,9 @@ class WalletService {
           .eq('id', transactionId);
 
         // Update wallet balance
-      
-        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:444',message:'getXUMMPayloadStatus: About to update wallet balance (auto-submitted)',data:{userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const { data: wallet } = await adminClient
           .from('wallets')
           .select('xrpl_address')
@@ -1987,11 +1895,13 @@ class WalletService {
           .single();
 
         if (wallet) {
-          
-       
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:450',message:'getXUMMPayloadStatus: Fetching balances from XRPL (auto-submitted)',data:{xrplAddress:wallet.xrpl_address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
           const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-          
-       
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:451',message:'getXUMMPayloadStatus: Got balances from XRPL (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
           await adminClient
             .from('wallets')
             .update({
@@ -2001,8 +1911,9 @@ class WalletService {
               updated_at: new Date().toISOString(),
             })
             .eq('user_id', userId);
-          
-         
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:459',message:'getXUMMPayloadStatus: Updated wallet balance in DB (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
           
           console.log('[XUMM Fix] Balance updated successfully for auto-submitted transaction:', {
             transactionId,
@@ -2027,6 +1938,9 @@ class WalletService {
         };
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:400',message:'getXUMMPayloadStatus: Returning status without processing',data:{signed:payloadStatus.meta.signed,hasHex:!!payloadStatus.response?.hex,hasTxid:!!payloadStatus.response?.txid,txid:payloadStatus.response?.txid,submit:payloadStatus.meta.submit,reason:'No hex or not signed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       return {
         success: true,
         message: 'Payload status retrieved',
@@ -2217,21 +2131,30 @@ class WalletService {
       error?: string;
     }
   > {
+    // #region agent log
+    // ...existing code...
+    // #endregion
     try {
       const adminClient = supabaseAdmin || supabase;
 
       // Get wallet
-
-      // Fetch all wallets for the user and use the first one (consistent with balance check)
-
-      const { data: wallets } = await adminClient
+      // #region agent log
+      // ...existing code...
+      // #endregion
+      let { data: wallet } = await adminClient
         .from('wallets')
         .select('*')
-        .eq('user_id', userId);
-
-      let wallet = wallets && wallets.length > 0 ? wallets[0] : null;
+        .eq('user_id', userId)
+        .single();
+      
+      // #region agent log
+      // ...existing code...
+      // #endregion
 
       if (!wallet) {
+        // #region agent log
+        // ...existing code...
+        // #endregion
         return {
           success: false,
           message: 'Wallet not found',
@@ -2343,8 +2266,11 @@ class WalletService {
 
       // Check balance
       const balance = await this.getBalance(userId);
+      // #region agent log
+      // ...existing code...
+      // #endregion
       if (!balance.success || !balance.data) {
-        
+        // #region agent log
         // ...existing code...
         // #endregion
         return {
@@ -2361,9 +2287,12 @@ class WalletService {
       const minimumRequired = BASE_RESERVE + ESTIMATED_FEE;
       const availableBalance = Math.max(0, balance.data.balance.xrp - minimumRequired);
       
+      // #region agent log
+      // ...existing code...
+      // #endregion
       
       if (availableBalance < amountXrp) {
-        
+        // #region agent log
         // ...existing code...
         // #endregion
         return {
@@ -2373,7 +2302,7 @@ class WalletService {
         };
       }
 
-      // Create transaction record (immediately completed)
+      // Create transaction record
       const { data: transaction, error: txError } = await adminClient
         .from('transactions')
         .insert({
@@ -2381,14 +2310,17 @@ class WalletService {
           type: 'withdrawal',
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
-          status: 'completed',
+          status: 'pending',
           description: `Withdrawal to ${request.destinationAddress}`,
         })
         .select()
         .single();
 
+      // #region agent log
+      // ...existing code...
+      // #endregion
       if (txError || !transaction) {
-        
+        // #region agent log
         // ...existing code...
         // #endregion
         return {
@@ -2398,13 +2330,17 @@ class WalletService {
         };
       }
 
+      // #region agent log
+      // ...existing code...
+      // #endregion
 
       // Get and decrypt wallet secret for signing withdrawal
       // If wallet doesn't have a secret (old wallet created before encrypted_wallet_secret feature),
       // we cannot migrate if the old address has funds (we can't access them without the secret)
       if (!wallet.encrypted_wallet_secret) {
-        
-     
+        // #region agent log
+        // ...existing code...
+        // #endregion
         
         // Check if old wallet address has balance
         let oldBalance = 0;
@@ -2418,7 +2354,9 @@ class WalletService {
         // If old address has funds, we cannot migrate (funds would become inaccessible)
         // Return error explaining the situation
         if (oldBalance > 0) {
-         
+          // #region agent log
+          // ...existing code...
+          // #endregion
           
           return {
             success: false,
@@ -2445,7 +2383,9 @@ class WalletService {
           .single();
         
         if (updateError || !updatedWallet) {
-        
+          // #region agent log
+          // ...existing code...
+          // #endregion
           return {
             success: false,
             message: 'Failed to migrate wallet. Please contact support.',
@@ -2453,7 +2393,9 @@ class WalletService {
           };
         }
         
-       
+        // #region agent log
+        // ...existing code...
+        // #endregion
         
         // Update wallet reference to use the new wallet
         wallet = updatedWallet;
@@ -2476,6 +2418,9 @@ class WalletService {
 
       // Create XRPL withdrawal transaction with wallet secret
       let xrplTxHash: string;
+      // #region agent log
+      // ...existing code...
+      // #endregion
       try {
         xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
           wallet.xrpl_address,
@@ -2483,9 +2428,13 @@ class WalletService {
           amountXrp,
           walletSecret
         );
-      
+        // #region agent log
+        // ...existing code...
+        // #endregion
       } catch (xrplError) {
-   
+        // #region agent log
+        // ...existing code...
+        // #endregion
         // Update transaction status to failed if XRPL submission fails
         await adminClient
           .from('transactions')
@@ -2495,7 +2444,9 @@ class WalletService {
             description: `Withdrawal failed: ${xrplError instanceof Error ? xrplError.message : 'Unknown error'}`,
           })
           .eq('id', transaction.id);
-      
+        // #region agent log
+        // ...existing code...
+        // #endregion
 
         return {
           success: false,
@@ -2504,15 +2455,52 @@ class WalletService {
         };
       }
 
-      // Update transaction with XRPL tx hash after successful submission
+      // Update transaction to completed only after successful XRPL submission
+      // #region agent log
+      // ...existing code...
+      // #endregion
+      
+      // Verify transaction exists before update
+      await adminClient
+        .from('transactions')
+        .select('id, status, xrpl_tx_hash')
+        .eq('id', transaction.id)
+        .single();
+      
+      // #region agent log
+      // ...existing code...
+      // #endregion
+      
+      // #region agent log
+      // ...existing code...
+      // #endregion
       await adminClient
         .from('transactions')
         .update({
           xrpl_tx_hash: xrplTxHash,
+          status: 'completed',
           updated_at: new Date().toISOString(),
         })
         .eq('id', transaction.id)
         .select();
+      
+      // #region agent log
+      // ...existing code...
+      // #endregion
+      
+      // Verify update actually persisted
+      await adminClient
+        .from('transactions')
+        .select('id, status, xrpl_tx_hash')
+        .eq('id', transaction.id)
+        .single();
+      
+      // #region agent log
+      // ...existing code...
+      // #endregion
+      
+      // Check if update succeeded
+      // Update result check removed (variable no longer declared)
 
       // Update wallet balance after withdrawal
       const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
@@ -2525,7 +2513,6 @@ class WalletService {
           updated_at: new Date().toISOString(),
         })
         .eq('id', wallet.id);
-
 
       // Create transaction record for the receiver (if destination is a TrustiChain user)
       try {
@@ -2581,37 +2568,15 @@ class WalletService {
           } catch (notifyError) {
             console.warn('Failed to create receiver deposit notification:', notifyError);
           }
-
-          // Fallback: Ensure sender's withdrawal status is completed if XRPL tx succeeded
-          await adminClient
-            .from('transactions')
-            .update({
-              status: 'completed',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', transaction.id)
-            .eq('status', 'pending');
         }
       } catch (receiverError) {
         // Log but don't fail the withdrawal if receiver transaction creation fails
         console.warn('[Withdrawal] Failed to create transaction for receiver:', receiverError);
       }
 
-
-      // Forced update: ensure sender's withdrawal status is 'completed' (regardless of previous value)
-      const { error: forceUpdateError } = await adminClient
-        .from('transactions')
-        .update({
-          status: 'completed',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', transaction.id);
-      if (forceUpdateError) {
-        console.error('[Withdrawal] Forced status update to completed failed:', forceUpdateError);
-      } else {
-        console.log('[Withdrawal] Forced status update to completed succeeded for transaction', transaction.id);
-      }
-
+      // #region agent log
+      // ...existing code...
+      // #endregion
       return {
         success: true,
         message: 'Withdrawal completed successfully',
@@ -2626,6 +2591,9 @@ class WalletService {
         },
       };
     } catch (error) {
+      // #region agent log
+      // ...existing code...
+      // #endregion
       console.error('Error withdrawing from wallet:', error);
       return {
         success: false,
@@ -2643,7 +2611,9 @@ class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-     
+      // #region agent log
+      // ...existing code...
+      // #endregion
 
       // Find pending withdrawal transactions that have an xrpl_tx_hash
       // These should be marked as completed since they have a transaction hash
@@ -2655,16 +2625,22 @@ class WalletService {
         .eq('status', 'pending')
         .not('xrpl_tx_hash', 'is', null);
 
-   
+      // #region agent log
+      // ...existing code...
+      // #endregion
 
       if (!pendingWithdrawals || pendingWithdrawals.length === 0) {
-   
+        // #region agent log
+        // ...existing code...
+        // #endregion
         return;
       }
 
       // Update all pending withdrawals with xrpl_tx_hash to completed
       for (const withdrawal of pendingWithdrawals) {
-      
+        // #region agent log
+        // ...existing code...
+        // #endregion
         
         await adminClient
           .from('transactions')
@@ -2674,12 +2650,17 @@ class WalletService {
           })
           .eq('id', withdrawal.id)
           .select();
-       
+        
+        // #region agent log
+        // ...existing code...
+        // #endregion
       }
     } catch (error) {
       // Don't throw - this is a background sync
       console.warn('[Sync] Error syncing pending withdrawals:', error);
-   
+      // #region agent log
+      // ...existing code...
+      // #endregion
     }
   }
 
@@ -2688,7 +2669,6 @@ class WalletService {
    * This fixes the issue where receivers don't have transaction records for incoming payments
    */
   private async syncPendingDeposits(userId: string): Promise<void> {
-
     try {
       const adminClient = supabaseAdmin || supabase;
 
@@ -2701,94 +2681,102 @@ class WalletService {
 
       if (!wallet) return;
 
-      // Query XRPL for all incoming Payment transactions to this wallet address
-      const { Client, dropsToXrp } = await import('xrpl');
-      const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
-      const xrplServer = xrplNetwork === 'mainnet'
-        ? 'wss://xrplcluster.com'
-        : 'wss://s.altnet.rippletest.net:51233';
-      const client: any = new Client(xrplServer);
-      await client.connect();
+      // Find all completed withdrawal transactions with xrpl_tx_hash
+      // that might have sent to this user's address
+      const { data: withdrawals } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('type', 'withdrawal')
+        .eq('status', 'completed')
+        .not('xrpl_tx_hash', 'is', null);
 
-      try {
-        // Get account transactions (limit to last 1000 for performance)
-        const txsResponse = await client.request({
-          command: 'account_tx',
-          account: wallet.xrpl_address,
-          ledger_index_min: -1,
-          ledger_index_max: -1,
-          limit: 1000,
-        });
-        const txs = txsResponse.result.transactions || [];
+      if (!withdrawals || withdrawals.length === 0) return;
 
-        for (const txObj of txs) {
-          const tx = txObj.tx;
-          const meta = txObj.meta;
-          // Defensive: ensure tx and TransactionType exist
-          if (
-            tx &&
-            typeof tx.TransactionType === 'string' &&
-            tx.TransactionType === 'Payment' &&
-            tx.Destination === wallet.xrpl_address &&
-            meta?.TransactionResult === 'tesSUCCESS'
-          ) {
-            // Check if already recorded in DB
-            const { data: existingDeposit } = await adminClient
-              .from('transactions')
-              .select('id')
-              .eq('user_id', userId)
-              .eq('xrpl_tx_hash', tx.hash)
-              .eq('type', 'deposit')
-              .maybeSingle();
-            if (existingDeposit) continue;
+      // Check each withdrawal transaction on XRPL to see if destination matches this user
+      for (const withdrawal of withdrawals) {
+        // Skip if we already created a deposit for this tx hash
+        const { data: existingDeposit } = await adminClient
+          .from('transactions')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('xrpl_tx_hash', withdrawal.xrpl_tx_hash)
+          .eq('type', 'deposit')
+          .maybeSingle();
 
-            // Get amount in XRP
-            let amountXrp = 0;
-            if (typeof tx.Amount === 'string') {
-              amountXrp = parseFloat(dropsToXrp(tx.Amount));
-            } else if (typeof tx.Amount === 'object' && tx.Amount.currency === 'XRP') {
-              amountXrp = parseFloat(tx.Amount.value);
-            }
+        if (existingDeposit) continue;
 
-            // Get USD conversion
-            let amountUsd = amountXrp;
-            const exchangeRates = await exchangeService.getLiveExchangeRates();
-            if (exchangeRates.success && exchangeRates.data) {
-              const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-              if (usdRate && usdRate > 0) {
-                amountUsd = amountXrp * usdRate;
+        // Query XRPL to get transaction details
+        try {
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          const client: any = new Client(xrplServer);
+          await client.connect();
+
+          try {
+            const txResponse = await client.request({
+              command: 'tx',
+              transaction: withdrawal.xrpl_tx_hash,
+            });
+
+            const txResult = txResponse.result as any;
+            const destination = txResult.Destination;
+
+            // If this withdrawal sent to this user's address, create deposit record
+            if (destination === wallet.xrpl_address && txResult.TransactionType === 'Payment') {
+              // Get amount from transaction
+              const { dropsToXrp } = await import('xrpl');
+              const amountDrops = txResult.Amount;
+              const amountXrp = parseFloat((dropsToXrp as any)(String(amountDrops)));
+
+              // Calculate USD amount (use the same rate as withdrawal if available, or fetch current)
+              let amountUsd = withdrawal.amount_usd;
+              if (amountXrp !== withdrawal.amount_xrp) {
+                // Amounts don't match, recalculate USD
+                const exchangeRates = await exchangeService.getLiveExchangeRates();
+                if (exchangeRates.success && exchangeRates.data) {
+                  const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+                  if (usdRate && usdRate > 0) {
+                    amountUsd = amountXrp * usdRate;
+                  }
+                }
               }
+
+              // Create deposit transaction for this user
+              await adminClient
+                .from('transactions')
+                .insert({
+                  user_id: userId,
+                  type: 'deposit',
+                  amount_xrp: amountXrp,
+                  amount_usd: amountUsd,
+                  xrpl_tx_hash: withdrawal.xrpl_tx_hash,
+                  status: 'completed',
+                  description: `Deposit from ${txResult.Account}`,
+                });
+
+              // Update wallet balance
+              const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
+              await adminClient
+                .from('wallets')
+                .update({
+                  balance_xrp: balances.xrp,
+                  balance_usdt: balances.usdt,
+                  balance_usdc: balances.usdc,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', userId);
             }
-
-            // Create deposit transaction for this user
-            await adminClient
-              .from('transactions')
-              .insert({
-                user_id: userId,
-                type: 'deposit',
-                amount_xrp: amountXrp,
-                amount_usd: amountUsd,
-                xrpl_tx_hash: tx.hash,
-                status: 'completed',
-                description: `Deposit from ${tx.Account}`,
-                created_at: tx.date ? new Date(tx.date * 1000).toISOString() : new Date().toISOString(),
-              });
+          } finally {
+            await client.disconnect();
           }
+        } catch (txError) {
+          // Skip if transaction not found or other error
+          console.warn(`[Sync] Could not fetch XRPL transaction ${withdrawal.xrpl_tx_hash}:`, txError);
         }
-
-        // Update wallet balance after syncing
-        const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-        await adminClient
-          .from('wallets')
-          .update({
-            balance_xrp: balances.xrp,
-            balance_usdt: balances.usdt,
-            balance_usdc: balances.usdc,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', userId);
-      } finally {
-        await client.disconnect();
       }
     } catch (error) {
       // Don't throw - this is a background sync, shouldn't break the main flow
@@ -2817,7 +2805,9 @@ class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-    
+      // #region agent log
+      // ...existing code...
+      // #endregion
 
       // Sync pending transactions in the background (don't wait for it)
       this.syncPendingWithdrawals(userId).catch(() => {});

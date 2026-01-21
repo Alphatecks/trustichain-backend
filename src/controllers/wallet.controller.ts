@@ -4,76 +4,6 @@ import { validateSignedTransactionFormat } from '../utils/transactionValidation'
 
 
 export class WalletController {
-    // ...existing methods...
-
-    async getEscrowTransactions(req: Request, res: Response): Promise<void> {
-      try {
-        const userId = (req as Request & { userId?: string }).userId!;
-        const limit = parseInt(req.query.limit as string) || 50;
-        const offset = parseInt(req.query.offset as string) || 0;
-        const result = await walletService.getEscrowTransactions(userId, limit, offset);
-        res.json(result);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-        res.json({
-          success: false,
-          message: errorMessage,
-          error: 'Internal server error',
-        });
-      }
-    }
-  async createWallet(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as Request & { userId?: string }).userId!;
-      const result = await walletService.createWallet(userId);
-      if (result.success && result.data) {
-        res.json({
-          success: true,
-          message: result.message,
-          data: result.data,
-        });
-      } else {
-        res.json({
-          success: false,
-          message: result.message,
-          error: result.error || 'Failed to create wallet',
-        });
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      res.json({
-        success: false,
-        message: errorMessage,
-        error: 'Internal server error',
-      });
-    }
-  }
-  async getAllWallets(req: Request, res: Response): Promise<void> {
-      try {
-        const userId = (req as Request & { userId?: string }).userId!;
-        const result = await walletService.getAllWallets(userId);
-        if (result.success && result.data) {
-          res.json({
-            success: true,
-            message: result.message,
-            wallets: result.data,
-          });
-        } else {
-          res.json({
-            success: false,
-            message: result.message,
-            error: result.error || 'Failed to fetch wallets',
-          });
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-        res.json({
-          success: false,
-          message: errorMessage,
-          error: 'Internal server error',
-        });
-      }
-    }
   async getBalance(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as Request & { userId?: string }).userId!;
@@ -84,8 +14,8 @@ export class WalletController {
           message: result.message,
           data: {
             balance: result.data.balance,
-            xrplAddress: result.data.xrpl_address ?? '',
           },
+          xrplAddress: result.xrpl_address ?? '',
         });
       } else {
         res.json({

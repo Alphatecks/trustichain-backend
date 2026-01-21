@@ -8,10 +8,10 @@ import { CreateEscrowRequest, CreateEscrowResponse, Escrow, GetEscrowListRequest
 import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
-import { encryptionService } from '../encryption/encryption.service';
 import { exchangeService } from '../exchange/exchange.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
+import { encryptionService } from '../encryption/encryption.service';
 
 export class EscrowService {
   /**
@@ -967,6 +967,9 @@ export class EscrowService {
       cancelledAt?: number;
       canFinish: boolean;
       canCancel: boolean;
+      canFinishAsOwner?: boolean; // Whether the owner (creator) can finish
+      canFinishAsDestination?: boolean; // Whether the destination can finish
+      finishAfterDate?: string; // ISO date string for FinishAfter
       error?: string;
     };
     error?: string;
@@ -1008,16 +1011,79 @@ export class EscrowService {
         };
       }
 
+      // Determine requester role
+      const isRequesterOwner = escrow.user_id === userId;
+      const isRequesterDestination = escrow.counterparty_id === userId;
+
       // Get escrow status from XRPL
       const status = await xrplEscrowService.getEscrowStatus(
         escrow.xrpl_escrow_id,
         platformAddress
       );
 
+      // Enhance status with user-specific permissions
+      let canFinishAsOwner = status.canFinish;
+      let canFinishAsDestination = status.canFinish;
+      let finishAfterDate: string | undefined;
+
+      if (status.finishAfter) {
+        // Convert Ripple Epoch to Unix timestamp for display
+        finishAfterDate = new Date((status.finishAfter + 946684800) * 1000).toISOString();
+        
+        // Get current ledger close time to check if FinishAfter has passed
+        try {
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          const client: any = new Client(xrplServer);
+          await client.connect();
+          
+          try {
+            const ledgerResponse = await client.request({
+              command: 'ledger',
+              ledger_index: 'validated',
+            });
+            
+            const currentLedgerTime = ledgerResponse.result.ledger.close_time;
+            const finishAfterPassed = currentLedgerTime >= status.finishAfter;
+            
+            // XRPL Rule: Before FinishAfter, only Destination can finish
+            // After FinishAfter, either Owner or Destination can finish
+            if (!finishAfterPassed) {
+              canFinishAsOwner = false; // Owner cannot finish before FinishAfter
+              canFinishAsDestination = true; // Destination can finish before FinishAfter
+            } else {
+              // After FinishAfter, both can finish
+              canFinishAsOwner = true;
+              canFinishAsDestination = true;
+            }
+          } finally {
+            await client.disconnect();
+          }
+        } catch (ledgerError) {
+          console.error('[Escrow Status] Error getting ledger time:', ledgerError);
+          // If we can't get ledger time, use the basic canFinish logic
+        }
+      }
+
+      // Determine if current user can finish based on their role
+      const userCanFinish = isRequesterOwner 
+        ? canFinishAsOwner 
+        : (isRequesterDestination ? canFinishAsDestination : false);
+
       return {
         success: true,
         message: 'Escrow status retrieved successfully',
-        data: status,
+        data: {
+          ...status,
+          canFinish: userCanFinish, // Override with user-specific permission
+          canFinishAsOwner,
+          canFinishAsDestination,
+          finishAfterDate,
+        },
       };
     } catch (error) {
       console.error('Error getting escrow XRPL status:', error);
@@ -1074,102 +1140,15 @@ export class EscrowService {
         };
       }
 
+      // Get platform wallet credentials from environment variables
+      const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
+      const platformSecret = process.env.XRPL_PLATFORM_SECRET;
 
-      // Use the actual escrow creator's XRPL address as the owner for XRPL operations
-      // Fallback to platform address if not available (for legacy escrows)
-      let escrowOwnerAddress = null;
-      let escrowOwnerSecret = null;
-      let escrowOwnerType = 'unknown';
-      // Try to fetch the escrow creator's wallet and secret
-      // Deep fix: Always use the escrow creator's XRPL address (from escrow.xrpl_owner_address if present, else fallback to Account in EscrowCreate tx)
-      let escrowOwnerAddressFromTx = null;
-      // 1. Prefer escrow.xrpl_owner_address if present
-      if (escrow.xrpl_owner_address) {
-        escrowOwnerAddress = escrow.xrpl_owner_address;
-        escrowOwnerType = 'escrow_record';
-        // Try to get secret from wallets table
-        try {
-          const { data: walletRow } = await adminClient
-            .from('wallets')
-            .select('xrpl_address, encrypted_wallet_secret')
-            .eq('xrpl_address', escrow.xrpl_owner_address)
-            .single();
-          if (walletRow && walletRow.encrypted_wallet_secret) {
-            escrowOwnerSecret = encryptionService.decrypt(walletRow.encrypted_wallet_secret);
-          }
-        } catch (err) {
-          console.warn('[Escrow Release][OWNER] Could not fetch/decrypt secret for escrow.xrpl_owner_address:', err);
-        }
-        console.log('[Escrow Release][OWNER] Using escrow.xrpl_owner_address for all XRPL operations:', escrowOwnerAddress);
-      } else {
-        // 2. Fallback: Try to get Account from EscrowCreate tx on XRPL
-        try {
-          const { Client } = await import('xrpl');
-          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
-          const xrplServer = xrplNetwork === 'mainnet'
-            ? 'wss://xrplcluster.com'
-            : 'wss://s.altnet.rippletest.net:51233';
-          const client: any = new Client(xrplServer);
-          await client.connect();
-          const txResponse = await client.request({
-            command: 'tx',
-            transaction: escrow.xrpl_escrow_id,
-          });
-          if (txResponse.result && txResponse.result.tx_json && txResponse.result.tx_json.Account) {
-            escrowOwnerAddressFromTx = txResponse.result.tx_json.Account;
-            escrowOwnerAddress = escrowOwnerAddressFromTx;
-            escrowOwnerType = 'xrpl_tx_fallback';
-            // Try to get secret from wallets table
-            try {
-              const { data: walletRow } = await adminClient
-                .from('wallets')
-                .select('xrpl_address, encrypted_wallet_secret')
-                .eq('xrpl_address', escrowOwnerAddressFromTx)
-                .single();
-              if (walletRow && walletRow.encrypted_wallet_secret) {
-                escrowOwnerSecret = encryptionService.decrypt(walletRow.encrypted_wallet_secret);
-              }
-            } catch (err) {
-              console.warn('[Escrow Release][OWNER] Could not fetch/decrypt secret for fallback Account:', err);
-            }
-            console.log('[Escrow Release][OWNER] Fallback: Using Account from EscrowCreate tx for all XRPL operations:', escrowOwnerAddressFromTx);
-          } else {
-            console.error('[Escrow Release][OWNER] Could not determine escrow creator address from EscrowCreate tx.');
-          }
-          await client.disconnect();
-        } catch (err) {
-          console.error('[Escrow Release][OWNER] Error fetching EscrowCreate tx for fallback owner address:', err);
-        }
-      }
-      // 3. If still not found, fallback to platform
-      if (!escrowOwnerAddress) {
-        escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
-        escrowOwnerSecret = process.env.XRPL_PLATFORM_SECRET;
-        escrowOwnerType = 'platform';
-        console.warn('[Escrow Release][OWNER] Fallback: Using platform address for XRPL operations:', escrowOwnerAddress);
-      }
-      // 4. Log and warn if secret is missing
-      if (!escrowOwnerSecret) {
-        console.error('[Escrow Release][OWNER] No secret found for escrow owner address:', escrowOwnerAddress);
-      }
-      // 5. Log final owner address and type
-      console.log('[Escrow Release][OWNER][FINAL] XRPL owner address used for all XRPL operations:', escrowOwnerAddress, '| Type:', escrowOwnerType);
-      // Fallback to platform wallet if missing
-      if (!escrowOwnerAddress || !escrowOwnerSecret) {
-        escrowOwnerAddress = process.env.XRPL_PLATFORM_ADDRESS;
-        escrowOwnerSecret = process.env.XRPL_PLATFORM_SECRET;
-        escrowOwnerType = 'platform';
-      }
-      console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Type:', escrowOwnerType);
-      console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Address:', escrowOwnerAddress);
-      console.log('[Escrow Release][DIAGNOSTICS] Escrow Owner Secret Provided:', !!escrowOwnerSecret);
-      console.log('[Escrow Release][CHECK 3] Escrow XRPL transaction hash (xrpl_escrow_id):', escrow.xrpl_escrow_id);
-
-      if (!escrowOwnerAddress || !escrowOwnerSecret) {
+      if (!platformAddress || !platformSecret) {
         return {
           success: false,
-          message: 'Escrow owner address or secret not configured. XRPL_PLATFORM_ADDRESS, XRPL_PLATFORM_SECRET, or creator wallet secret must be set.',
-          error: 'Escrow owner address or secret not configured',
+          message: 'Platform wallet not configured. XRPL_PLATFORM_ADDRESS and XRPL_PLATFORM_SECRET must be set.',
+          error: 'Platform wallet not configured',
         };
       }
 
@@ -1185,52 +1164,21 @@ export class EscrowService {
 
       try {
         // Get escrow details from XRPL to retrieve the sequence number
-              // Log XRPL network and node URL for diagnostics
-              const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
-              const xrplServer = xrplNetwork === 'mainnet'
-                ? 'wss://xrplcluster.com'
-                : 'wss://s.altnet.rippletest.net:51233';
-              console.log('[Escrow Release][DIAGNOSTICS] XRPL Network:', xrplNetwork);
-              console.log('[Escrow Release][DIAGNOSTICS] XRPL Node URL:', xrplServer);
-        // The escrow owner is the actual creator (xrpl_owner_address)
+        // The escrow owner is the platform wallet (since escrows are created using platform wallet)
         console.log('[Escrow Release] Retrieving escrow details from XRPL:', {
           txHash: escrow.xrpl_escrow_id,
-          ownerAddress: escrowOwnerAddress,
+          ownerAddress: platformAddress,
         });
 
         let escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
           escrow.xrpl_escrow_id,
-          escrowOwnerAddress
+          platformAddress
         );
-        console.log('[Escrow Release][DIAGNOSTICS] getEscrowDetailsByTxHash response:', escrowDetails);
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
         // This handles escrows created with placeholder hashes
         if (!escrowDetails) {
-          console.log('[Escrow Release][DIAGNOSTICS] Transaction hash lookup failed, trying fallback: querying account_objects');
-          // Directly query XRPL for tx and account_objects and log full responses
-          try {
-            const { Client } = await import('xrpl');
-            const client: any = new Client(xrplServer);
-            await client.connect();
-            // Log tx response
-            const txResponse = await client.request({
-              command: 'tx',
-              transaction: escrow.xrpl_escrow_id,
-            });
-            console.log('[Escrow Release][DIAGNOSTICS] XRPL tx response:', JSON.stringify(txResponse, null, 2));
-            // Log account_objects response using the escrow creator's address
-            console.log('[Escrow Release][OWNER] Querying account_objects with owner address:', escrowOwnerAddress);
-            const accountObjectsResponse = await client.request({
-              command: 'account_objects',
-              account: escrowOwnerAddress,
-              type: 'escrow',
-            });
-            console.log('[Escrow Release][DIAGNOSTICS] XRPL account_objects response:', JSON.stringify(accountObjectsResponse, null, 2));
-            await client.disconnect();
-          } catch (xrplDiagError) {
-            console.error('[Escrow Release][DIAGNOSTICS] Error querying XRPL for diagnostics:', xrplDiagError);
-          }
+          console.log('[Escrow Release] Transaction hash lookup failed, trying fallback: querying account_objects');
           
           // Get counterparty wallet address to match destination
           let counterpartyWalletAddress: string | null = null;
@@ -1278,12 +1226,12 @@ export class EscrowService {
 
               const accountObjectsResponse = await client.request({
                 command: 'account_objects',
-                account: escrowOwnerAddress,
+                account: platformAddress,
                 type: 'escrow',
               });
 
               const escrowObjects = accountObjectsResponse.result.account_objects || [];
-              console.log('[Escrow Release][CHECK 4] Fallback account_objects escrows:', escrowObjects);
+              
               // Find escrow matching destination and approximate amount
               const targetAmountDrops = xrpToDrops(escrow.amount_xrp.toString());
               const escrowObject = escrowObjects.find((obj: any) => {
@@ -1293,53 +1241,8 @@ export class EscrowService {
                 const matchesAmount = objAmount && Math.abs(parseInt(String(objAmount)) - parseInt(String(targetAmountDrops))) < 1000; // Allow small difference for fees
                 // If we have a transaction hash, also try to match by PreviousTxnID
                 const matchesTxHash = !escrow.xrpl_escrow_id || (obj as any).PreviousTxnID === escrow.xrpl_escrow_id;
-                return matchesDestination && matchesAmount && matchesTxHash;
+                return matchesDestination && matchesAmount && (transactionSequence !== null || matchesTxHash);
               }) as any;
-              if (escrowObject) {
-                // Try to get the sequence from the fallback escrow object if not found from tx hash
-                let sequenceToUse = transactionSequence;
-                if (!sequenceToUse && escrowObject && escrow.xrpl_escrow_id) {
-                  // Attempt to fetch the EscrowCreate transaction and extract Sequence
-                  try {
-                    const txResponse = await client.request({
-                      command: 'tx',
-                      transaction: escrow.xrpl_escrow_id,
-                    });
-                    let foundSequence: number | undefined = undefined;
-                    if (txResponse.result) {
-                      if (typeof txResponse.result.Sequence === 'number') {
-                        foundSequence = txResponse.result.Sequence;
-                      } else if (txResponse.result.tx_json && typeof txResponse.result.tx_json.Sequence === 'number') {
-                        foundSequence = txResponse.result.tx_json.Sequence;
-                      }
-                    }
-                    if (typeof foundSequence === 'number') {
-                      sequenceToUse = foundSequence;
-                      console.log('[Escrow Release][FALLBACK][AUTO] Fetched Sequence from EscrowCreate tx:', sequenceToUse);
-                    } else {
-                      console.warn('[Escrow Release][FALLBACK][AUTO] Could not extract Sequence from EscrowCreate tx response:', txResponse.result);
-                    }
-                  } catch (fetchSeqError) {
-                    console.error('[Escrow Release][FALLBACK][AUTO] Error fetching EscrowCreate tx for Sequence:', fetchSeqError);
-                  }
-                }
-                if (typeof sequenceToUse !== 'number') {
-                  console.error('[Escrow Release] Fallback method cannot determine transaction sequence - cannot proceed');
-                  console.error('[Escrow Release][FALLBACK] You must manually look up the EscrowCreate transaction sequence ("Sequence") for this escrow.');
-                  console.error('[Escrow Release][FALLBACK] Use the XRPL explorer and search for the EscrowCreate transaction hash: ', escrow.xrpl_escrow_id);
-                  console.error('[Escrow Release][FALLBACK] The Sequence field in the transaction is required for EscrowFinish.');
-                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish. Please look up the Sequence for the EscrowCreate transaction hash and provide it.');
-                }
-                escrowDetails = {
-                  sequence: sequenceToUse,
-                  amount: parseFloat(dropsToXrp(String(escrowObject.Amount) || '0') as any),
-                  destination: escrowObject.Destination || '',
-                  finishAfter: escrowObject.FinishAfter ? (escrowObject.FinishAfter as number) : undefined,
-                  cancelAfter: escrowObject.CancelAfter ? (escrowObject.CancelAfter as number) : undefined,
-                  condition: escrowObject.Condition || undefined,
-                };
-                console.log('[Escrow Release] Fallback escrowDetails:', escrowDetails);
-              }
 
               if (escrowObject) {
                 const escrowAmount = (escrowObject as any).Amount;
@@ -1352,10 +1255,7 @@ export class EscrowService {
                 
                 if (!sequenceToUse) {
                   console.error('[Escrow Release] Fallback method cannot determine transaction sequence - cannot proceed');
-                  console.error('[Escrow Release][FALLBACK] You must manually look up the EscrowCreate transaction sequence ("Sequence") for this escrow.');
-                  console.error('[Escrow Release][FALLBACK] Use the XRPL explorer and search for the EscrowCreate transaction hash: ', escrow.xrpl_escrow_id);
-                  console.error('[Escrow Release][FALLBACK] The Sequence field in the transaction is required for EscrowFinish.');
-                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish. Please look up the Sequence for the EscrowCreate transaction hash and provide it.');
+                  throw new Error('Cannot determine escrow transaction sequence for EscrowFinish');
                 }
 
                 escrowDetails = {
@@ -1405,19 +1305,19 @@ export class EscrowService {
                 const txSequence = (txResponse.result as any).Sequence;
                 
                 // Check account transaction history for EscrowFinish/EscrowCancel
-                  const accountTxResponse = await client.request({
-                    command: 'account_tx',
-                    account: escrowOwnerAddress,
-                    ledger_index_min: -1,
-                    ledger_index_max: -1,
-                    limit: 200,
-                  });
+                const accountTxResponse = await client.request({
+                  command: 'account_tx',
+                  account: platformAddress,
+                  ledger_index_min: -1,
+                  ledger_index_max: -1,
+                  limit: 200,
+                });
                 
                 const transactions = accountTxResponse.result.transactions || [];
                 const relatedTx = transactions.find((txData: any) => {
                   const tx = txData.tx || txData;
                   return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
-                         (tx as any).Owner === escrowOwnerAddress &&
+                         (tx as any).Owner === platformAddress &&
                          (tx as any).OfferSequence === txSequence;
                 });
                 
@@ -1469,8 +1369,9 @@ export class EscrowService {
           sequenceType: typeof escrowDetails.sequence,
           amount: escrowDetails.amount,
           destination: escrowDetails.destination,
+          finishAfter: escrowDetails.finishAfter,
           txHash: escrow.xrpl_escrow_id,
-          escrowOwnerAddress: escrowOwnerAddress,
+          platformAddress: platformAddress,
         });
 
         // Check if escrow has a condition that requires fulfillment
@@ -1484,36 +1385,219 @@ export class EscrowService {
           };
         }
 
-        // Finish escrow on XRPL using the determined wallet (sign directly, no XUMM)
-        console.log('[Escrow Release][DIAGNOSTICS] Finishing escrow on XRPL using wallet:');
-        console.log('  EscrowCreate Transaction Hash (xrpl_escrow_id):', escrow.xrpl_escrow_id);
-        console.log('  EscrowCreate Sequence (OfferSequence):', escrowDetails.sequence, '| Type:', typeof escrowDetails.sequence);
-        console.log('  Owner Address:', escrowOwnerAddress, '| Type:', typeof escrowOwnerAddress);
-        console.log('  Owner Secret Provided:', !!escrowOwnerSecret);
-        console.log('  Owner Type:', escrowOwnerType);
-        console.log('  Destination:', escrowDetails.destination);
-        console.log('  Amount (drops):', escrowDetails.amount);
-        console.log('  Condition:', escrowDetails.condition);
-        console.log('  Fulfillment:', undefined);
+        // Determine requester role: Owner (escrow creator) or Destination (counterparty)
+        const isRequesterOwner = escrow.user_id === userId;
+        const isRequesterDestination = escrow.counterparty_id === userId;
+        
+        if (!isRequesterOwner && !isRequesterDestination) {
+          return {
+            success: false,
+            message: 'Unauthorized: You are not authorized to release this escrow',
+            error: 'Unauthorized',
+          };
+        }
+
+        // Check FinishAfter timestamp and validate permissions
+        let canFinish = true;
+        let finishAfterPassed = true;
+        let requiresDestination = false;
+
+        if (escrowDetails.finishAfter) {
+          // Get current ledger close time from XRPL
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          const client: any = new Client(xrplServer);
+          await client.connect();
+          
+          try {
+            // Get the latest validated ledger to get close time
+            const ledgerResponse = await client.request({
+              command: 'ledger',
+              ledger_index: 'validated',
+            });
+            
+            // XRPL ledger close_time is in seconds since Ripple Epoch (Jan 1, 2000)
+            // FinishAfter is also in Ripple Epoch seconds
+            const currentLedgerTime = ledgerResponse.result.ledger.close_time;
+            finishAfterPassed = currentLedgerTime >= escrowDetails.finishAfter;
+            
+            console.log('[Escrow Release] FinishAfter check:', {
+              finishAfter: escrowDetails.finishAfter,
+              currentLedgerTime: currentLedgerTime,
+              finishAfterPassed: finishAfterPassed,
+              finishAfterDate: new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString(), // Convert Ripple Epoch to Unix timestamp
+              currentLedgerDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
+            });
+
+            // XRPL Rule: Before FinishAfter, only Destination can finish
+            // After FinishAfter, either Owner or Destination can finish
+            if (!finishAfterPassed) {
+              requiresDestination = true;
+              if (isRequesterOwner) {
+                canFinish = false;
+              } else if (isRequesterDestination) {
+                canFinish = true; // Destination can finish before FinishAfter
+              }
+            } else {
+              // After FinishAfter, either party can finish
+              canFinish = true;
+            }
+          } catch (ledgerError) {
+            console.error('[Escrow Release] Error getting ledger time:', ledgerError);
+            // If we can't get ledger time, allow the attempt but log warning
+            console.warn('[Escrow Release] Could not verify FinishAfter timestamp, proceeding with caution');
+          } finally {
+            await client.disconnect();
+          }
+        }
+
+        // Validate permissions
+        if (!canFinish) {
+          // FinishAfter is in Ripple Epoch seconds (since Jan 1, 2000)
+          // Convert to Unix timestamp for display: Ripple Epoch + 946684800 = Unix timestamp
+          const finishAfterDate = escrowDetails.finishAfter 
+            ? new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString()
+            : 'N/A';
+          
+          return {
+            success: false,
+            message: `Cannot release escrow: Only the destination can finish this escrow before the FinishAfter time (${finishAfterDate}). The escrow owner cannot finish it until after that time.`,
+            error: 'FinishAfter permission denied',
+          };
+        }
+
+        // Determine which wallet to use for finishing
+        let finisherAddress: string;
+        let finisherSecret: string;
+        let isFinishingAsDestination = false;
+
+        if (requiresDestination && isRequesterDestination) {
+          // Destination needs to finish before FinishAfter
+          isFinishingAsDestination = true;
+          
+          // Get destination wallet address and secret
+          const { data: destinationWallet } = await adminClient
+            .from('wallets')
+            .select('xrpl_address, encrypted_wallet_secret')
+            .eq('user_id', escrow.counterparty_id)
+            .single();
+
+          if (!destinationWallet) {
+            return {
+              success: false,
+              message: 'Cannot release escrow: Destination wallet not found',
+              error: 'Destination wallet not found',
+            };
+          }
+
+          finisherAddress = destinationWallet.xrpl_address;
+          
+          // Verify destination address matches escrow destination
+          if (finisherAddress !== escrowDetails.destination) {
+            return {
+              success: false,
+              message: `Cannot release escrow: Destination wallet address (${finisherAddress}) does not match escrow destination (${escrowDetails.destination})`,
+              error: 'Destination address mismatch',
+            };
+          }
+
+          // If destination doesn't have wallet secret, use XUMM for signing
+          if (!destinationWallet.encrypted_wallet_secret) {
+            console.log('[Escrow Release] Destination wallet secret not available, creating XUMM payload for user signing');
+            
+            // Prepare EscrowFinish transaction for XUMM signing
+            const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
+            if (!platformAddress) {
+              return {
+                success: false,
+                message: 'Platform wallet not configured',
+                error: 'Platform wallet not configured',
+              };
+            }
+
+            const escrowFinishTx = await xrplEscrowService.prepareEscrowFinishTransaction({
+              ownerAddress: platformAddress, // Original owner from EscrowCreate (always required)
+              finisherAddress: finisherAddress, // Destination address (who will sign)
+              escrowSequence: escrowDetails.sequence,
+              condition: escrowDetails.condition,
+              fulfillment: undefined,
+            });
+
+            // Create XUMM payload
+            const xummPayload = await xummService.createPayload(escrowFinishTx.transaction);
+
+            // Create pending transaction record
+            const { data: transaction } = await adminClient
+              .from('transactions')
+              .insert({
+                user_id: userId,
+                type: 'escrow_release',
+                amount_xrp: parseFloat(escrow.amount_xrp),
+                amount_usd: parseFloat(escrow.amount_usd),
+                status: 'pending',
+                escrow_id: escrowId,
+                description: `Escrow release pending XUMM signature | XUMM_UUID:${xummPayload.uuid}${notes ? ` | Notes: ${notes}` : ''}`,
+              })
+              .select()
+              .single();
+
+            return {
+              success: true,
+              message: 'Please sign the transaction in your Xaman (XUMM) wallet to release the escrow',
+              data: {
+                requiresSigning: true,
+                xummUrl: xummPayload.next.always,
+                xummUuid: xummPayload.uuid,
+                qrCode: xummPayload.next.qr,
+                instructions: 'Open the Xaman app and sign the EscrowFinish transaction to release the escrow funds.',
+              } as any,
+            };
+          }
+
+          // Destination has wallet secret, decrypt it
+          try {
+            finisherSecret = encryptionService.decrypt(destinationWallet.encrypted_wallet_secret);
+          } catch (decryptError) {
+            console.error('[Escrow Release] Failed to decrypt destination wallet secret:', decryptError);
+            return {
+              success: false,
+              message: 'Cannot release escrow: Failed to decrypt destination wallet secret',
+              error: 'Wallet secret decryption failed',
+            };
+          }
+        } else {
+          // Owner can finish (either no FinishAfter or FinishAfter has passed)
+          finisherAddress = platformAddress;
+          finisherSecret = platformSecret;
+        }
+
+        // Finish escrow on XRPL
+        console.log('[Escrow Release] Finishing escrow on XRPL:', {
+          escrowSequence: escrowDetails.sequence,
+          ownerAddress: platformAddress,
+          finisherAddress: finisherAddress,
+          isFinishingAsDestination: isFinishingAsDestination,
+          finishAfterPassed: finishAfterPassed,
+        });
 
         let finishTxHash: string;
         try {
-          console.log('[Escrow Release][DIAGNOSTICS] About to call xrplEscrowService.finishEscrow with:');
-          console.log('  ownerAddress:', escrowOwnerAddress);
-          console.log('  escrowSequence:', escrowDetails.sequence);
-          console.log('  condition:', escrowDetails.condition);
-          console.log('  fulfillment:', undefined);
-          console.log('  walletSecret provided:', !!escrowOwnerSecret);
           finishTxHash = await xrplEscrowService.finishEscrow({
-            ownerAddress: escrowOwnerAddress,
-            escrowSequence: escrowDetails.sequence,
-            condition: escrowDetails.condition,
-            fulfillment: undefined, // TODO: Implement fulfillment if condition exists
-            walletSecret: escrowOwnerSecret,
-          });
+            ownerAddress: platformAddress, // Original owner from EscrowCreate (always required)
+          escrowSequence: escrowDetails.sequence,
+            finisherAddress: finisherAddress, // Who is finishing (Owner or Destination)
+          condition: escrowDetails.condition,
+          fulfillment: undefined, // TODO: Implement fulfillment if condition exists
+            walletSecret: finisherSecret,
+        });
           console.log('[Escrow Release] Escrow finished on XRPL:', {
             txHash: finishTxHash,
-            escrowSequence: escrowDetails.sequence,
+          escrowSequence: escrowDetails.sequence,
+            finisherAddress: finisherAddress,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
