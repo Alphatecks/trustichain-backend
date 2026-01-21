@@ -35,6 +35,7 @@ export class WalletService {
         usd: number;
       };
     };
+    xrpl_address?: string | null;
     error?: string;
   }> {
     try {

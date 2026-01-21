@@ -116,6 +116,95 @@ export class EmailService {
       return { success: false, error: errorMessage };
     }
   }
+
+  /**
+   * Send password reset OTP email
+   * @param email - User email address
+   * @param otp - 6-digit OTP code
+   * @param fullName - User's full name
+   */
+  async sendPasswordResetOTP(
+    email: string,
+    otp: string,
+    fullName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend) {
+        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      console.log(`Attempting to send password reset OTP email to: ${email}`);
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: 'Password Reset OTP - TrustiChain',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Password Reset OTP</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: white; margin: 0;">Password Reset Request</h1>
+            </div>
+            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+              <p>Hi ${fullName},</p>
+              <p>You requested to reset your password. Use the OTP code below to reset your password:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <div style="background: white; border: 2px solid #667eea; border-radius: 5px; padding: 20px; display: inline-block;">
+                  <h2 style="color: #667eea; margin: 0; font-size: 32px; letter-spacing: 5px;">${otp}</h2>
+                </div>
+              </div>
+              <p style="font-size: 12px; color: #666;">
+                This OTP will expire in 15 minutes. If you didn't request a password reset, please ignore this email.
+              </p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Hi ${fullName},
+          
+          You requested to reset your password. Use this OTP code: ${otp}
+          
+          This OTP will expire in 15 minutes. If you didn't request a password reset, please ignore this email.
+          
+          © ${new Date().getFullYear()} TrustiChain. All rights reserved.
+        `,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+
+      console.log('Password reset OTP email sent successfully via Resend:', {
+        id: data?.id,
+        to: email,
+      });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send password reset OTP email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
 }
 
 export const emailService = new EmailService();

@@ -1531,7 +1531,7 @@ export class EscrowService {
             const xummPayload = await xummService.createPayload(escrowFinishTx.transaction);
 
             // Create pending transaction record
-            const { data: transaction } = await adminClient
+            await adminClient
               .from('transactions')
               .insert({
                 user_id: userId,
@@ -1552,7 +1552,7 @@ export class EscrowService {
                 requiresSigning: true,
                 xummUrl: xummPayload.next.always,
                 xummUuid: xummPayload.uuid,
-                qrCode: xummPayload.next.qr,
+                qrCode: xummPayload.refs?.qr_png || xummPayload.refs?.qr_uri || null,
                 instructions: 'Open the Xaman app and sign the EscrowFinish transaction to release the escrow funds.',
               } as any,
             };
