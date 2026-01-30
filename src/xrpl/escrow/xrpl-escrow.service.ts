@@ -410,26 +410,73 @@ export class XRPLEscrowService {
           return null;
         }
 
-        const txResult = txResponse.result as any;
-        const escrowSequence = txResult.Sequence as number;
+        // Add detailed logging to capture actual response structure
+        console.log('[XRPL] Raw txResponse structure:', {
+          hasResult: !!txResponse.result,
+          resultKeys: txResponse.result ? Object.keys(txResponse.result) : [],
+          resultType: typeof txResponse.result,
+          hasSequence: !!(txResponse.result as any)?.Sequence,
+          hasTx: !!(txResponse.result as any)?.tx,
+          fullResult: JSON.stringify(txResponse.result, null, 2).substring(0, 500), // First 500 chars for debugging
+        });
 
-        console.log('[XRPL] Transaction details from tx command:', {
+        const txResult = txResponse.result as any;
+        
+        // Try multiple possible paths for Sequence with defensive parsing
+        const escrowSequence = 
+          txResult.Sequence || 
+          txResult.tx?.Sequence || 
+          (txResponse.result as any).tx?.Sequence ||
+          null;
+
+        // Try multiple paths for other transaction fields
+        const transactionType = 
+          txResult.TransactionType || 
+          txResult.tx?.TransactionType ||
+          null;
+        
+        const account = 
+          txResult.Account || 
+          txResult.tx?.Account ||
+          null;
+        
+        const destination = 
+          txResult.Destination || 
+          txResult.tx?.Destination ||
+          null;
+        
+        const amount = 
+          txResult.Amount || 
+          txResult.tx?.Amount ||
+          null;
+
+        console.log('[XRPL] Transaction details from tx command (with fallback parsing):', {
           txHash,
-          transactionType: txResult.TransactionType,
+          transactionType,
           sequence: escrowSequence,
-          account: txResult.Account,
-          destination: txResult.Destination,
-          amount: txResult.Amount,
+          account,
+          destination,
+          amount,
+          parsingPath: {
+            sequence: txResult.Sequence ? 'txResult.Sequence' : (txResult.tx?.Sequence ? 'txResult.tx.Sequence' : 'not found'),
+            transactionType: txResult.TransactionType ? 'txResult.TransactionType' : (txResult.tx?.TransactionType ? 'txResult.tx.TransactionType' : 'not found'),
+          },
         });
 
         if (!escrowSequence) {
-          console.error('[XRPL] No sequence found in transaction:', txHash);
+          console.error('[XRPL] No sequence found in transaction after trying all paths:', {
+            txHash,
+            txResultKeys: Object.keys(txResult || {}),
+            txResultHasTx: !!txResult?.tx,
+            txResultTxKeys: txResult?.tx ? Object.keys(txResult.tx) : [],
+            fullTxResult: JSON.stringify(txResult, null, 2).substring(0, 1000), // First 1000 chars for debugging
+          });
           return null;
         }
 
         // Verify this is an EscrowCreate transaction
-        if (txResult.TransactionType !== 'EscrowCreate') {
-          console.error('[XRPL] Transaction is not EscrowCreate:', txResult.TransactionType);
+        if (transactionType !== 'EscrowCreate') {
+          console.error('[XRPL] Transaction is not EscrowCreate:', transactionType);
           return null;
         }
 
@@ -451,11 +498,11 @@ export class XRPLEscrowService {
 
         if (!escrowObject) {
           // Fallback: try matching by Destination and Amount if PreviousTxnID is missing
-          const txResult = txResponse.result as any;
+          // Use defensively parsed values
           escrowObject = escrowObjects.find(
             (obj: any) =>
-              (obj as any).Destination === txResult.Destination &&
-              (obj as any).Amount === txResult.Amount &&
+              (obj as any).Destination === destination &&
+              (obj as any).Amount === amount &&
               (obj as any).Account === ownerAddress
           ) as any;
           if (!escrowObject) {
@@ -508,10 +555,10 @@ export class XRPLEscrowService {
         });
 
         // Extract amount from escrow object (it's in drops)
-        const escrowAmount = (escrowObject as any).Amount;
+        const escrowAmountDrops = (escrowObject as any).Amount;
         // dropsToXrp expects a string, ensure it's always a string
-        const amountDropsStr: string = escrowAmount ? String(escrowAmount) : '0';
-        const amount = parseFloat((dropsToXrp as any)(amountDropsStr));
+        const amountDropsStr: string = escrowAmountDrops ? String(escrowAmountDrops) : '0';
+        const escrowAmountXrp = parseFloat((dropsToXrp as any)(amountDropsStr));
 
         // IMPORTANT: For EscrowFinish, OfferSequence must match the Sequence from the original EscrowCreate transaction
         // This is the account sequence number from the EscrowCreate transaction, NOT the escrow object sequence
@@ -519,7 +566,7 @@ export class XRPLEscrowService {
 
         return {
           sequence: escrowSequence, // Use transaction sequence (account sequence from EscrowCreate), not escrow object sequence
-          amount,
+          amount: escrowAmountXrp, // Use amount from escrow object (more reliable than transaction amount)
           destination: (escrowObject as any).Destination || '',
           finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
           cancelAfter: (escrowObject as any).CancelAfter ? ((escrowObject as any).CancelAfter as number) : undefined,
