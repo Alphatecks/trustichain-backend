@@ -1284,6 +1284,7 @@ export class EscrowService {
         if (!escrowDetails) {
           // Check if escrow was already finished by looking at transaction history
           // The escrow object not existing means it was already finished or cancelled
+          // OR the transaction was never validated
           try {
             const { Client } = await import('xrpl');
             const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
@@ -1295,60 +1296,96 @@ export class EscrowService {
             await client.connect();
             
             try {
-              // Get transaction details to find the sequence
-              const txResponse = await client.request({
-                command: 'tx',
-                transaction: escrow.xrpl_escrow_id,
-              });
+              // First, check if the transaction exists and was validated
+              let txResponse: any;
+              let transactionExists = false;
+              let transactionValidated = false;
               
-              if (txResponse.result) {
-                const txSequence = (txResponse.result as any).Sequence;
-                
-                // Check account transaction history for EscrowFinish/EscrowCancel
-                const accountTxResponse = await client.request({
-                  command: 'account_tx',
-                  account: platformAddress,
-                  ledger_index_min: -1,
-                  ledger_index_max: -1,
-                  limit: 200,
+              try {
+                txResponse = await client.request({
+                  command: 'tx',
+                  transaction: escrow.xrpl_escrow_id,
                 });
                 
-                const transactions = accountTxResponse.result.transactions || [];
-                const relatedTx = transactions.find((txData: any) => {
-                  const tx = txData.tx || txData;
-                  return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
-                         (tx as any).Owner === platformAddress &&
-                         (tx as any).OfferSequence === txSequence;
-                });
-                
-                if (relatedTx) {
-                  const tx = (relatedTx as any).tx || relatedTx;
-                  const wasFinished = (tx as any).TransactionType === 'EscrowFinish';
+                if (txResponse.result) {
+                  transactionExists = true;
+                  // Check if transaction was validated (has validated field or ledger_index)
+                  transactionValidated = !!(txResponse.result.validated || txResponse.result.ledger_index);
                   
-                  // Update database status if it's still showing as active
-                  if (escrow.status === 'active') {
-                    console.log(`[Escrow Release] Updating database: Escrow was already ${wasFinished ? 'finished' : 'cancelled'} on XRPL`);
-                    await adminClient
-                      .from('escrows')
-                      .update({
-                        status: wasFinished ? 'completed' : 'cancelled',
-                        completed_at: wasFinished ? new Date().toISOString() : null,
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', escrowId);
+                  if (!transactionValidated) {
+                    await client.disconnect();
+                    return {
+                      success: false,
+                      message: 'Cannot release escrow: The escrow creation transaction has not been validated on XRPL yet. Please wait a few moments and try again.',
+                      error: 'Transaction not validated',
+                    };
                   }
                   
-                  await client.disconnect();
+                  const txSequence = (txResponse.result as any).Sequence;
                   
-          return {
-            success: false,
-                    message: `Cannot release escrow: The escrow was already ${wasFinished ? 'finished' : 'cancelled'} on XRPL. The database status has been updated.`,
-                    error: `Escrow already ${wasFinished ? 'finished' : 'cancelled'}`,
-                  };
+                  // Check account transaction history for EscrowFinish/EscrowCancel
+                  const accountTxResponse = await client.request({
+                    command: 'account_tx',
+                    account: platformAddress,
+                    ledger_index_min: -1,
+                    ledger_index_max: -1,
+                    limit: 200,
+                  });
+                  
+                  const transactions = accountTxResponse.result.transactions || [];
+                  const relatedTx = transactions.find((txData: any) => {
+                    const tx = txData.tx || txData;
+                    return ((tx as any).TransactionType === 'EscrowFinish' || (tx as any).TransactionType === 'EscrowCancel') &&
+                           (tx as any).Owner === platformAddress &&
+                           (tx as any).OfferSequence === txSequence;
+                  });
+                  
+                  if (relatedTx) {
+                    const tx = (relatedTx as any).tx || relatedTx;
+                    const wasFinished = (tx as any).TransactionType === 'EscrowFinish';
+                    
+                    // Update database status if it's still showing as active
+                    if (escrow.status === 'active') {
+                      console.log(`[Escrow Release] Updating database: Escrow was already ${wasFinished ? 'finished' : 'cancelled'} on XRPL`);
+                      await adminClient
+                        .from('escrows')
+                        .update({
+                          status: wasFinished ? 'completed' : 'cancelled',
+                          completed_at: wasFinished ? new Date().toISOString() : null,
+                          updated_at: new Date().toISOString(),
+                        })
+                        .eq('id', escrowId);
+                    }
+                    
+                    await client.disconnect();
+                    
+                    return {
+                      success: false,
+                      message: `Cannot release escrow: The escrow was already ${wasFinished ? 'finished' : 'cancelled'} on XRPL. The database status has been updated.`,
+                      error: `Escrow already ${wasFinished ? 'finished' : 'cancelled'}`,
+                    };
+                  }
+                }
+              } catch (txError: any) {
+                // Transaction not found - might not have been validated or might have failed
+                const errorCode = txError?.data?.error;
+                if (errorCode === 'txnNotFound') {
+                  transactionExists = false;
+                } else {
+                  console.error('[Escrow Release] Error checking transaction:', txError);
                 }
               }
               
               await client.disconnect();
+              
+              // If transaction doesn't exist, the escrow was never created on XRPL
+              if (!transactionExists) {
+                return {
+                  success: false,
+                  message: 'Cannot release escrow: The escrow creation transaction was not found on XRPL. This may mean the transaction failed or was never validated. Please contact support if this escrow was recently created.',
+                  error: 'Transaction not found on XRPL',
+                };
+              }
             } catch (checkError) {
               await client.disconnect();
               console.error('[Escrow Release] Error checking escrow status:', checkError);
@@ -1359,7 +1396,7 @@ export class EscrowService {
           
           return {
             success: false,
-            message: 'Cannot release escrow: Escrow not found on XRPL. The escrow object does not exist, which means it was already finished or cancelled on the XRPL ledger. Please refresh your escrow list to see the updated status.',
+            message: 'Cannot release escrow: Escrow not found on XRPL. The escrow object does not exist, which means it was already finished or cancelled on the XRPL ledger, or the transaction was never validated. Please refresh your escrow list to see the updated status.',
             error: 'Escrow not found on XRPL - already finished or cancelled',
           };
         }
