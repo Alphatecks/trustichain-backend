@@ -419,14 +419,49 @@ export class EscrowService {
       // Convert Unix timestamp to Ripple Epoch by subtracting 946684800 seconds (30 years difference)
       const RIPPLE_EPOCH_OFFSET = 946684800; // Seconds between Unix Epoch (1970) and Ripple Epoch (2000)
       let finishAfter: number | undefined;
+      
+      console.log('[Escrow Create] Expected release date check:', {
+        hasExpectedReleaseDate: !!request.expectedReleaseDate,
+        expectedReleaseDate: request.expectedReleaseDate,
+        expectedReleaseDateType: typeof request.expectedReleaseDate,
+        releaseType: request.releaseType,
+      });
+      
       if (request.expectedReleaseDate) {
-        const unixTimestamp = Math.floor(new Date(request.expectedReleaseDate).getTime() / 1000);
-        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
+        const releaseDate = new Date(request.expectedReleaseDate);
+        const now = new Date();
+        
+        // Validate that the date is not in the past
+        if (releaseDate < now) {
+          console.warn('[Escrow Create] Expected release date is in the past, using default 30 days:', {
+            providedDate: request.expectedReleaseDate,
+            providedDateParsed: releaseDate.toISOString(),
+            currentDate: now.toISOString(),
+          });
+          // Use default instead of invalid past date
+          const unixTimestamp = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
+          finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
+        } else {
+          const unixTimestamp = Math.floor(releaseDate.getTime() / 1000);
+          finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
+          console.log('[Escrow Create] Using provided expected release date:', {
+            originalDate: request.expectedReleaseDate,
+            parsedDate: releaseDate.toISOString(),
+            unixTimestamp,
+            rippleEpoch: finishAfter,
+            rippleEpochDate: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+          });
+        }
       } else {
         // Default: 30 days from now (allows escrow to be released after this time)
         // This satisfies XRPL's requirement while allowing reasonable release time
         const unixTimestamp = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
         finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
+        console.log('[Escrow Create] Using default 30-day finishAfter:', {
+          unixTimestamp,
+          rippleEpoch: finishAfter,
+          rippleEpochDate: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+        });
       }
 
       console.log('[Escrow Create] Creating escrow on XRPL using platform wallet:', {
