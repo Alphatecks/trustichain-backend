@@ -1321,6 +1321,17 @@ export class EscrowService {
                     };
                   }
                   
+                  // Check if transaction was successful (not failed)
+                  const txResult = txResponse.result as any;
+                  if (txResult.meta && txResult.meta.TransactionResult && txResult.meta.TransactionResult !== 'tesSUCCESS') {
+                    await client.disconnect();
+                    return {
+                      success: false,
+                      message: `Cannot release escrow: The escrow creation transaction failed on XRPL with error: ${txResult.meta.TransactionResult}. The escrow was never created.`,
+                      error: 'Transaction failed',
+                    };
+                  }
+                  
                   const txSequence = (txResponse.result as any).Sequence;
                   
                   // Check account transaction history for EscrowFinish/EscrowCancel
@@ -1369,10 +1380,22 @@ export class EscrowService {
               } catch (txError: any) {
                 // Transaction not found - might not have been validated or might have failed
                 const errorCode = txError?.data?.error;
+                const errorMessage = txError?.data?.error_message || txError?.message;
+                
                 if (errorCode === 'txnNotFound') {
                   transactionExists = false;
+                  console.log('[Escrow Release] Transaction not found on XRPL:', {
+                    txHash: escrow.xrpl_escrow_id,
+                    errorCode,
+                    errorMessage,
+                  });
                 } else {
-                  console.error('[Escrow Release] Error checking transaction:', txError);
+                  console.error('[Escrow Release] Error checking transaction:', {
+                    txHash: escrow.xrpl_escrow_id,
+                    errorCode,
+                    errorMessage,
+                    fullError: txError,
+                  });
                 }
               }
               
