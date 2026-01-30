@@ -99,9 +99,43 @@ export class XRPLEscrowService {
           command: 'submit',
           tx_blob,
         });
+        
+        // Check if transaction was successful
+        // XRPL submit response can have status in different places:
+        // - submitResult.result.engine_result or submitResult.result.engine_result_code
+        // - submitResult.result.tx_json.meta.TransactionResult (after validation)
+        const engineResult = submitResult.result.engine_result || submitResult.result.engine_result_code;
+        const txResult = submitResult.result.tx_json?.meta?.TransactionResult;
+        
+        console.log('[XRPL Escrow Create] Submit result:', {
+          engineResult,
+          txResult,
+          hasHash: !!(submitResult.result.tx_json?.hash || submitResult.result.hash),
+          fullResult: JSON.stringify(submitResult.result, null, 2).substring(0, 500),
+        });
+        
+        // Check for transaction failure
+        // tec* codes are temporary failures, ter* are retryable, tesSUCCESS is success
+        if (engineResult && !engineResult.startsWith('tes') && engineResult !== 'terQUEUED') {
+          await client.disconnect();
+          throw new Error(`Escrow creation transaction failed: ${engineResult}. This usually means the account doesn't have enough XRP to cover the escrow amount and transaction fee.`);
+        }
+        
+        // If we have a validated transaction result, check it
+        if (txResult && txResult !== 'tesSUCCESS') {
+          await client.disconnect();
+          throw new Error(`Escrow creation transaction failed: ${txResult}. The escrow was not created on XRPL.`);
+        }
+        
         await client.disconnect();
+        
         // Wait for validation (simplified, production should poll for tx result)
         const realTxHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
+        
+        if (!realTxHash) {
+          throw new Error('Transaction submitted but no hash returned. Transaction may have failed.');
+        }
+        
         return realTxHash;
       } catch (error) {
         await client.disconnect();
