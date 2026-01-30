@@ -44,9 +44,18 @@ export class WalletService {
         .from('wallets')
         .select('balance_xrp, balance_usdt, balance_usdc, xrpl_address')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
-      if (error || !wallet) {
+      if (error) {
+        console.error('Error fetching wallet:', error);
+        return {
+          success: false,
+          message: 'Failed to fetch wallet',
+          error: error.message || 'Database error',
+        };
+      }
+
+      if (!wallet) {
         return {
           success: false,
           message: 'Wallet not found',
@@ -134,8 +143,12 @@ export class WalletService {
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
-        .single();
-      if (walletError || !currentWallet) {
+        .maybeSingle();
+      if (walletError) {
+        console.error('Error checking wallet:', walletError);
+        return { success: false, message: 'Failed to check wallet', error: 'Database error' };
+      }
+      if (!currentWallet) {
         const { error: createError } = await adminClient
           .from('wallets')
           .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
@@ -173,8 +186,12 @@ export class WalletService {
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
-        .single();
-      if (walletError || !currentWallet) {
+        .maybeSingle();
+      if (walletError) {
+        console.error('Error checking wallet:', walletError);
+        return { success: false, message: 'Failed to check wallet', error: 'Database error' };
+      }
+      if (!currentWallet) {
         return { success: false, message: 'No wallet found to disconnect', error: 'Wallet not found' };
       }
       const previousAddress = currentWallet.xrpl_address;
