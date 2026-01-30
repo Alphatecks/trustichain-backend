@@ -422,8 +422,10 @@ export class XRPLEscrowService {
 
         const txResult = txResponse.result as any;
         
+        // The XRPL tx command returns transaction data in tx_json field
         // Try multiple possible paths for Sequence with defensive parsing
         const escrowSequence = 
+          txResult.tx_json?.Sequence || 
           txResult.Sequence || 
           txResult.tx?.Sequence || 
           (txResponse.result as any).tx?.Sequence ||
@@ -431,21 +433,25 @@ export class XRPLEscrowService {
 
         // Try multiple paths for other transaction fields
         const transactionType = 
+          txResult.tx_json?.TransactionType || 
           txResult.TransactionType || 
           txResult.tx?.TransactionType ||
           null;
         
         const account = 
+          txResult.tx_json?.Account || 
           txResult.Account || 
           txResult.tx?.Account ||
           null;
         
         const destination = 
+          txResult.tx_json?.Destination || 
           txResult.Destination || 
           txResult.tx?.Destination ||
           null;
         
         const amount = 
+          txResult.tx_json?.Amount || 
           txResult.Amount || 
           txResult.tx?.Amount ||
           null;
@@ -458,8 +464,8 @@ export class XRPLEscrowService {
           destination,
           amount,
           parsingPath: {
-            sequence: txResult.Sequence ? 'txResult.Sequence' : (txResult.tx?.Sequence ? 'txResult.tx.Sequence' : 'not found'),
-            transactionType: txResult.TransactionType ? 'txResult.TransactionType' : (txResult.tx?.TransactionType ? 'txResult.tx.TransactionType' : 'not found'),
+            sequence: txResult.tx_json?.Sequence ? 'txResult.tx_json.Sequence' : (txResult.Sequence ? 'txResult.Sequence' : (txResult.tx?.Sequence ? 'txResult.tx.Sequence' : 'not found')),
+            transactionType: txResult.tx_json?.TransactionType ? 'txResult.tx_json.TransactionType' : (txResult.TransactionType ? 'txResult.TransactionType' : (txResult.tx?.TransactionType ? 'txResult.tx.TransactionType' : 'not found')),
           },
         });
 
