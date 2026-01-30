@@ -415,13 +415,18 @@ export class EscrowService {
       // The platform wallet signs the transaction directly, no XUMM needed
       // XRPL requires either FinishAfter or CancelAfter to be specified
       // Use expectedReleaseDate if provided, otherwise set a default (30 days from now)
+      // XRPL uses Ripple Epoch (seconds since Jan 1, 2000), not Unix Epoch (seconds since Jan 1, 1970)
+      // Convert Unix timestamp to Ripple Epoch by subtracting 946684800 seconds (30 years difference)
+      const RIPPLE_EPOCH_OFFSET = 946684800; // Seconds between Unix Epoch (1970) and Ripple Epoch (2000)
       let finishAfter: number | undefined;
       if (request.expectedReleaseDate) {
-        finishAfter = Math.floor(new Date(request.expectedReleaseDate).getTime() / 1000);
+        const unixTimestamp = Math.floor(new Date(request.expectedReleaseDate).getTime() / 1000);
+        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
       } else {
         // Default: 30 days from now (allows escrow to be released after this time)
         // This satisfies XRPL's requirement while allowing reasonable release time
-        finishAfter = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
+        const unixTimestamp = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
+        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
       }
 
       console.log('[Escrow Create] Creating escrow on XRPL using platform wallet:', {
