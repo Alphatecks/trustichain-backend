@@ -107,10 +107,14 @@ export class XRPLEscrowService {
         const engineResult = submitResult.result.engine_result || submitResult.result.engine_result_code;
         const txResult = submitResult.result.tx_json?.meta?.TransactionResult;
         
+        // Wait for validation (simplified, production should poll for tx result)
+        const realTxHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
+        
         console.log('[XRPL Escrow Create] Submit result:', {
           engineResult,
           txResult,
-          hasHash: !!(submitResult.result.tx_json?.hash || submitResult.result.hash),
+          txHash: realTxHash,
+          hasHash: !!realTxHash,
           fullResult: JSON.stringify(submitResult.result, null, 2).substring(0, 500),
         });
         
@@ -129,12 +133,11 @@ export class XRPLEscrowService {
         
         await client.disconnect();
         
-        // Wait for validation (simplified, production should poll for tx result)
-        const realTxHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
-        
         if (!realTxHash) {
           throw new Error('Transaction submitted but no hash returned. Transaction may have failed.');
         }
+        
+        console.log('[XRPL Escrow Create] Transaction successful, returning hash:', realTxHash);
         
         return realTxHash;
       } catch (error) {
