@@ -239,10 +239,42 @@ export class XRPLEscrowService {
           command: 'submit',
           tx_blob,
         });
-        await client.disconnect();
-        // Wait for validation (simplified, production should poll for tx result)
+        
+        // Check if transaction was successful
+        const engineResult = submitResult.result.engine_result || submitResult.result.engine_result_code;
+        const txResult = submitResult.result.tx_json?.meta?.TransactionResult;
         const txHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
-        // For production, check txResult for success
+        
+        console.log('[XRPL Escrow Finish] Submit result:', {
+          engineResult,
+          txResult,
+          txHash,
+          hasHash: !!txHash,
+          ownerAddress: params.ownerAddress,
+          finisherAddress: params.finisherAddress || params.ownerAddress,
+          escrowSequence: params.escrowSequence,
+        });
+        
+        // Check for transaction failure
+        if (engineResult && !engineResult.startsWith('tes') && engineResult !== 'terQUEUED') {
+          await client.disconnect();
+          throw new Error(`EscrowFinish transaction failed: ${engineResult}. The escrow was not released.`);
+        }
+        
+        // If we have a validated transaction result, check it
+        if (txResult && txResult !== 'tesSUCCESS') {
+          await client.disconnect();
+          throw new Error(`EscrowFinish transaction failed: ${txResult}. The escrow was not released.`);
+        }
+        
+        await client.disconnect();
+        
+        if (!txHash) {
+          throw new Error('Transaction submitted but no hash returned. Transaction may have failed.');
+        }
+        
+        console.log('[XRPL Escrow Finish] Transaction successful, returning hash:', txHash);
+        
         return txHash;
       } catch (error) {
         await client.disconnect();
