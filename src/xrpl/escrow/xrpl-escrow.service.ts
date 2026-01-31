@@ -151,6 +151,208 @@ export class XRPLEscrowService {
   }
 
   /**
+   * Verify that an escrow exists on XRPL before attempting to finish it
+   * Returns escrow details if found, null if not found or already finished/cancelled
+   */
+  async verifyEscrowExists(params: {
+    ownerAddress: string;
+    escrowSequence: number;
+    finisherAddress?: string;
+    expectedTxHash?: string;
+  }): Promise<{
+    exists: boolean;
+    escrowObject?: any;
+    finishAfter?: number;
+    cancelAfter?: number;
+    condition?: string;
+    destination?: string;
+    alreadyFinished?: boolean;
+    alreadyCancelled?: boolean;
+    error?: string;
+  }> {
+    const client = new Client(this.XRPL_SERVER);
+    await client.connect();
+
+    try {
+      const finisherAddress = params.finisherAddress || params.ownerAddress;
+
+      // Query account_objects to find escrow
+      const accountObjectsResponse = await (client as any).request({
+        command: 'account_objects',
+        account: params.ownerAddress,
+        type: 'escrow',
+      });
+
+      const escrowObjects = accountObjectsResponse.result.account_objects || [];
+      console.log(`[XRPL Escrow Verification] Found ${escrowObjects.length} escrow objects for owner ${params.ownerAddress}`);
+
+      // Find escrow by matching the transaction sequence
+      // We need to check account_tx to find which escrow object corresponds to the sequence
+      // The OfferSequence in EscrowFinish must match the Sequence from EscrowCreate transaction
+      let matchingEscrow: any = null;
+
+      // First, try to find by PreviousTxnID if we have the expected transaction hash
+      if (params.expectedTxHash) {
+        matchingEscrow = escrowObjects.find(
+          (obj: any) => (obj as any).PreviousTxnID === params.expectedTxHash && (obj as any).Account === params.ownerAddress
+        ) as any;
+        
+        if (matchingEscrow) {
+          console.log('[XRPL Escrow Verification] Found escrow by PreviousTxnID:', {
+            PreviousTxnID: (matchingEscrow as any).PreviousTxnID,
+            ObjectSequence: (matchingEscrow as any).Sequence,
+            TransactionSequence: params.escrowSequence,
+          });
+        }
+      }
+
+      // If not found by PreviousTxnID, we need to verify the sequence matches
+      // by checking transaction history to find which escrow object was created with this sequence
+      if (!matchingEscrow) {
+        try {
+          const accountTxResponse = await (client as any).request({
+            command: 'account_tx',
+            account: params.ownerAddress,
+            ledger_index_min: -1,
+            ledger_index_max: -1,
+            limit: 200,
+          });
+
+          const transactions = accountTxResponse.result.transactions || [];
+          
+          // Find the EscrowCreate transaction with the matching sequence
+          const createTx = transactions.find((txData: any) => {
+            const tx = txData.tx || txData;
+            return (tx as any).TransactionType === 'EscrowCreate' &&
+                   (tx as any).Account === params.ownerAddress &&
+                   (tx as any).Sequence === params.escrowSequence;
+          });
+
+          if (createTx) {
+            const tx = (createTx as any).tx || createTx;
+            const createTxHash = (tx as any).hash || (createTx as any).hash;
+            
+            // Now find the escrow object with this PreviousTxnID
+            matchingEscrow = escrowObjects.find(
+              (obj: any) => (obj as any).PreviousTxnID === createTxHash && (obj as any).Account === params.ownerAddress
+            ) as any;
+
+            if (matchingEscrow) {
+              console.log('[XRPL Escrow Verification] Found escrow by transaction sequence:', {
+                PreviousTxnID: (matchingEscrow as any).PreviousTxnID,
+                ObjectSequence: (matchingEscrow as any).Sequence,
+                TransactionSequence: params.escrowSequence,
+              });
+            }
+          }
+        } catch (txError) {
+          console.warn('[XRPL Escrow Verification] Could not check transaction history:', txError);
+        }
+      }
+
+      // Check if escrow was already finished or cancelled
+      if (!matchingEscrow) {
+        try {
+          const accountTxResponse = await (client as any).request({
+            command: 'account_tx',
+            account: params.ownerAddress,
+            ledger_index_min: -1,
+            ledger_index_max: -1,
+            limit: 200,
+          });
+
+          const transactions = accountTxResponse.result.transactions || [];
+          
+          const finishTx = transactions.find((txData: any) => {
+            const tx = txData.tx || txData;
+            return (tx as any).TransactionType === 'EscrowFinish' &&
+                   (tx as any).Owner === params.ownerAddress &&
+                   (tx as any).OfferSequence === params.escrowSequence;
+          });
+
+          const cancelTx = transactions.find((txData: any) => {
+            const tx = txData.tx || txData;
+            return (tx as any).TransactionType === 'EscrowCancel' &&
+                   (tx as any).Owner === params.ownerAddress &&
+                   (tx as any).OfferSequence === params.escrowSequence;
+          });
+
+          if (finishTx) {
+            return {
+              exists: false,
+              alreadyFinished: true,
+              error: `Escrow with sequence ${params.escrowSequence} for owner ${params.ownerAddress} has already been finished`,
+            };
+          }
+
+          if (cancelTx) {
+            return {
+              exists: false,
+              alreadyCancelled: true,
+              error: `Escrow with sequence ${params.escrowSequence} for owner ${params.ownerAddress} has already been cancelled`,
+            };
+          }
+        } catch (txError) {
+          console.warn('[XRPL Escrow Verification] Could not check if escrow was finished/cancelled:', txError);
+        }
+
+        return {
+          exists: false,
+          error: `Escrow not found with sequence ${params.escrowSequence} for owner ${params.ownerAddress}. The escrow may not exist or the sequence number is incorrect.`,
+        };
+      }
+
+      // Verify permissions: check FinishAfter if finisher is Owner
+      const finishAfter = (matchingEscrow as any).FinishAfter ? ((matchingEscrow as any).FinishAfter as number) : undefined;
+      const cancelAfter = (matchingEscrow as any).CancelAfter ? ((matchingEscrow as any).CancelAfter as number) : undefined;
+      const condition = (matchingEscrow as any).Condition || undefined;
+      const destination = (matchingEscrow as any).Destination || undefined;
+
+      // If Owner is trying to finish before FinishAfter, they don't have permission
+      if (finishAfter && finisherAddress === params.ownerAddress) {
+        try {
+          const ledgerResponse = await (client as any).request({
+            command: 'ledger',
+            ledger_index: 'validated',
+          });
+          const currentLedgerTime = ledgerResponse.result.ledger.close_time;
+          
+          if (currentLedgerTime < finishAfter) {
+            return {
+              exists: true,
+              escrowObject: matchingEscrow,
+              finishAfter,
+              cancelAfter,
+              condition,
+              destination,
+              error: `Insufficient permissions: FinishAfter time (${new Date((finishAfter + 946684800) * 1000).toISOString()}) not reached. Only the destination can finish before this time.`,
+            };
+          }
+        } catch (ledgerError) {
+          console.warn('[XRPL Escrow Verification] Could not check ledger time:', ledgerError);
+        }
+      }
+
+      return {
+        exists: true,
+        escrowObject: matchingEscrow,
+        finishAfter,
+        cancelAfter,
+        condition,
+        destination,
+      };
+    } catch (error) {
+      console.error('[XRPL Escrow Verification] Error verifying escrow:', error);
+      return {
+        exists: false,
+        error: error instanceof Error ? error.message : 'Unknown error verifying escrow',
+      };
+    } finally {
+      await client.disconnect();
+    }
+  }
+
+  /**
    * Finish (release) an escrow
    * Note: This requires wallet secret for signing. In production, handle securely.
    * For user-signed transactions, use prepareEscrowFinishTransaction instead.
@@ -161,6 +363,7 @@ export class XRPLEscrowService {
    * @param params.condition - Optional condition if escrow was created with one
    * @param params.fulfillment - Optional fulfillment if escrow has a condition
    * @param params.walletSecret - Secret of the finisher (Owner or Destination)
+   * @param params.expectedTxHash - Optional transaction hash to help verify escrow exists
    */
   async finishEscrow(params: {
     ownerAddress: string;
@@ -169,6 +372,7 @@ export class XRPLEscrowService {
     condition?: string;
     fulfillment?: string;
     walletSecret?: string;
+    expectedTxHash?: string; // Optional: transaction hash to help verify escrow
   }): Promise<string> {
     try {
       if (!params.walletSecret) {
@@ -191,6 +395,46 @@ export class XRPLEscrowService {
           );
         }
 
+        // Verify escrow exists before attempting to finish
+        console.log('[XRPL Escrow Finish] Verifying escrow exists before finishing:', {
+          ownerAddress: params.ownerAddress,
+          finisherAddress,
+          escrowSequence: params.escrowSequence,
+          expectedTxHash: params.expectedTxHash,
+        });
+
+        const verification = await this.verifyEscrowExists({
+          ownerAddress: params.ownerAddress,
+          escrowSequence: params.escrowSequence,
+          finisherAddress,
+          expectedTxHash: params.expectedTxHash,
+        });
+
+        if (!verification.exists) {
+          if (verification.alreadyFinished) {
+            throw new Error(`Escrow with sequence ${params.escrowSequence} for owner ${params.ownerAddress} has already been finished.`);
+          }
+          if (verification.alreadyCancelled) {
+            throw new Error(`Escrow with sequence ${params.escrowSequence} for owner ${params.ownerAddress} has already been cancelled.`);
+          }
+          throw new Error(verification.error || `Escrow not found with sequence ${params.escrowSequence} for owner ${params.ownerAddress}. The sequence number may be incorrect.`);
+        }
+
+        if (verification.error) {
+          throw new Error(verification.error);
+        }
+
+        // Use condition from verification if not provided
+        const conditionToUse = params.condition || verification.condition;
+
+        console.log('[XRPL Escrow Finish] Escrow verified, proceeding with transaction:', {
+          ownerAddress: params.ownerAddress,
+          finisherAddress,
+          escrowSequence: params.escrowSequence,
+          hasCondition: !!conditionToUse,
+          finishAfter: verification.finishAfter,
+        });
+
         // EscrowFinish transaction structure:
         // - Account: The account submitting the transaction (Owner or Destination)
         // - Owner: The original owner address from EscrowCreate (always required)
@@ -203,8 +447,8 @@ export class XRPLEscrowService {
         };
 
         // Add condition and fulfillment if provided
-        if (params.condition) {
-          escrowFinish.Condition = params.condition;
+        if (conditionToUse) {
+          escrowFinish.Condition = conditionToUse;
         }
         if (params.fulfillment) {
           escrowFinish.Fulfillment = params.fulfillment;
@@ -257,6 +501,15 @@ export class XRPLEscrowService {
         
         // Check for transaction failure
         if (engineResult && !engineResult.startsWith('tes') && engineResult !== 'terQUEUED') {
+          let errorMessage = `EscrowFinish transaction failed: ${engineResult}. The escrow was not released.`;
+          
+          // Provide more specific error messages for common error codes
+          if (engineResult === 'tecNO_PERMISSION') {
+            errorMessage = `EscrowFinish transaction failed: tecNO_PERMISSION. No permission to finish escrow with sequence ${params.escrowSequence} for owner ${params.ownerAddress}. This usually means: (1) The sequence number doesn't match any escrow created by the owner, (2) The FinishAfter time hasn't been reached and the finisher doesn't have permission, or (3) The escrow has already been finished or cancelled.`;
+          } else if (engineResult === 'tecNO_ENTRY') {
+            errorMessage = `EscrowFinish transaction failed: tecNO_ENTRY. Escrow with sequence ${params.escrowSequence} for owner ${params.ownerAddress} not found. The escrow may have already been finished or cancelled, or the sequence number is incorrect.`;
+          }
+          
           console.error('[XRPL Escrow Finish] Transaction failed:', {
             engineResult,
             txResult,
@@ -268,7 +521,7 @@ export class XRPLEscrowService {
             fullSubmitResult: JSON.stringify(submitResult.result, null, 2).substring(0, 1000),
           });
           await client.disconnect();
-          throw new Error(`EscrowFinish transaction failed: ${engineResult}. The escrow was not released.`);
+          throw new Error(errorMessage);
         }
         
         // If we have a validated transaction result, check it
@@ -541,12 +794,25 @@ export class XRPLEscrowService {
         
         // The XRPL tx command returns transaction data in tx_json field
         // Try multiple possible paths for Sequence with defensive parsing
-        const escrowSequence = 
+        // The correct path is usually tx_json.Sequence for the tx command
+        let escrowSequence = 
           txResult.tx_json?.Sequence || 
           txResult.Sequence || 
           txResult.tx?.Sequence || 
           (txResponse.result as any).tx?.Sequence ||
           null;
+
+        // Log which path was used for debugging
+        let sequenceSource = 'unknown';
+        if (txResult.tx_json?.Sequence) {
+          sequenceSource = 'tx_json.Sequence';
+        } else if (txResult.Sequence) {
+          sequenceSource = 'txResult.Sequence';
+        } else if (txResult.tx?.Sequence) {
+          sequenceSource = 'txResult.tx.Sequence';
+        } else if ((txResponse.result as any).tx?.Sequence) {
+          sequenceSource = 'txResponse.result.tx.Sequence';
+        }
 
         // Try multiple paths for other transaction fields
         const transactionType = 
@@ -577,11 +843,12 @@ export class XRPLEscrowService {
           txHash,
           transactionType,
           sequence: escrowSequence,
+          sequenceSource,
           account,
           destination,
           amount,
           parsingPath: {
-            sequence: txResult.tx_json?.Sequence ? 'txResult.tx_json.Sequence' : (txResult.Sequence ? 'txResult.Sequence' : (txResult.tx?.Sequence ? 'txResult.tx.Sequence' : 'not found')),
+            sequence: sequenceSource,
             transactionType: txResult.tx_json?.TransactionType ? 'txResult.tx_json.TransactionType' : (txResult.TransactionType ? 'txResult.TransactionType' : (txResult.tx?.TransactionType ? 'txResult.tx.TransactionType' : 'not found')),
           },
         });
@@ -594,7 +861,53 @@ export class XRPLEscrowService {
             txResultTxKeys: txResult?.tx ? Object.keys(txResult.tx) : [],
             fullTxResult: JSON.stringify(txResult, null, 2).substring(0, 1000), // First 1000 chars for debugging
           });
-          return null;
+          
+          // Fallback: Try to get sequence from account_objects by matching PreviousTxnID
+          console.log('[XRPL] Attempting fallback: querying account_objects to find sequence by PreviousTxnID');
+          try {
+            const accountObjectsResponse = await (client as any).request({
+              command: 'account_objects',
+              account: ownerAddress,
+              type: 'escrow',
+            });
+            
+            const escrowObjects = accountObjectsResponse.result.account_objects || [];
+            const escrowByTxHash = escrowObjects.find(
+              (obj: any) => (obj as any).PreviousTxnID === txHash && (obj as any).Account === ownerAddress
+            ) as any;
+            
+            if (escrowByTxHash) {
+              // If we found the escrow object, we still need the transaction sequence
+              // Try to get it from account_tx by finding the EscrowCreate transaction
+              const accountTxResponse = await (client as any).request({
+                command: 'account_tx',
+                account: ownerAddress,
+                ledger_index_min: -1,
+                ledger_index_max: -1,
+                limit: 200,
+              });
+              
+              const transactions = accountTxResponse.result.transactions || [];
+              const createTx = transactions.find((txData: any) => {
+                const tx = txData.tx || txData;
+                return (tx as any).TransactionType === 'EscrowCreate' &&
+                       ((tx as any).hash === txHash || (txData as any).hash === txHash);
+              });
+              
+              if (createTx) {
+                const tx = (createTx as any).tx || createTx;
+                escrowSequence = (tx as any).Sequence;
+                sequenceSource = 'account_tx fallback';
+                console.log('[XRPL] Found sequence via account_tx fallback:', escrowSequence);
+              }
+            }
+          } catch (fallbackError) {
+            console.warn('[XRPL] Fallback sequence lookup failed:', fallbackError);
+          }
+          
+          if (!escrowSequence) {
+            return null;
+          }
         }
 
         // Verify this is an EscrowCreate transaction

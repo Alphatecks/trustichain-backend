@@ -1682,18 +1682,102 @@ export class EscrowService {
           finisherAddress: finisherAddress,
           isFinishingAsDestination: isFinishingAsDestination,
           finishAfterPassed: finishAfterPassed,
+          txHash: escrow.xrpl_escrow_id,
         });
+
+        // Pre-finish verification: Verify escrow exists on XRPL before attempting to finish
+        console.log('[Escrow Release] Performing pre-finish verification...');
+        try {
+          const verification = await xrplEscrowService.verifyEscrowExists({
+            ownerAddress: platformAddress,
+            escrowSequence: escrowDetails.sequence,
+            finisherAddress: finisherAddress,
+            expectedTxHash: escrow.xrpl_escrow_id || undefined,
+          });
+
+          if (!verification.exists) {
+            if (verification.alreadyFinished) {
+              // Update database to reflect that escrow is already finished
+              await adminClient
+                .from('escrows')
+                .update({
+                  status: 'completed',
+                  progress: 100,
+                  completed_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', escrowId);
+
+              return {
+                success: false,
+                message: `Cannot release escrow: The escrow has already been finished on XRPL. The database status has been updated.`,
+                error: 'Escrow already finished',
+              };
+            }
+
+            if (verification.alreadyCancelled) {
+              // Update database to reflect that escrow is already cancelled
+              await adminClient
+                .from('escrows')
+                .update({
+                  status: 'cancelled',
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', escrowId);
+
+              return {
+                success: false,
+                message: `Cannot release escrow: The escrow has already been cancelled on XRPL. The database status has been updated.`,
+                error: 'Escrow already cancelled',
+              };
+            }
+
+            return {
+              success: false,
+              message: verification.error || `Cannot release escrow: Escrow not found on XRPL with sequence ${escrowDetails.sequence}. The sequence number may be incorrect.`,
+              error: 'Escrow not found on XRPL',
+            };
+          }
+
+          if (verification.error) {
+            return {
+              success: false,
+              message: verification.error,
+              error: 'Escrow verification failed',
+            };
+          }
+
+          // Verify escrow details match
+          if (verification.destination && verification.destination !== escrowDetails.destination) {
+            console.warn('[Escrow Release] Destination mismatch:', {
+              verificationDestination: verification.destination,
+              escrowDetailsDestination: escrowDetails.destination,
+            });
+          }
+
+          console.log('[Escrow Release] Pre-finish verification passed:', {
+            exists: verification.exists,
+            hasFinishAfter: !!verification.finishAfter,
+            hasCondition: !!verification.condition,
+            destination: verification.destination,
+          });
+        } catch (verificationError) {
+          console.error('[Escrow Release] Pre-finish verification error:', verificationError);
+          // Continue with finish attempt, but log the error
+          console.warn('[Escrow Release] Continuing with finish attempt despite verification error');
+        }
 
         let finishTxHash: string;
         try {
           finishTxHash = await xrplEscrowService.finishEscrow({
             ownerAddress: platformAddress, // Original owner from EscrowCreate (always required)
-          escrowSequence: escrowDetails.sequence,
+            escrowSequence: escrowDetails.sequence,
             finisherAddress: finisherAddress, // Who is finishing (Owner or Destination)
-          condition: escrowDetails.condition,
-          fulfillment: undefined, // TODO: Implement fulfillment if condition exists
+            condition: escrowDetails.condition,
+            fulfillment: undefined, // TODO: Implement fulfillment if condition exists
             walletSecret: finisherSecret,
-        });
+            expectedTxHash: escrow.xrpl_escrow_id || undefined, // Pass transaction hash to help verification
+          });
           console.log('[Escrow Release] Escrow finished on XRPL:', {
             txHash: finishTxHash,
           escrowSequence: escrowDetails.sequence,
