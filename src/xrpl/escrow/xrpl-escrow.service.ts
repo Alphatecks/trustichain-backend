@@ -257,12 +257,32 @@ export class XRPLEscrowService {
         
         // Check for transaction failure
         if (engineResult && !engineResult.startsWith('tes') && engineResult !== 'terQUEUED') {
+          console.error('[XRPL Escrow Finish] Transaction failed:', {
+            engineResult,
+            txResult,
+            txHash,
+            ownerAddress: params.ownerAddress,
+            finisherAddress: params.finisherAddress || params.ownerAddress,
+            escrowSequence: params.escrowSequence,
+            errorCode: engineResult,
+            fullSubmitResult: JSON.stringify(submitResult.result, null, 2).substring(0, 1000),
+          });
           await client.disconnect();
           throw new Error(`EscrowFinish transaction failed: ${engineResult}. The escrow was not released.`);
         }
         
         // If we have a validated transaction result, check it
         if (txResult && txResult !== 'tesSUCCESS') {
+          console.error('[XRPL Escrow Finish] Transaction validation failed:', {
+            engineResult,
+            txResult,
+            txHash,
+            ownerAddress: params.ownerAddress,
+            finisherAddress: params.finisherAddress || params.ownerAddress,
+            escrowSequence: params.escrowSequence,
+            errorCode: txResult,
+            fullSubmitResult: JSON.stringify(submitResult.result, null, 2).substring(0, 1000),
+          });
           await client.disconnect();
           throw new Error(`EscrowFinish transaction failed: ${txResult}. The escrow was not released.`);
         }
@@ -270,6 +290,17 @@ export class XRPLEscrowService {
         await client.disconnect();
         
         if (!txHash) {
+          console.error('[XRPL Escrow Finish] No transaction hash returned:', {
+            engineResult,
+            txResult,
+            hasTxJson: !!submitResult.result.tx_json,
+            hasHash: !!submitResult.result.hash,
+            fullSubmitResult: JSON.stringify(submitResult.result, null, 2).substring(0, 1000),
+            ownerAddress: params.ownerAddress,
+            finisherAddress: params.finisherAddress || params.ownerAddress,
+            escrowSequence: params.escrowSequence,
+          });
+          await client.disconnect();
           throw new Error('Transaction submitted but no hash returned. Transaction may have failed.');
         }
         
@@ -278,10 +309,27 @@ export class XRPLEscrowService {
         return txHash;
       } catch (error) {
         await client.disconnect();
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('[XRPL Escrow Finish] Error in finishEscrow inner try block:', {
+          error: errorMessage,
+          errorName: error instanceof Error ? error.name : 'Unknown',
+          errorStack: error instanceof Error ? error.stack : undefined,
+          ownerAddress: params.ownerAddress,
+          finisherAddress: params.finisherAddress || params.ownerAddress,
+          escrowSequence: params.escrowSequence,
+        });
         throw error;
       }
     } catch (error) {
-      console.error('[XRPL] Error finishing escrow:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[XRPL] Error finishing escrow (outer catch):', {
+        error: errorMessage,
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorStack: error instanceof Error ? error.stack : undefined,
+        ownerAddress: params.ownerAddress,
+        finisherAddress: params.finisherAddress || params.ownerAddress,
+        escrowSequence: params.escrowSequence,
+      });
       throw error;
     }
   }

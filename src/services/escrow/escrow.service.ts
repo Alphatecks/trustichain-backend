@@ -1701,7 +1701,16 @@ export class EscrowService {
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[Escrow Release] Failed to finish escrow on XRPL:', errorMessage);
+          console.error('[Escrow Release] Failed to finish escrow on XRPL:', {
+            error: errorMessage,
+            errorName: error instanceof Error ? error.name : 'Unknown',
+            errorStack: error instanceof Error ? error.stack : undefined,
+            escrowId,
+            escrowSequence: escrowDetails.sequence,
+            ownerAddress: platformAddress,
+            finisherAddress: finisherAddress,
+            isFinishingAsDestination,
+          });
           throw new Error(`Failed to finish escrow on XRPL: ${errorMessage}`);
         }
 
