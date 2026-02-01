@@ -473,10 +473,14 @@ export class XRPLEscrowService {
         // Use condition from verification if not provided
         const conditionToUse = params.condition || verification.condition;
 
-        // Additional validation: Verify sequence by looking up EscrowCreate transaction
+        // COMPREHENSIVE VERIFICATION: Multiple checks before submitting
         let actualTxSequence: number | null = null;
+        let verificationDetails: any = {};
+
         if (params.expectedTxHash) {
           try {
+            // Verification 1: Query EscrowCreate transaction directly
+            console.log('[XRPL Escrow Finish] Verification Step 1: Querying EscrowCreate transaction directly...');
             const txResponse = await (client as any).request({
               command: 'tx',
               transaction: params.expectedTxHash,
@@ -490,10 +494,40 @@ export class XRPLEscrowService {
                 txResult.tx?.Sequence ||
                 null;
 
+              const txAccount = txResult.tx_json?.Account || txResult.Account || txResult.tx?.Account;
+              const txDestination = txResult.tx_json?.Destination || txResult.Destination || txResult.tx?.Destination;
+              const txAmount = txResult.tx_json?.Amount || txResult.Amount || txResult.tx?.Amount;
+              const txFinishAfter = txResult.tx_json?.FinishAfter || txResult.FinishAfter || txResult.tx?.FinishAfter;
+              const txCondition = txResult.tx_json?.Condition || txResult.Condition || txResult.tx?.Condition;
+
+              verificationDetails.escrowCreateTx = {
+                sequence: actualTxSequence,
+                account: txAccount,
+                destination: txDestination,
+                amount: txAmount,
+                finishAfter: txFinishAfter,
+                condition: txCondition,
+                hash: params.expectedTxHash,
+              };
+
+              console.log('[XRPL Escrow Finish] EscrowCreate transaction details:', verificationDetails.escrowCreateTx);
+
               if (actualTxSequence !== null && actualTxSequence !== params.escrowSequence) {
                 await client.disconnect();
                 throw new Error(
                   `Sequence mismatch: The provided sequence ${params.escrowSequence} does not match the EscrowCreate transaction sequence ${actualTxSequence}. Use the transaction sequence (${actualTxSequence}) as OfferSequence in EscrowFinish.`
+                );
+              }
+
+              // Verify Account matches Owner
+              if (txAccount && txAccount !== params.ownerAddress) {
+                console.error('[XRPL Escrow Finish] CRITICAL: EscrowCreate Account does not match Owner!', {
+                  escrowCreateAccount: txAccount,
+                  ownerAddress: params.ownerAddress,
+                });
+                await client.disconnect();
+                throw new Error(
+                  `EscrowCreate transaction Account (${txAccount}) does not match Owner address (${params.ownerAddress}). This is a critical mismatch.`
                 );
               }
             }
@@ -504,9 +538,176 @@ export class XRPLEscrowService {
             }
             // Continue if transaction not found, but log warning
           }
+
+          // Verification 2: Check for multiple escrows with similar sequences
+          try {
+            console.log('[XRPL Escrow Finish] Verification Step 2: Checking for multiple escrows with similar sequences...');
+            const accountObjectsResponse = await (client as any).request({
+              command: 'account_objects',
+              account: params.ownerAddress,
+              type: 'escrow',
+            });
+
+            const escrowObjects = accountObjectsResponse.result.account_objects || [];
+            
+            // Find all escrows that might match
+            const potentialMatches = escrowObjects.filter((obj: any) => {
+              const objSequence = (obj as any).Sequence;
+              // Check if object sequence is close to our sequence (within 10)
+              return Math.abs(objSequence - params.escrowSequence) <= 10;
+            });
+
+            verificationDetails.potentialMatches = potentialMatches.map((obj: any) => ({
+              objectSequence: (obj as any).Sequence,
+              previousTxnID: (obj as any).PreviousTxnID,
+              destination: (obj as any).Destination,
+              amount: (obj as any).Amount,
+              finishAfter: (obj as any).FinishAfter,
+            }));
+
+            console.log('[XRPL Escrow Finish] Escrows with similar sequences:', {
+              targetSequence: params.escrowSequence,
+              potentialMatches: verificationDetails.potentialMatches,
+            });
+
+            // Check if there are multiple escrows with the exact same sequence (shouldn't happen, but check)
+            const exactMatches = escrowObjects.filter((obj: any) => {
+              return (obj as any).Sequence === params.escrowSequence;
+            });
+
+            if (exactMatches.length > 1) {
+              console.error('[XRPL Escrow Finish] WARNING: Multiple escrow objects found with same sequence!', {
+                sequence: params.escrowSequence,
+                count: exactMatches.length,
+                escrows: exactMatches.map((obj: any) => ({
+                  previousTxnID: (obj as any).PreviousTxnID,
+                  destination: (obj as any).Destination,
+                })),
+              });
+            }
+          } catch (objError) {
+            console.warn('[XRPL Escrow Finish] Could not check for multiple escrows:', objError);
+          }
+
+          // Verification 3: Verify escrow object state matches expectations
+          try {
+            console.log('[XRPL Escrow Finish] Verification Step 3: Verifying escrow object state...');
+            if (verification.escrowObject) {
+              const escrowObj = verification.escrowObject as any;
+              
+              verificationDetails.escrowObject = {
+                objectSequence: escrowObj.Sequence,
+                previousTxnID: escrowObj.PreviousTxnID,
+                account: escrowObj.Account,
+                destination: escrowObj.Destination,
+                amount: escrowObj.Amount,
+                finishAfter: escrowObj.FinishAfter,
+                cancelAfter: escrowObj.CancelAfter,
+                condition: escrowObj.Condition,
+                ledgerIndex: escrowObj.LedgerIndex,
+              };
+
+              // Verify PreviousTxnID matches expected hash
+              if (escrowObj.PreviousTxnID !== params.expectedTxHash) {
+                console.error('[XRPL Escrow Finish] CRITICAL: Escrow object PreviousTxnID mismatch!', {
+                  expected: params.expectedTxHash,
+                  actual: escrowObj.PreviousTxnID,
+                });
+              }
+
+              // Verify Account matches Owner
+              if (escrowObj.Account !== params.ownerAddress) {
+                console.error('[XRPL Escrow Finish] CRITICAL: Escrow object Account mismatch!', {
+                  expected: params.ownerAddress,
+                  actual: escrowObj.Account,
+                });
+                await client.disconnect();
+                throw new Error(
+                  `Escrow object Account (${escrowObj.Account}) does not match Owner address (${params.ownerAddress}).`
+                );
+              }
+
+              // Verify Destination matches finisher (if finisher is destination)
+              if (finisherAddress !== params.ownerAddress && escrowObj.Destination !== finisherAddress) {
+                console.error('[XRPL Escrow Finish] CRITICAL: Escrow object Destination mismatch!', {
+                  expected: finisherAddress,
+                  actual: escrowObj.Destination,
+                });
+                await client.disconnect();
+                throw new Error(
+                  `Escrow object Destination (${escrowObj.Destination}) does not match finisher address (${finisherAddress}).`
+                );
+              }
+
+              console.log('[XRPL Escrow Finish] Escrow object state verified:', verificationDetails.escrowObject);
+            }
+          } catch (objStateError) {
+            console.warn('[XRPL Escrow Finish] Could not verify escrow object state:', objStateError);
+          }
+
+          // Verification 4: Check account_tx to see if escrow was already finished/cancelled
+          try {
+            console.log('[XRPL Escrow Finish] Verification Step 4: Checking transaction history...');
+            const accountTxResponse = await (client as any).request({
+              command: 'account_tx',
+              account: params.ownerAddress,
+              ledger_index_min: -1,
+              ledger_index_max: -1,
+              limit: 100,
+            });
+
+            const transactions = accountTxResponse.result.transactions || [];
+            
+            // Find EscrowFinish transactions with this sequence
+            const finishTxs = transactions.filter((txData: any) => {
+              const tx = txData.tx || txData;
+              return (tx as any).TransactionType === 'EscrowFinish' &&
+                     (tx as any).Owner === params.ownerAddress &&
+                     (tx as any).OfferSequence === params.escrowSequence;
+            });
+
+            // Find EscrowCancel transactions with this sequence
+            const cancelTxs = transactions.filter((txData: any) => {
+              const tx = txData.tx || txData;
+              return (tx as any).TransactionType === 'EscrowCancel' &&
+                     (tx as any).Owner === params.ownerAddress &&
+                     (tx as any).OfferSequence === params.escrowSequence;
+            });
+
+            verificationDetails.transactionHistory = {
+              finishTransactions: finishTxs.length,
+              cancelTransactions: cancelTxs.length,
+              finishTxHashes: finishTxs.map((txData: any) => {
+                const tx = txData.tx || txData;
+                return (tx as any).hash || txData.hash;
+              }),
+            };
+
+            if (finishTxs.length > 0) {
+              console.error('[XRPL Escrow Finish] CRITICAL: Escrow was already finished!', {
+                finishTxHashes: verificationDetails.transactionHistory.finishTxHashes,
+              });
+              await client.disconnect();
+              throw new Error(
+                `Escrow with sequence ${params.escrowSequence} has already been finished. Transaction hashes: ${verificationDetails.transactionHistory.finishTxHashes.join(', ')}`
+              );
+            }
+
+            if (cancelTxs.length > 0) {
+              console.error('[XRPL Escrow Finish] CRITICAL: Escrow was already cancelled!');
+              await client.disconnect();
+              throw new Error(
+                `Escrow with sequence ${params.escrowSequence} has already been cancelled.`
+              );
+            }
+
+            console.log('[XRPL Escrow Finish] Transaction history check passed:', verificationDetails.transactionHistory);
+          } catch (historyError) {
+            console.warn('[XRPL Escrow Finish] Could not check transaction history:', historyError);
+          }
         }
 
-        console.log('[XRPL Escrow Finish] Escrow verified, proceeding with transaction:', {
+        console.log('[XRPL Escrow Finish] All verifications passed, proceeding with transaction:', {
           ownerAddress: params.ownerAddress,
           finisherAddress,
           escrowSequence: params.escrowSequence,
@@ -514,6 +715,7 @@ export class XRPLEscrowService {
           hasCondition: !!conditionToUse,
           finishAfter: verification.finishAfter,
           objectSequence: verification.escrowObject ? (verification.escrowObject as any).Sequence : 'unknown',
+          verificationDetails: JSON.stringify(verificationDetails, null, 2).substring(0, 2000), // First 2000 chars
         });
 
         // EscrowFinish transaction structure:
