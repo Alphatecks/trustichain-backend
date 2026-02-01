@@ -1629,8 +1629,57 @@ export class EscrowService {
           destination: escrowDetails.destination,
           finishAfter: escrowDetails.finishAfter,
           txHash: escrow.xrpl_escrow_id,
-          platformAddress: platformAddress,
+          ownerAddress: actualOwnerAddress,
         });
+
+        // CRITICAL: Double-verify the sequence is the transaction sequence, not object sequence
+        // Query the EscrowCreate transaction directly to ensure we have the correct sequence
+        try {
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          const client: any = new Client(xrplServer);
+          await client.connect();
+          
+          try {
+            const txResponse = await client.request({
+              command: 'tx',
+              transaction: escrow.xrpl_escrow_id,
+            });
+            
+            if (txResponse.result) {
+              const txResult = txResponse.result as any;
+              const actualTxSequence = 
+                txResult.tx_json?.Sequence || 
+                txResult.Sequence || 
+                txResult.tx?.Sequence ||
+                null;
+              
+              if (actualTxSequence !== null) {
+                if (actualTxSequence !== escrowDetails.sequence) {
+                  console.error('[Escrow Release] CRITICAL: Sequence mismatch detected!', {
+                    returnedSequence: escrowDetails.sequence,
+                    actualTxSequence: actualTxSequence,
+                    txHash: escrow.xrpl_escrow_id,
+                    ownerAddress: actualOwnerAddress,
+                  });
+                  // Correct the sequence to use the actual transaction sequence
+                  escrowDetails.sequence = actualTxSequence;
+                  console.log('[Escrow Release] Corrected sequence to transaction sequence:', actualTxSequence);
+                } else {
+                  console.log('[Escrow Release] Sequence verified: matches EscrowCreate transaction');
+                }
+              }
+            }
+          } finally {
+            await client.disconnect();
+          }
+        } catch (verifyError) {
+          console.warn('[Escrow Release] Could not verify sequence from transaction (will proceed with returned sequence):', verifyError);
+        }
 
         // Check if escrow has a condition that requires fulfillment
         if (escrowDetails.condition) {
