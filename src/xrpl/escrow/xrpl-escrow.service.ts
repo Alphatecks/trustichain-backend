@@ -1121,6 +1121,13 @@ export class XRPLEscrowService {
 
         console.log('[XRPL] EscrowFinish transaction before autofill:', JSON.stringify(escrowFinish, null, 2));
 
+        // Ensure client is still connected before making account_info request
+        // The client might have been disconnected in error handling paths
+        if (!client.isConnected()) {
+          console.warn('[XRPL Escrow Finish] Client disconnected, reconnecting...');
+          await client.connect();
+        }
+
         // Manually fill required fields (Sequence, Fee)
         const accountInfo = await (client as any).request({
           command: 'account_info',
