@@ -1904,14 +1904,27 @@ export class EscrowService {
               currentLedgerDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
             });
 
-            // XRPL Rule: Before FinishAfter, only Destination can finish
-            // After FinishAfter, either Owner or Destination can finish
+            // XRPL Rule: 
+            // - Destination can finish at any time (before or after FinishAfter)
+            // - Owner can only finish after FinishAfter has passed
+            // However, we'll let XRPL enforce this rule rather than blocking at application level
+            // This allows for edge cases and better error messages from XRPL
             if (!finishAfterPassed) {
-              requiresDestination = true;
+              // Before FinishAfter: Destination can finish, Owner cannot
               if (isRequesterOwner) {
-                canFinish = false;
+                // Owner trying to finish before FinishAfter - XRPL will reject this
+                // We'll allow the attempt but log a warning
+                console.warn('[Escrow Release] Owner attempting to finish before FinishAfter - XRPL may reject:', {
+                  finishAfterDate: new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString(),
+                  currentDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
+                });
+                // Still allow the attempt - let XRPL handle the rejection with proper error
+                canFinish = true;
+                requiresDestination = false; // Don't require destination, let XRPL reject if needed
               } else if (isRequesterDestination) {
-                canFinish = true; // Destination can finish before FinishAfter
+                // Destination can finish before FinishAfter
+                canFinish = true;
+                requiresDestination = true;
               }
             } else {
               // After FinishAfter, either party can finish
@@ -1926,20 +1939,9 @@ export class EscrowService {
           }
         }
 
-        // Validate permissions
-        if (!canFinish) {
-          // FinishAfter is in Ripple Epoch seconds (since Jan 1, 2000)
-          // Convert to Unix timestamp for display: Ripple Epoch + 946684800 = Unix timestamp
-          const finishAfterDate = escrowDetails.finishAfter 
-            ? new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString()
-            : 'N/A';
-          
-          return {
-            success: false,
-            message: `Cannot release escrow: Only the destination can finish this escrow before the FinishAfter time (${finishAfterDate}). The escrow owner cannot finish it until after that time.`,
-            error: 'FinishAfter permission denied',
-          };
-        }
+        // Note: We no longer block at application level - let XRPL enforce FinishAfter rules
+        // XRPL will reject with tecNO_PERMISSION if owner tries to finish before FinishAfter
+        // This allows for better error handling and edge cases
 
         // Determine which wallet to use for finishing
         let finisherAddress: string;
