@@ -348,13 +348,14 @@ export class XRPLEscrowService {
         };
       }
 
-      // Verify permissions: check FinishAfter if finisher is Owner
+      // Get escrow details for informational purposes
       const finishAfter = (matchingEscrow as any).FinishAfter ? ((matchingEscrow as any).FinishAfter as number) : undefined;
       const cancelAfter = (matchingEscrow as any).CancelAfter ? ((matchingEscrow as any).CancelAfter as number) : undefined;
       const condition = (matchingEscrow as any).Condition || undefined;
       const destination = (matchingEscrow as any).Destination || undefined;
 
-      // If Owner is trying to finish before FinishAfter, they don't have permission
+      // Log warning if Owner is trying to finish before FinishAfter, but don't block
+      // Let XRPL enforce the rules - it will return tecNO_PERMISSION if not allowed
       if (finishAfter && finisherAddress === params.ownerAddress) {
         try {
           const ledgerResponse = await (client as any).request({
@@ -364,15 +365,13 @@ export class XRPLEscrowService {
           const currentLedgerTime = ledgerResponse.result.ledger.close_time;
           
           if (currentLedgerTime < finishAfter) {
-            return {
-              exists: true,
-              escrowObject: matchingEscrow,
-              finishAfter,
-              cancelAfter,
-              condition,
-              destination,
-              error: `Insufficient permissions: FinishAfter time (${new Date((finishAfter + 946684800) * 1000).toISOString()}) not reached. Only the destination can finish before this time.`,
-            };
+            console.warn('[XRPL Escrow Verification] Owner attempting to finish before FinishAfter - XRPL may reject:', {
+              finishAfterDate: new Date((finishAfter + 946684800) * 1000).toISOString(),
+              currentLedgerDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
+              ownerAddress: params.ownerAddress,
+              finisherAddress,
+            });
+            // Don't return error - let XRPL handle the validation
           }
         } catch (ledgerError) {
           console.warn('[XRPL Escrow Verification] Could not check ledger time:', ledgerError);
