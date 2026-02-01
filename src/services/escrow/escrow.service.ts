@@ -1305,16 +1305,72 @@ export class EscrowService {
       }
 
       try {
+        // First, get the actual owner address from the EscrowCreate transaction
+        // Escrows are now created with user wallets, not platform wallet
+        let actualOwnerAddress: string;
+        try {
+          const { Client } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          const client: any = new Client(xrplServer);
+          await client.connect();
+          
+          try {
+            const txResponse = await client.request({
+              command: 'tx',
+              transaction: escrow.xrpl_escrow_id,
+            });
+            
+            if (txResponse.result) {
+              const txResult = txResponse.result as any;
+              actualOwnerAddress = 
+                txResult.tx_json?.Account || 
+                txResult.Account || 
+                txResult.tx?.Account ||
+                null;
+              
+              if (!actualOwnerAddress) {
+                throw new Error('Could not determine owner address from EscrowCreate transaction');
+              }
+              
+              console.log('[Escrow Release] Extracted owner address from EscrowCreate transaction:', {
+                txHash: escrow.xrpl_escrow_id,
+                ownerAddress: actualOwnerAddress,
+              });
+            } else {
+              throw new Error('Transaction not found');
+            }
+          } finally {
+            await client.disconnect();
+          }
+        } catch (txError) {
+          console.error('[Escrow Release] Failed to get owner address from transaction:', txError);
+          // Fallback: Try to get owner from user's wallet (for new escrows) or platform (for old escrows)
+          const { data: userWallet } = await adminClient
+            .from('wallets')
+            .select('xrpl_address')
+            .eq('user_id', escrow.user_id)
+            .single();
+          
+          actualOwnerAddress = userWallet?.xrpl_address || platformAddress;
+          console.log('[Escrow Release] Using fallback owner address:', {
+            ownerAddress: actualOwnerAddress,
+            source: userWallet ? 'user_wallet' : 'platform_wallet',
+          });
+        }
+
         // Get escrow details from XRPL to retrieve the sequence number
-        // The escrow owner is the platform wallet (since escrows are created using platform wallet)
         console.log('[Escrow Release] Retrieving escrow details from XRPL:', {
           txHash: escrow.xrpl_escrow_id,
-          ownerAddress: platformAddress,
+          ownerAddress: actualOwnerAddress,
         });
 
         let escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
           escrow.xrpl_escrow_id,
-          platformAddress
+          actualOwnerAddress
         );
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
@@ -1368,7 +1424,7 @@ export class EscrowService {
 
               const accountObjectsResponse = await client.request({
                 command: 'account_objects',
-                account: platformAddress,
+                account: actualOwnerAddress,
                 type: 'escrow',
               });
 
@@ -1722,7 +1778,7 @@ export class EscrowService {
             }
 
             const escrowFinishTx = await xrplEscrowService.prepareEscrowFinishTransaction({
-              ownerAddress: platformAddress, // Original owner from EscrowCreate (always required)
+              ownerAddress: actualOwnerAddress, // Original owner from EscrowCreate (always required)
               finisherAddress: finisherAddress, // Destination address (who will sign)
               escrowSequence: escrowDetails.sequence,
               condition: escrowDetails.condition,
@@ -1780,7 +1836,7 @@ export class EscrowService {
         // Finish escrow on XRPL
         console.log('[Escrow Release] Finishing escrow on XRPL:', {
           escrowSequence: escrowDetails.sequence,
-          ownerAddress: platformAddress,
+          ownerAddress: actualOwnerAddress,
           finisherAddress: finisherAddress,
           isFinishingAsDestination: isFinishingAsDestination,
           finishAfterPassed: finishAfterPassed,
@@ -1791,7 +1847,7 @@ export class EscrowService {
         console.log('[Escrow Release] Performing pre-finish verification...');
         try {
           const verification = await xrplEscrowService.verifyEscrowExists({
-            ownerAddress: platformAddress,
+            ownerAddress: actualOwnerAddress,
             escrowSequence: escrowDetails.sequence,
             finisherAddress: finisherAddress,
             expectedTxHash: escrow.xrpl_escrow_id || undefined,
@@ -1872,7 +1928,7 @@ export class EscrowService {
         let finishTxHash: string;
         try {
           finishTxHash = await xrplEscrowService.finishEscrow({
-            ownerAddress: platformAddress, // Original owner from EscrowCreate (always required)
+            ownerAddress: actualOwnerAddress, // Original owner from EscrowCreate (always required)
             escrowSequence: escrowDetails.sequence,
             finisherAddress: finisherAddress, // Who is finishing (Owner or Destination)
             condition: escrowDetails.condition,
@@ -1893,7 +1949,7 @@ export class EscrowService {
             errorStack: error instanceof Error ? error.stack : undefined,
             escrowId,
             escrowSequence: escrowDetails.sequence,
-            ownerAddress: platformAddress,
+            ownerAddress: actualOwnerAddress,
             finisherAddress: finisherAddress,
             isFinishingAsDestination,
           });
