@@ -432,14 +432,29 @@ export class EscrowService {
       });
       
       if (request.expectedReleaseDate) {
-        const releaseDate = new Date(request.expectedReleaseDate);
+        // Parse date string as LOCAL midnight, not UTC midnight
+        // Date strings like "2026-01-31" are interpreted as UTC by default
+        // We need to parse the components and create a Date in local timezone
+        let releaseDate: Date;
+        
+        // Check if it's a simple date string (YYYY-MM-DD) or includes time
+        if (/^\d{4}-\d{2}-\d{2}$/.test(request.expectedReleaseDate)) {
+          // Parse as local midnight: "2026-01-31" -> Jan 31, 2026 00:00:00 local time
+          const [year, month, day] = request.expectedReleaseDate.split('-').map(Number);
+          releaseDate = new Date(year, month - 1, day, 0, 0, 0, 0); // month is 0-indexed
+        } else {
+          // If it includes time, parse normally (handles ISO strings with time)
+          releaseDate = new Date(request.expectedReleaseDate);
+        }
+        
         const now = new Date();
         
         // Validate that the date is not in the past
         if (releaseDate < now) {
           console.warn('[Escrow Create] Expected release date is in the past, using default 30 days:', {
             providedDate: request.expectedReleaseDate,
-            providedDateParsed: releaseDate.toISOString(),
+            parsedDate: releaseDate.toISOString(),
+            parsedDateLocal: releaseDate.toString(),
             currentDate: now.toISOString(),
           });
           // Use default instead of invalid past date
@@ -451,9 +466,11 @@ export class EscrowService {
           console.log('[Escrow Create] Using provided expected release date:', {
             originalDate: request.expectedReleaseDate,
             parsedDate: releaseDate.toISOString(),
+            parsedDateLocal: releaseDate.toString(),
             unixTimestamp,
             rippleEpoch: finishAfter,
             rippleEpochDate: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+            rippleEpochDateLocal: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toString(),
           });
         }
       } else {
