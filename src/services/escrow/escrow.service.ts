@@ -1868,8 +1868,7 @@ export class EscrowService {
           };
         }
 
-        // Check FinishAfter timestamp and validate permissions
-        let canFinish = true;
+        // Check FinishAfter timestamp for logging and determining if destination is required
         let finishAfterPassed = true;
         let requiresDestination = false;
 
@@ -1918,17 +1917,15 @@ export class EscrowService {
                   finishAfterDate: new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString(),
                   currentDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
                 });
-                // Still allow the attempt - let XRPL handle the rejection with proper error
-                canFinish = true;
-                requiresDestination = false; // Don't require destination, let XRPL reject if needed
+                // Don't require destination, let XRPL reject if needed
+                requiresDestination = false;
               } else if (isRequesterDestination) {
                 // Destination can finish before FinishAfter
-                canFinish = true;
                 requiresDestination = true;
               }
             } else {
               // After FinishAfter, either party can finish
-              canFinish = true;
+              requiresDestination = false;
             }
           } catch (ledgerError) {
             console.error('[Escrow Release] Error getting ledger time:', ledgerError);
