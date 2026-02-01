@@ -1368,21 +1368,119 @@ export class EscrowService {
           ownerAddress: actualOwnerAddress,
         });
 
-        console.log('[Escrow Release] Calling getEscrowDetailsByTxHash...', {
+        // CRITICAL: Always query the EscrowCreate transaction directly to get the correct sequence
+        // Don't rely on getEscrowDetailsByTxHash - query the transaction ourselves
+        console.log('[Escrow Release] Querying EscrowCreate transaction directly for sequence...', {
           txHash: escrow.xrpl_escrow_id,
           ownerAddress: actualOwnerAddress,
         });
         
-        let escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
-          escrow.xrpl_escrow_id,
-          actualOwnerAddress
-        );
+        let actualTxSequence: number | null = null;
+        let escrowDetails: any = null;
         
-        console.log('[Escrow Release] getEscrowDetailsByTxHash returned:', {
-          hasDetails: !!escrowDetails,
-          sequence: escrowDetails?.sequence,
-          amount: escrowDetails?.amount,
-          destination: escrowDetails?.destination,
+        try {
+          const { Client } = await import('xrpl');
+          const { dropsToXrp } = await import('xrpl');
+          const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+          const xrplServer = xrplNetwork === 'mainnet'
+            ? 'wss://xrplcluster.com'
+            : 'wss://s.altnet.rippletest.net:51233';
+          
+          const client: any = new Client(xrplServer);
+          await client.connect();
+          
+          try {
+            // Query the EscrowCreate transaction directly
+            const txResponse = await client.request({
+              command: 'tx',
+              transaction: escrow.xrpl_escrow_id,
+            });
+            
+            if (txResponse.result) {
+              const txResult = txResponse.result as any;
+              const txJson = txResult.tx_json || txResult.tx || txResult;
+              
+              // Extract sequence from transaction
+              actualTxSequence = 
+                txJson.Sequence || 
+                txResult.tx_json?.Sequence || 
+                txResult.Sequence || 
+                null;
+              
+              // Extract other details
+              const txAccount = txJson.Account || txResult.tx_json?.Account || txResult.Account;
+              const txDestination = txJson.Destination || txResult.tx_json?.Destination || txResult.Destination;
+              const txAmount = txJson.Amount || txResult.tx_json?.Amount || txResult.Amount;
+              const txFinishAfter = txJson.FinishAfter || txResult.tx_json?.FinishAfter || txResult.FinishAfter;
+              const txCancelAfter = txJson.CancelAfter || txResult.tx_json?.CancelAfter || txResult.CancelAfter;
+              const txCondition = txJson.Condition || txResult.tx_json?.Condition || txResult.Condition;
+              
+              console.log('[Escrow Release] EscrowCreate transaction details:', {
+                sequence: actualTxSequence,
+                account: txAccount,
+                destination: txDestination,
+                amount: txAmount,
+                finishAfter: txFinishAfter,
+                transactionType: txJson.TransactionType || txResult.tx_json?.TransactionType,
+              });
+              
+              if (!actualTxSequence) {
+                throw new Error('Could not extract sequence from EscrowCreate transaction');
+              }
+              
+              // Verify account matches
+              if (txAccount !== actualOwnerAddress) {
+                console.error('[Escrow Release] CRITICAL: Transaction account mismatch!', {
+                  transactionAccount: txAccount,
+                  expectedOwner: actualOwnerAddress,
+                  txHash: escrow.xrpl_escrow_id,
+                });
+                throw new Error(`EscrowCreate transaction account (${txAccount}) does not match expected owner (${actualOwnerAddress})`);
+              }
+              
+              // Build escrow details from transaction
+              const amountDrops = typeof txAmount === 'string' ? txAmount : String(txAmount);
+              const amountXrp = parseFloat(dropsToXrp(amountDrops) as any);
+              
+              escrowDetails = {
+                sequence: actualTxSequence, // CRITICAL: Use transaction sequence
+                amount: amountXrp,
+                destination: txDestination || '',
+                finishAfter: txFinishAfter ? Number(txFinishAfter) : undefined,
+                cancelAfter: txCancelAfter ? Number(txCancelAfter) : undefined,
+                condition: txCondition || undefined,
+              };
+              
+              console.log('[Escrow Release] Built escrow details from transaction:', escrowDetails);
+            } else {
+              throw new Error('EscrowCreate transaction not found');
+            }
+          } finally {
+            await client.disconnect();
+          }
+        } catch (txError) {
+          console.error('[Escrow Release] Failed to query EscrowCreate transaction directly, falling back to getEscrowDetailsByTxHash:', txError);
+          // Fallback to original method
+          escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
+            escrow.xrpl_escrow_id,
+            actualOwnerAddress
+          );
+        }
+        
+        if (!escrowDetails || !escrowDetails.sequence) {
+          return {
+            success: false,
+            message: 'Cannot release escrow: Could not determine escrow sequence from EscrowCreate transaction.',
+            error: 'Escrow sequence not found',
+          };
+        }
+        
+        console.log('[Escrow Release] Using escrow details:', {
+          sequence: escrowDetails.sequence,
+          amount: escrowDetails.amount,
+          destination: escrowDetails.destination,
+          finishAfter: escrowDetails.finishAfter,
+          source: actualTxSequence ? 'direct_transaction_query' : 'getEscrowDetailsByTxHash',
         });
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
