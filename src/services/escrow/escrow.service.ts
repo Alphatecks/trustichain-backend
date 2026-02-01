@@ -377,7 +377,7 @@ export class EscrowService {
 
       // Use user's wallet address (payerWallet already fetched above)
       const userWalletAddress = payerWallet.xrpl_address;
-      const hasEncryptedSecret = !!payerWallet.encrypted_wallet_secret;
+      let hasEncryptedSecret = !!payerWallet.encrypted_wallet_secret;
 
       // Check user's XRPL balance on-chain before proceeding
       console.log('[Escrow Create] Checking user XRPL balance on-chain...', {
