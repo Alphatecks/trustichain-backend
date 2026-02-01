@@ -945,13 +945,162 @@ export class XRPLEscrowService {
         // EscrowFinish transaction structure:
         // - Account: The account submitting the transaction (Owner or Destination)
         // - Owner: The original owner address from EscrowCreate (always required)
+        // FINAL VERIFICATION: Query account_objects one more time to confirm escrow exists with this sequence
+        // This is a last-ditch check before submitting
+        try {
+          console.log('[XRPL Escrow Finish] Final verification: Querying account_objects to confirm escrow exists...', {
+            ownerAddress: params.ownerAddress,
+            escrowSequence: params.escrowSequence,
+            expectedTxHash: params.expectedTxHash,
+          });
+          
+          const finalCheckResponse = await (client as any).request({
+            command: 'account_objects',
+            account: params.ownerAddress,
+            type: 'escrow',
+            ledger_index: 'validated',
+          });
+          
+          const finalEscrows = finalCheckResponse.result.account_objects || [];
+          
+          // Find escrow by PreviousTxnID if we have it, or verify sequence matches
+          let finalEscrowMatch: any = null;
+          if (params.expectedTxHash) {
+            finalEscrowMatch = finalEscrows.find(
+              (obj: any) => (obj as any).PreviousTxnID === params.expectedTxHash && (obj as any).Account === params.ownerAddress
+            ) as any;
+          }
+          
+          if (!finalEscrowMatch) {
+            // Try to find by matching the transaction sequence
+            // We need to verify that an escrow exists that was created with this sequence
+            console.warn('[XRPL Escrow Finish] Could not find escrow by PreviousTxnID, checking if escrow exists...');
+            
+            // Query the EscrowCreate transaction to get its sequence
+            if (params.expectedTxHash) {
+              try {
+                const finalTxResponse = await (client as any).request({
+                  command: 'tx',
+                  transaction: params.expectedTxHash,
+                });
+                
+                if (finalTxResponse.result) {
+                  const finalTxResult = finalTxResponse.result as any;
+                  const finalTxSequence = 
+                    finalTxResult.tx_json?.Sequence || 
+                    finalTxResult.Sequence || 
+                    finalTxResult.tx?.Sequence ||
+                    null;
+                  
+                  if (finalTxSequence !== null && finalTxSequence !== params.escrowSequence) {
+                    console.error('[XRPL Escrow Finish] CRITICAL: Final sequence mismatch!', {
+                      providedSequence: params.escrowSequence,
+                      actualTxSequence: finalTxSequence,
+                      expectedTxHash: params.expectedTxHash,
+                    });
+                    await client.disconnect();
+                    throw new Error(
+                      `CRITICAL: Sequence mismatch detected in final check. Provided sequence ${params.escrowSequence} does not match EscrowCreate transaction sequence ${finalTxSequence}. Use sequence ${finalTxSequence} for OfferSequence.`
+                    );
+                  }
+                  
+                  // Now find escrow by PreviousTxnID
+                  finalEscrowMatch = finalEscrows.find(
+                    (obj: any) => (obj as any).PreviousTxnID === params.expectedTxHash && (obj as any).Account === params.ownerAddress
+                  ) as any;
+                }
+              } catch (finalTxError) {
+                console.error('[XRPL Escrow Finish] Failed to verify transaction in final check:', finalTxError);
+              }
+            }
+          }
+          
+          if (!finalEscrowMatch) {
+            console.error('[XRPL Escrow Finish] CRITICAL: Escrow object not found in final verification!', {
+              ownerAddress: params.ownerAddress,
+              escrowSequence: params.escrowSequence,
+              expectedTxHash: params.expectedTxHash,
+              availableEscrows: finalEscrows.length,
+              escrowPreviousTxnIDs: finalEscrows.map((obj: any) => (obj as any).PreviousTxnID),
+            });
+            await client.disconnect();
+            throw new Error(
+              `Escrow object not found on XRPL for owner ${params.ownerAddress} with sequence ${params.escrowSequence}. The escrow may not exist, may have been finished/cancelled, or the sequence may be incorrect.`
+            );
+          }
+          
+          console.log('[XRPL Escrow Finish] Final verification passed: Escrow object confirmed on XRPL', {
+            previousTxnID: (finalEscrowMatch as any).PreviousTxnID,
+            account: (finalEscrowMatch as any).Account,
+            destination: (finalEscrowMatch as any).Destination,
+            amount: (finalEscrowMatch as any).Amount,
+          });
+        } catch (finalCheckError) {
+          console.error('[XRPL Escrow Finish] Final verification failed, but proceeding with transaction:', finalCheckError);
+          // Don't throw - let XRPL reject it if there's really an issue
+        }
+
+        // FINAL SEQUENCE VERIFICATION: Query EscrowCreate transaction one last time to ensure correct sequence
+        let finalSequenceToUse = params.escrowSequence;
+        if (params.expectedTxHash) {
+          try {
+            console.log('[XRPL Escrow Finish] Final sequence verification: Querying EscrowCreate transaction one last time...', {
+              providedSequence: params.escrowSequence,
+              expectedTxHash: params.expectedTxHash,
+            });
+            
+            const finalTxCheck = await (client as any).request({
+              command: 'tx',
+              transaction: params.expectedTxHash,
+            });
+            
+            if (finalTxCheck.result) {
+              const finalTxResult = finalTxCheck.result as any;
+              const finalTxSequence = 
+                finalTxResult.tx_json?.Sequence || 
+                finalTxResult.Sequence || 
+                finalTxResult.tx?.Sequence ||
+                null;
+              
+              if (finalTxSequence !== null) {
+                if (finalTxSequence !== params.escrowSequence) {
+                  console.error('[XRPL Escrow Finish] CRITICAL: Final sequence mismatch detected!', {
+                    providedSequence: params.escrowSequence,
+                    actualTxSequence: finalTxSequence,
+                    expectedTxHash: params.expectedTxHash,
+                  });
+                  await client.disconnect();
+                  throw new Error(
+                    `CRITICAL: Sequence mismatch in final check. Provided sequence ${params.escrowSequence} does not match EscrowCreate transaction sequence ${finalTxSequence}. Use sequence ${finalTxSequence} for OfferSequence.`
+                  );
+                }
+                
+                finalSequenceToUse = finalTxSequence;
+                console.log('[XRPL Escrow Finish] Final sequence verification passed:', {
+                  sequence: finalSequenceToUse,
+                  matchesProvided: finalSequenceToUse === params.escrowSequence,
+                });
+              }
+            }
+          } catch (finalCheckError) {
+            console.warn('[XRPL Escrow Finish] Final sequence verification failed, using provided sequence:', finalCheckError);
+            // Continue with provided sequence
+          }
+        }
+
         // - OfferSequence: The sequence from EscrowCreate transaction
         const escrowFinish: any = {
           TransactionType: 'EscrowFinish',
           Account: wallet.classicAddress, // Who is submitting (Owner or Destination)
           Owner: params.ownerAddress, // Original owner from EscrowCreate (always required)
-          OfferSequence: params.escrowSequence,
+          OfferSequence: finalSequenceToUse, // Use verified sequence
         };
+        
+        console.log('[XRPL Escrow Finish] Using sequence for OfferSequence:', {
+          originalProvided: params.escrowSequence,
+          finalUsed: finalSequenceToUse,
+          match: finalSequenceToUse === params.escrowSequence,
+        });
 
         // Add condition and fulfillment if provided
         if (conditionToUse) {
