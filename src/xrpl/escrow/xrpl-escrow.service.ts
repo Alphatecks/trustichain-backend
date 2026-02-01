@@ -709,47 +709,47 @@ export class XRPLEscrowService {
           // Verification 5: Verify escrow object exists on validated ledger
           try {
             console.log('[XRPL Escrow Finish] Verification Step 5: Verifying escrow object exists on validated ledger...');
-            if (verification.escrowObject) {
+            if (verification.escrowObject && params.expectedTxHash) {
               const escrowObj = verification.escrowObject as any;
-              const ledgerIndex = escrowObj.LedgerIndex;
+              // LedgerIndex might be in different fields: LedgerIndex, index, or not present
+              const ledgerIndex = escrowObj.LedgerIndex || escrowObj.index || escrowObj.ledger_index;
 
-              if (ledgerIndex) {
-                // Query account_objects with ledger_index to ensure we're getting validated data
-                const validatedObjectsResponse = await (client as any).request({
-                  command: 'account_objects',
-                  account: params.ownerAddress,
-                  type: 'escrow',
-                  ledger_index: 'validated',
+              // Query account_objects with ledger_index: 'validated' to ensure we're getting validated data
+              const validatedObjectsResponse = await (client as any).request({
+                command: 'account_objects',
+                account: params.ownerAddress,
+                type: 'escrow',
+                ledger_index: 'validated',
+              });
+
+              const validatedEscrows = validatedObjectsResponse.result.account_objects || [];
+              // Find by PreviousTxnID (most reliable) or by LedgerIndex if available
+              const validatedEscrow = validatedEscrows.find(
+                (obj: any) => (obj as any).PreviousTxnID === params.expectedTxHash ||
+                             (ledgerIndex && ((obj as any).LedgerIndex === ledgerIndex || (obj as any).index === ledgerIndex))
+              ) as any;
+
+              if (!validatedEscrow) {
+                console.error('[XRPL Escrow Finish] CRITICAL: Escrow object not found on validated ledger!', {
+                  ledgerIndex: ledgerIndex || 'not found',
+                  expectedTxHash: params.expectedTxHash,
+                  validatedEscrowsCount: validatedEscrows.length,
+                  escrowObjectKeys: Object.keys(escrowObj),
                 });
-
-                const validatedEscrows = validatedObjectsResponse.result.account_objects || [];
-                const validatedEscrow = validatedEscrows.find(
-                  (obj: any) => (obj as any).LedgerIndex === ledgerIndex || 
-                               (obj as any).PreviousTxnID === params.expectedTxHash
-                ) as any;
-
-                if (!validatedEscrow) {
-                  console.error('[XRPL Escrow Finish] CRITICAL: Escrow object not found on validated ledger!', {
-                    ledgerIndex,
-                    expectedTxHash: params.expectedTxHash,
-                    validatedEscrowsCount: validatedEscrows.length,
-                  });
-                  await client.disconnect();
-                  throw new Error(
-                    `Escrow object not found on validated ledger. The escrow may not be fully validated yet. LedgerIndex: ${ledgerIndex}`
-                  );
-                }
-
-                verificationDetails.validatedLedgerCheck = {
-                  found: true,
-                  ledgerIndex: (validatedEscrow as any).LedgerIndex,
-                  previousTxnID: (validatedEscrow as any).PreviousTxnID,
-                };
-
-                console.log('[XRPL Escrow Finish] Escrow object verified on validated ledger:', verificationDetails.validatedLedgerCheck);
-              } else {
-                console.warn('[XRPL Escrow Finish] Escrow object has no LedgerIndex, cannot verify on validated ledger');
+                await client.disconnect();
+                throw new Error(
+                  `Escrow object not found on validated ledger. The escrow may not be fully validated yet. Try waiting a few seconds and retry. PreviousTxnID: ${params.expectedTxHash}`
+                );
               }
+
+              verificationDetails.validatedLedgerCheck = {
+                found: true,
+                ledgerIndex: (validatedEscrow as any).LedgerIndex || (validatedEscrow as any).index,
+                previousTxnID: (validatedEscrow as any).PreviousTxnID,
+                validatedLedgerIndex: validatedObjectsResponse.result.ledger_index,
+              };
+
+              console.log('[XRPL Escrow Finish] Escrow object verified on validated ledger:', verificationDetails.validatedLedgerCheck);
             }
           } catch (ledgerError) {
             console.warn('[XRPL Escrow Finish] Could not verify escrow on validated ledger:', ledgerError);
@@ -839,7 +839,7 @@ export class XRPLEscrowService {
 
               if (createTxResponse.result) {
                 const createLedgerIndex = createTxResponse.result.ledger_index;
-                const ledgersSinceCreation = currentLedgerIndex - createLedgerIndex;
+                let ledgersSinceCreation = currentLedgerIndex - createLedgerIndex;
 
                 verificationDetails.validationStatus = {
                   createLedgerIndex,
@@ -852,10 +852,77 @@ export class XRPLEscrowService {
 
                 console.log('[XRPL Escrow Finish] Escrow validation status:', verificationDetails.validationStatus);
 
-                if (ledgersSinceCreation < 2) {
-                  console.warn('[XRPL Escrow Finish] WARNING: Escrow was created very recently, may not be fully validated', {
+                // XRPL requires escrows to be validated for at least a few ledgers before they can be finished
+                // This is a known limitation - escrows need time to be fully indexed
+                // If escrow is too recent, poll and wait until it's ready
+                if (ledgersSinceCreation < 5) {
+                  console.log('[XRPL Escrow Finish] Escrow is too recent, waiting for validation...', {
                     ledgersSinceCreation,
+                    requiredLedgers: 5,
                   });
+
+                  const maxWaitTime = 30000; // 30 seconds max wait
+                  const pollInterval = 2000; // Poll every 2 seconds
+                  const startTime = Date.now();
+                  let ready = false;
+                  let attempts = 0;
+                  const maxAttempts = Math.ceil(maxWaitTime / pollInterval);
+
+                  while (!ready && (Date.now() - startTime) < maxWaitTime) {
+                    attempts++;
+                    console.log(`[XRPL Escrow Finish] Polling attempt ${attempts}/${maxAttempts} - waiting for escrow validation...`);
+
+                    // Wait before polling
+                    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+                    try {
+                      // Check current ledger and recalculate ledgersSinceCreation
+                      const currentLedgerResponse = await (client as any).request({
+                        command: 'ledger',
+                        ledger_index: 'validated',
+                      });
+
+                      const newCurrentLedgerIndex = currentLedgerResponse.result.ledger_index;
+                      ledgersSinceCreation = newCurrentLedgerIndex - createLedgerIndex;
+
+                      console.log('[XRPL Escrow Finish] Polling check:', {
+                        attempt: attempts,
+                        currentLedgerIndex: newCurrentLedgerIndex,
+                        createLedgerIndex,
+                        ledgersSinceCreation,
+                        required: 5,
+                        ready: ledgersSinceCreation >= 5,
+                      });
+
+                      if (ledgersSinceCreation >= 5) {
+                        ready = true;
+                        verificationDetails.validationStatus = {
+                          ...verificationDetails.validationStatus,
+                          currentLedgerIndex: newCurrentLedgerIndex,
+                          ledgersSinceCreation,
+                          waitedForValidation: true,
+                          waitTimeMs: Date.now() - startTime,
+                          pollingAttempts: attempts,
+                        };
+                        console.log('[XRPL Escrow Finish] Escrow is now ready after waiting:', {
+                          waitTimeMs: Date.now() - startTime,
+                          pollingAttempts: attempts,
+                          finalLedgersSinceCreation: ledgersSinceCreation,
+                        });
+                      }
+                    } catch (pollError) {
+                      console.warn('[XRPL Escrow Finish] Error during polling, will retry:', pollError);
+                      // Continue polling
+                    }
+                  }
+
+                  if (!ready) {
+                    const waitTime = Date.now() - startTime;
+                    const errorMessage = `Escrow validation timeout: Waited ${Math.round(waitTime / 1000)} seconds but escrow is still not ready (only ${ledgersSinceCreation} ledger(s) since creation). XRPL requires escrows to be validated for at least 5 ledgers before they can be finished. Please try again in a few moments.`;
+                    console.error('[XRPL Escrow Finish] CRITICAL:', errorMessage);
+                    await client.disconnect();
+                    throw new Error(errorMessage);
+                  }
                 }
               }
             }
