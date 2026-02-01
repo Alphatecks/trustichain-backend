@@ -705,6 +705,163 @@ export class XRPLEscrowService {
           } catch (historyError) {
             console.warn('[XRPL Escrow Finish] Could not check transaction history:', historyError);
           }
+
+          // Verification 5: Verify escrow object exists on validated ledger
+          try {
+            console.log('[XRPL Escrow Finish] Verification Step 5: Verifying escrow object exists on validated ledger...');
+            if (verification.escrowObject) {
+              const escrowObj = verification.escrowObject as any;
+              const ledgerIndex = escrowObj.LedgerIndex;
+
+              if (ledgerIndex) {
+                // Query account_objects with ledger_index to ensure we're getting validated data
+                const validatedObjectsResponse = await (client as any).request({
+                  command: 'account_objects',
+                  account: params.ownerAddress,
+                  type: 'escrow',
+                  ledger_index: 'validated',
+                });
+
+                const validatedEscrows = validatedObjectsResponse.result.account_objects || [];
+                const validatedEscrow = validatedEscrows.find(
+                  (obj: any) => (obj as any).LedgerIndex === ledgerIndex || 
+                               (obj as any).PreviousTxnID === params.expectedTxHash
+                ) as any;
+
+                if (!validatedEscrow) {
+                  console.error('[XRPL Escrow Finish] CRITICAL: Escrow object not found on validated ledger!', {
+                    ledgerIndex,
+                    expectedTxHash: params.expectedTxHash,
+                    validatedEscrowsCount: validatedEscrows.length,
+                  });
+                  await client.disconnect();
+                  throw new Error(
+                    `Escrow object not found on validated ledger. The escrow may not be fully validated yet. LedgerIndex: ${ledgerIndex}`
+                  );
+                }
+
+                verificationDetails.validatedLedgerCheck = {
+                  found: true,
+                  ledgerIndex: (validatedEscrow as any).LedgerIndex,
+                  previousTxnID: (validatedEscrow as any).PreviousTxnID,
+                };
+
+                console.log('[XRPL Escrow Finish] Escrow object verified on validated ledger:', verificationDetails.validatedLedgerCheck);
+              } else {
+                console.warn('[XRPL Escrow Finish] Escrow object has no LedgerIndex, cannot verify on validated ledger');
+              }
+            }
+          } catch (ledgerError) {
+            console.warn('[XRPL Escrow Finish] Could not verify escrow on validated ledger:', ledgerError);
+          }
+
+          // Verification 6: Check destination account flags and restrictions
+          try {
+            console.log('[XRPL Escrow Finish] Verification Step 6: Checking destination account flags and restrictions...');
+            const accountInfoResponse = await (client as any).request({
+              command: 'account_info',
+              account: finisherAddress,
+              ledger_index: 'validated',
+            });
+
+            if (accountInfoResponse.result) {
+              const accountData = accountInfoResponse.result.account_data;
+              const flags = accountData.Flags || 0;
+              const sequence = accountData.Sequence;
+              const balance = accountData.Balance;
+
+              verificationDetails.destinationAccount = {
+                address: finisherAddress,
+                sequence,
+                balance: balance ? parseFloat((dropsToXrp as any)(String(balance))) : 0,
+                flags,
+                flagsHex: '0x' + flags.toString(16),
+                // Check for common flags that might prevent transactions
+                hasDisableMaster: (flags & 0x00100000) !== 0, // asfDisableMaster
+                hasRequireAuth: (flags & 0x00040000) !== 0, // asfRequireAuth
+                hasRequireDestTag: (flags & 0x00020000) !== 0, // asfRequireDestTag
+                hasDisallowXRP: (flags & 0x00080000) !== 0, // asfDisallowXRP
+                hasGlobalFreeze: (flags & 0x00400000) !== 0, // asfGlobalFreeze
+                hasNoFreeze: (flags & 0x00200000) !== 0, // asfNoFreeze
+              };
+
+              console.log('[XRPL Escrow Finish] Destination account info:', verificationDetails.destinationAccount);
+
+              // Check if account has enough balance for transaction fee
+              const minBalance = 10000000; // 10 XRP reserve (in drops)
+              if (parseInt(String(balance)) < minBalance + 12000) { // 12 drops for fee
+                console.warn('[XRPL Escrow Finish] WARNING: Destination account may not have enough balance for transaction fee', {
+                  balance: verificationDetails.destinationAccount.balance,
+                  minRequired: (minBalance + 12000) / 1000000,
+                });
+              }
+
+              // Check for flags that might prevent transactions
+              if (verificationDetails.destinationAccount.hasDisableMaster) {
+                console.warn('[XRPL Escrow Finish] WARNING: Destination account has DisableMaster flag set');
+              }
+              if (verificationDetails.destinationAccount.hasGlobalFreeze) {
+                console.error('[XRPL Escrow Finish] CRITICAL: Destination account has GlobalFreeze flag set!');
+                await client.disconnect();
+                throw new Error('Destination account has GlobalFreeze flag set, cannot finish escrow');
+              }
+            }
+          } catch (accountError: any) {
+            const errorCode = accountError?.data?.error;
+            if (errorCode === 'actNotFound') {
+              console.error('[XRPL Escrow Finish] CRITICAL: Destination account not found on XRPL!', {
+                finisherAddress,
+              });
+              await client.disconnect();
+              throw new Error(`Destination account ${finisherAddress} not found on XRPL`);
+            }
+            console.warn('[XRPL Escrow Finish] Could not check destination account info:', accountError);
+          }
+
+          // Verification 7: Check if escrow was recently created (validation delay check)
+          try {
+            console.log('[XRPL Escrow Finish] Verification Step 7: Checking escrow validation status...');
+            if (verificationDetails.escrowCreateTx && verificationDetails.escrowCreateTx.hash) {
+              // Get the latest validated ledger
+              const ledgerResponse = await (client as any).request({
+                command: 'ledger',
+                ledger_index: 'validated',
+              });
+
+              const currentLedgerIndex = ledgerResponse.result.ledger_index;
+              const currentLedgerTime = ledgerResponse.result.ledger.close_time;
+
+              // Get the EscrowCreate transaction to find which ledger it was validated in
+              const createTxResponse = await (client as any).request({
+                command: 'tx',
+                transaction: verificationDetails.escrowCreateTx.hash,
+              });
+
+              if (createTxResponse.result) {
+                const createLedgerIndex = createTxResponse.result.ledger_index;
+                const ledgersSinceCreation = currentLedgerIndex - createLedgerIndex;
+
+                verificationDetails.validationStatus = {
+                  createLedgerIndex,
+                  currentLedgerIndex,
+                  ledgersSinceCreation,
+                  currentLedgerTime,
+                  createLedgerTime: createTxResponse.result.close_time_iso,
+                  isRecentlyCreated: ledgersSinceCreation < 10,
+                };
+
+                console.log('[XRPL Escrow Finish] Escrow validation status:', verificationDetails.validationStatus);
+
+                if (ledgersSinceCreation < 2) {
+                  console.warn('[XRPL Escrow Finish] WARNING: Escrow was created very recently, may not be fully validated', {
+                    ledgersSinceCreation,
+                  });
+                }
+              }
+            }
+          } catch (validationError) {
+            console.warn('[XRPL Escrow Finish] Could not check escrow validation status:', validationError);
+          }
         }
 
         console.log('[XRPL Escrow Finish] All verifications passed, proceeding with transaction:', {
