@@ -1121,19 +1121,29 @@ export class XRPLEscrowService {
 
         console.log('[XRPL] EscrowFinish transaction before autofill:', JSON.stringify(escrowFinish, null, 2));
 
-        // Ensure client is still connected before making account_info request
-        // The client might have been disconnected in error handling paths
-        if (!client.isConnected()) {
-          console.warn('[XRPL Escrow Finish] Client disconnected, reconnecting...');
-          await client.connect();
-        }
-
         // Manually fill required fields (Sequence, Fee)
-        const accountInfo = await (client as any).request({
-          command: 'account_info',
-          account: wallet.classicAddress,
-          ledger_index: 'validated',
-        });
+        // The client might have been disconnected in error handling paths, so try-catch and reconnect if needed
+        let accountInfo: any;
+        try {
+          accountInfo = await (client as any).request({
+            command: 'account_info',
+            account: wallet.classicAddress,
+            ledger_index: 'validated',
+          });
+        } catch (connectionError: any) {
+          // If client is disconnected, reconnect and try again
+          if (connectionError?.name === 'NotConnectedError' || connectionError?.message?.includes('NotConnected')) {
+            console.warn('[XRPL Escrow Finish] Client disconnected, reconnecting and retrying account_info...');
+            await client.connect();
+            accountInfo = await (client as any).request({
+              command: 'account_info',
+              account: wallet.classicAddress,
+              ledger_index: 'validated',
+            });
+          } else {
+            throw connectionError;
+          }
+        }
         escrowFinish.Sequence = accountInfo.result.account_data.Sequence;
         escrowFinish.Fee = '12'; // Set a default fee (in drops), adjust as needed
 
