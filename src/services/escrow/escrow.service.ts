@@ -183,10 +183,10 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Automatically fetch payer wallet address from authenticated user's registered wallet
+      // Automatically fetch payer wallet address and encrypted secret from authenticated user's registered wallet
       const { data: payerWallet } = await adminClient
         .from('wallets')
-        .select('xrpl_address')
+        .select('xrpl_address, encrypted_wallet_secret')
         .eq('user_id', userId)
         .single();
 
@@ -195,6 +195,14 @@ export class EscrowService {
           success: false,
           message: 'Wallet not found. Please create a wallet first.',
           error: 'Wallet not found. Please create a wallet first.',
+        };
+      }
+
+      if (!payerWallet.xrpl_address) {
+        return {
+          success: false,
+          message: 'Wallet address not found. Please connect a wallet first.',
+          error: 'Wallet address not found',
         };
       }
 
@@ -367,52 +375,48 @@ export class EscrowService {
         amountUsd = escrowAmount * usdRate;
       }
 
-      // Get platform wallet credentials from environment variables
-      const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
-      const platformSecret = process.env.XRPL_PLATFORM_SECRET;
+      // Use user's wallet address (payerWallet already fetched above)
+      const userWalletAddress = payerWallet.xrpl_address;
+      const hasEncryptedSecret = !!payerWallet.encrypted_wallet_secret;
 
-      // #region agent log
-      const logDataA = {location:'escrow.service.ts:355',message:'createEscrow: Checking platform wallet env vars',data:{hasAddress:!!platformAddress,hasSecret:!!platformSecret,addressLength:platformAddress?.length,secretLength:platformSecret?.length,secretFirst3:platformSecret?.substring(0,3),secretLast3:platformSecret?.substring(platformSecret.length-3),hasNewlines:platformSecret?.includes('\n'),hasCarriageReturn:platformSecret?.includes('\r'),hasSpaces:platformSecret?.includes(' '),hasQuotes:platformSecret?.includes('"')||platformSecret?.includes("'")},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
-      console.log('[DEBUG]', JSON.stringify(logDataA));
-      console.error('[DEBUG]', JSON.stringify(logDataA)); // Also log to stderr for better visibility
+      // Check user's XRPL balance on-chain before proceeding
+      console.log('[Escrow Create] Checking user XRPL balance on-chain...', {
+        userWalletAddress,
+        requiredAmountXrp: amountXrp,
+      });
+
       try {
-        const fs = require('fs');
-        const path = require('path');
-        const logPath = path.join(process.cwd(), 'debug.log');
-        fs.appendFileSync(logPath, JSON.stringify(logDataA) + '\n');
-      } catch (e) {}
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataA)}).catch(()=>{});
-      // #endregion
+        const userBalanceXrp = await xrplWalletService.getBalance(userWalletAddress);
+        const transactionFeeXrp = 0.000012; // Standard XRPL transaction fee (~12 drops)
+        const requiredTotalXrp = amountXrp + transactionFeeXrp;
 
-      if (!platformAddress || !platformSecret) {
+        console.log('[Escrow Create] Balance check result:', {
+          userBalanceXrp,
+          requiredAmountXrp: amountXrp,
+          transactionFeeXrp,
+          requiredTotalXrp,
+          sufficient: userBalanceXrp >= requiredTotalXrp,
+        });
+
+        if (userBalanceXrp < requiredTotalXrp) {
+          return {
+            success: false,
+            message: `Insufficient XRP balance. You have ${userBalanceXrp.toFixed(6)} XRP but need ${requiredTotalXrp.toFixed(6)} XRP (${amountXrp.toFixed(6)} XRP for escrow + ${transactionFeeXrp.toFixed(6)} XRP for transaction fee).`,
+            error: 'Insufficient balance',
+          };
+        }
+      } catch (balanceError) {
+        console.error('[Escrow Create] Failed to check user balance:', balanceError);
         return {
           success: false,
-          message: 'Platform wallet not configured. XRPL_PLATFORM_ADDRESS and XRPL_PLATFORM_SECRET must be set.',
-          error: 'Platform wallet not configured',
+          message: 'Failed to verify wallet balance. Please try again.',
+          error: 'Balance check failed',
         };
       }
 
-      // #region agent log
-      const logDataB = {location:'escrow.service.ts:365',message:'createEscrow: Platform wallet env vars validated',data:{address:platformAddress,secretLength:platformSecret.length,secretTrimmedLength:platformSecret.trim().length,secretStartsWithS:platformSecret.startsWith('s'),secretMatchesBase58Pattern:/^[a-zA-Z0-9]+$/.test(platformSecret)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'};
-      console.log('[DEBUG]', JSON.stringify(logDataB));
-      console.error('[DEBUG]', JSON.stringify(logDataB)); // Also log to stderr
-      try {
-        const fs = require('fs');
-        const path = require('path');
-        const logPath = path.join(process.cwd(), 'debug.log');
-        fs.appendFileSync(logPath, JSON.stringify(logDataB) + '\n');
-      } catch (e) {}
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logDataB)}).catch(()=>{});
-      // #endregion
-      
-      // Trim the secret to remove any whitespace issues
-      const trimmedSecret = platformSecret.trim();
-      if (trimmedSecret !== platformSecret) {
-        console.warn('[Escrow Create] Platform secret had whitespace, using trimmed version');
-      }
-
-      // Create escrow on XRPL using platform wallet (users have deposited funds to platform wallet)
-      // The platform wallet signs the transaction directly, no XUMM needed
+      // Create escrow on XRPL using user's wallet
+      // If user has encrypted_wallet_secret, auto-sign the transaction
+      // Otherwise, use XUMM for user signing
       // XRPL requires either FinishAfter or CancelAfter to be specified
       // Use expectedReleaseDate if provided, otherwise set a default (30 days from now)
       // XRPL uses Ripple Epoch (seconds since Jan 1, 2000), not Unix Epoch (seconds since Jan 1, 1970)
@@ -464,46 +468,102 @@ export class EscrowService {
         });
       }
 
-      console.log('[Escrow Create] Creating escrow on XRPL using platform wallet:', {
-        platformAddress,
+      console.log('[Escrow Create] Creating escrow on XRPL using user wallet:', {
+        userWalletAddress,
         toAddress: counterpartyWalletAddress,
         amountXrp,
-        finishAfter: new Date(finishAfter * 1000).toISOString(),
+        finishAfter: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+        hasEncryptedSecret,
       });
 
-      let xrplTxHash: string;
-      try {
-        xrplTxHash = await xrplEscrowService.createEscrow({
-          fromAddress: platformAddress,
-          toAddress: counterpartyWalletAddress,
-          amountXrp,
-          finishAfter, // XRPL requires either FinishAfter or CancelAfter
-          walletSecret: trimmedSecret, // Use trimmed secret
-        });
-        console.log('[Escrow Create] Escrow created on XRPL:', {
-          txHash: xrplTxHash,
-          platformAddress,
-          toAddress: counterpartyWalletAddress,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        // #region agent log
-        const logError = {location:'escrow.service.ts:393',message:'createEscrow: XRPL createEscrow call failed',data:{errorMessage,errorName:error instanceof Error ? error.name : 'Unknown',errorStack:error instanceof Error ? error.stack : undefined,platformAddress,secretLength:trimmedSecret?.length,secretFirst5:trimmedSecret?.substring(0,5)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ERROR'};
-        console.error('[DEBUG ERROR]', JSON.stringify(logError));
+      let xrplTxHash: string | null = null;
+      let xummUrl: string | undefined;
+      let xummUuid: string | undefined;
+
+      // Branch: Use encrypted secret for auto-sign if available, otherwise use XUMM
+      if (hasEncryptedSecret) {
+        // Auto-sign flow: Decrypt secret and sign directly
         try {
-          const fs = require('fs');
-          const path = require('path');
-          const logPath = path.join(process.cwd(), 'debug.log');
-          fs.appendFileSync(logPath, JSON.stringify(logError) + '\n');
-        } catch (e) {}
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logError)}).catch(()=>{});
-        // #endregion
-        console.error('[Escrow Create] Failed to create escrow on XRPL:', errorMessage);
-        return {
-          success: false,
-          message: `Failed to create escrow on XRPL: ${errorMessage}`,
-          error: 'XRPL transaction failed',
-        };
+          console.log('[Escrow Create] Using encrypted wallet secret for auto-signing...');
+          const decryptedSecret = encryptionService.decrypt(payerWallet.encrypted_wallet_secret);
+          const trimmedSecret = decryptedSecret.trim();
+
+          xrplTxHash = await xrplEscrowService.createEscrow({
+            fromAddress: userWalletAddress,
+            toAddress: counterpartyWalletAddress,
+            amountXrp,
+            finishAfter, // XRPL requires either FinishAfter or CancelAfter
+            walletSecret: trimmedSecret,
+          });
+
+          console.log('[Escrow Create] Escrow created on XRPL (auto-signed):', {
+            txHash: xrplTxHash,
+            userWalletAddress,
+            toAddress: counterpartyWalletAddress,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[Escrow Create] Failed to create escrow with encrypted secret:', errorMessage);
+          
+          // If decryption fails, fall back to XUMM
+          if (errorMessage.includes('decrypt') || errorMessage.includes('Decryption')) {
+            console.log('[Escrow Create] Decryption failed, falling back to XUMM flow...');
+            hasEncryptedSecret = false; // Force XUMM flow
+          } else {
+            return {
+              success: false,
+              message: `Failed to create escrow on XRPL: ${errorMessage}`,
+              error: 'XRPL transaction failed',
+            };
+          }
+        }
+      }
+
+      // XUMM flow: If no encrypted secret or decryption failed
+      if (!hasEncryptedSecret || !xrplTxHash) {
+        console.log('[Escrow Create] Using XUMM for user signing...');
+        
+        try {
+          // Prepare unsigned EscrowCreate transaction
+          const preparedTx = await xrplEscrowService.prepareEscrowCreateTransaction({
+            fromAddress: userWalletAddress,
+            toAddress: counterpartyWalletAddress,
+            amountXrp,
+            finishAfter,
+          });
+
+          // Create XUMM payload
+          const xummPayload = await xummService.createPayload(preparedTx.transaction);
+
+          xummUrl = xummPayload.next.always;
+          xummUuid = xummPayload.uuid;
+
+          console.log('[Escrow Create] XUMM payload created:', {
+            xummUuid,
+            userWalletAddress,
+            toAddress: counterpartyWalletAddress,
+          });
+
+          // Store pending transaction record for tracking
+          await adminClient
+            .from('transactions')
+            .insert({
+              user_id: userId,
+              type: 'escrow_create',
+              status: 'pending',
+              amount_xrp: amountXrp,
+              amount_usd: amountUsd,
+              description: `Escrow creation pending XUMM signature | XUMM_UUID:${xummUuid}`,
+            });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[Escrow Create] Failed to create XUMM payload:', errorMessage);
+          return {
+            success: false,
+            message: `Failed to create XUMM payload: ${errorMessage}`,
+            error: 'XUMM payload creation failed',
+          };
+        }
       }
 
       // Get sequence number for the current year
@@ -518,8 +578,13 @@ export class EscrowService {
 
       const nextSequence = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
 
+      // Determine escrow status based on signing method
+      const escrowStatus = xrplTxHash ? 'active' : 'pending';
+      const escrowDescription = xrplTxHash
+        ? request.description || `Escrow created on XRPL: ${xrplTxHash}`
+        : request.description || (xummUuid ? `Escrow creation pending XUMM signature | XUMM_UUID:${xummUuid}` : 'Escrow creation pending');
+
       // Create escrow record in database with contact information and terms
-      // Status is 'active' because the XRPL transaction was already submitted successfully
       const { data: escrow, error: escrowError } = await adminClient
         .from('escrows')
         .insert({
@@ -527,9 +592,9 @@ export class EscrowService {
           counterparty_id: counterpartyUserId,
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
-          status: 'active', // Escrow is active because XRPL transaction was submitted
-          xrpl_escrow_id: xrplTxHash, // Store the real XRPL transaction hash
-          description: request.description || `Escrow created on XRPL: ${xrplTxHash}`,
+          status: escrowStatus, // 'active' if auto-signed, 'pending' if XUMM
+          xrpl_escrow_id: xrplTxHash || null, // Store XRPL transaction hash if available
+          description: escrowDescription,
           transaction_type: request.transactionType || 'custom',
           industry: request.industry || null,
           progress: 0,
@@ -611,64 +676,101 @@ export class EscrowService {
         }
       }
 
-      // Create completed transaction record for escrow creation
-      await adminClient
-        .from('transactions')
-        .insert({
-          user_id: userId,
-          type: 'escrow_create',
-          amount_xrp: amountXrp,
-          amount_usd: amountUsd,
-          xrpl_tx_hash: xrplTxHash,
-          status: 'completed',
-          escrow_id: escrow.id,
-          description: `Escrow create: ${request.description || 'No description'} | XRPL TX: ${xrplTxHash}`,
-        });
+      // Create transaction record for escrow creation
+      // Only create if not already created (XUMM flow creates it earlier)
+      if (!xummUuid) {
+        await adminClient
+          .from('transactions')
+          .insert({
+            user_id: userId,
+            type: 'escrow_create',
+            amount_xrp: amountXrp,
+            amount_usd: amountUsd,
+            xrpl_tx_hash: xrplTxHash,
+            status: 'completed',
+            escrow_id: escrow.id,
+            description: `Escrow create: ${request.description || 'No description'} | XRPL TX: ${xrplTxHash}`,
+          });
+      } else {
+        // Update the existing pending transaction with escrow_id
+        await adminClient
+          .from('transactions')
+          .update({
+            escrow_id: escrow.id,
+          })
+          .eq('user_id', userId)
+          .eq('type', 'escrow_create')
+          .eq('status', 'pending')
+          .like('description', `%XUMM_UUID:${xummUuid}%`);
+      }
 
       // Create notifications for initiator and counterparty (if user)
-      try {
-        // Initiator
-        await notificationService.createNotification({
-          userId,
-          type: 'escrow_created',
-          title: 'Escrow created',
-          message: `Escrow was created for ${amountXrp.toFixed(6)} XRP.`,
-          metadata: {
-            escrowId: escrow.id,
-            xrplTxHash: xrplTxHash,
-          },
-        });
-
-        // Counterparty
-        if (counterpartyUserId) {
+      // Only send notifications if escrow was auto-signed (active status)
+      if (xrplTxHash) {
+        try {
+          // Initiator
           await notificationService.createNotification({
-            userId: counterpartyUserId,
+            userId,
             type: 'escrow_created',
-            title: 'New escrow assigned',
-            message: `You have been added to a new escrow for ${amountXrp.toFixed(6)} XRP.`,
+            title: 'Escrow created',
+            message: `Escrow was created for ${amountXrp.toFixed(6)} XRP.`,
             metadata: {
               escrowId: escrow.id,
               xrplTxHash: xrplTxHash,
             },
           });
+
+          // Counterparty
+          if (counterpartyUserId) {
+            await notificationService.createNotification({
+              userId: counterpartyUserId,
+              type: 'escrow_created',
+              title: 'New escrow assigned',
+              message: `You have been added to a new escrow for ${amountXrp.toFixed(6)} XRP.`,
+              metadata: {
+                escrowId: escrow.id,
+                xrplTxHash: xrplTxHash,
+              },
+            });
+          }
+        } catch (notifyError) {
+          console.warn('Failed to create escrow created notifications:', notifyError);
         }
-      } catch (notifyError) {
-        console.warn('Failed to create escrow created notifications:', notifyError);
       }
 
-      return {
-        success: true,
-        message: 'Escrow created successfully on XRPL',
-        data: {
-          escrowId: escrow.id,
-          amount: {
-            usd: parseFloat(amountUsd.toFixed(2)),
-            xrp: parseFloat(amountXrp.toFixed(6)),
+      // Return response with appropriate message and data
+      if (xrplTxHash) {
+        // Auto-signed: Escrow created successfully
+        return {
+          success: true,
+          message: 'Escrow created successfully on XRPL',
+          data: {
+            escrowId: escrow.id,
+            amount: {
+              usd: parseFloat(amountUsd.toFixed(2)),
+              xrp: parseFloat(amountXrp.toFixed(6)),
+            },
+            status: escrow.status,
+            xrplEscrowId: xrplTxHash,
           },
-          status: escrow.status,
-          xrplEscrowId: xrplTxHash,
-        },
-      };
+        };
+      } else {
+        // XUMM flow: Return XUMM URL for user signing
+        return {
+          success: true,
+          message: 'Please sign the escrow creation transaction in your Xaman (XUMM) wallet',
+          data: {
+            escrowId: escrow.id,
+            amount: {
+              usd: parseFloat(amountUsd.toFixed(2)),
+              xrp: parseFloat(amountXrp.toFixed(6)),
+            },
+            status: escrow.status,
+            xummUrl: xummUrl,
+            xummUuid: xummUuid,
+          },
+        };
+      }
     } catch (error) {
       // #region agent log
       const logCatch = {location:'escrow.service.ts:catch',message:'createEscrow: Outer catch block',data:{errorMessage:error instanceof Error ? error.message : String(error),errorName:error instanceof Error ? error.name : 'Unknown',errorStack:error instanceof Error ? error.stack : undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CATCH'};
