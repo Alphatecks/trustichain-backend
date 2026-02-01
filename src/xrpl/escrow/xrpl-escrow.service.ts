@@ -203,6 +203,52 @@ export class XRPLEscrowService {
             ObjectSequence: (matchingEscrow as any).Sequence,
             TransactionSequence: params.escrowSequence,
           });
+
+          // CRITICAL: Verify that the sequence matches the actual EscrowCreate transaction sequence
+          // The OfferSequence in EscrowFinish must match the Sequence from EscrowCreate, not the object sequence
+          try {
+            const txResponse = await (client as any).request({
+              command: 'tx',
+              transaction: params.expectedTxHash,
+            });
+
+            if (txResponse.result) {
+              const txResult = txResponse.result as any;
+              // Extract sequence from transaction - try multiple paths
+              const actualTxSequence = 
+                txResult.tx_json?.Sequence || 
+                txResult.Sequence || 
+                txResult.tx?.Sequence ||
+                null;
+
+              if (actualTxSequence !== null) {
+                console.log('[XRPL Escrow Verification] EscrowCreate transaction sequence:', {
+                  expectedSequence: params.escrowSequence,
+                  actualTxSequence: actualTxSequence,
+                  objectSequence: (matchingEscrow as any).Sequence,
+                  matches: actualTxSequence === params.escrowSequence,
+                });
+
+                // Verify the sequence matches
+                if (actualTxSequence !== params.escrowSequence) {
+                  return {
+                    exists: false,
+                    error: `Sequence mismatch: The provided sequence ${params.escrowSequence} does not match the EscrowCreate transaction sequence ${actualTxSequence}. Use the transaction sequence (${actualTxSequence}) as OfferSequence in EscrowFinish.`,
+                  };
+                }
+              } else {
+                console.warn('[XRPL Escrow Verification] Could not extract sequence from EscrowCreate transaction');
+              }
+            }
+          } catch (txError: any) {
+            const errorCode = txError?.data?.error;
+            if (errorCode === 'txnNotFound') {
+              console.warn('[XRPL Escrow Verification] EscrowCreate transaction not found by hash, cannot verify sequence');
+            } else {
+              console.warn('[XRPL Escrow Verification] Error looking up EscrowCreate transaction:', txError);
+            }
+            // Continue with verification but log warning
+          }
         }
       }
 
@@ -427,12 +473,47 @@ export class XRPLEscrowService {
         // Use condition from verification if not provided
         const conditionToUse = params.condition || verification.condition;
 
+        // Additional validation: Verify sequence by looking up EscrowCreate transaction
+        let actualTxSequence: number | null = null;
+        if (params.expectedTxHash) {
+          try {
+            const txResponse = await (client as any).request({
+              command: 'tx',
+              transaction: params.expectedTxHash,
+            });
+
+            if (txResponse.result) {
+              const txResult = txResponse.result as any;
+              actualTxSequence = 
+                txResult.tx_json?.Sequence || 
+                txResult.Sequence || 
+                txResult.tx?.Sequence ||
+                null;
+
+              if (actualTxSequence !== null && actualTxSequence !== params.escrowSequence) {
+                await client.disconnect();
+                throw new Error(
+                  `Sequence mismatch: The provided sequence ${params.escrowSequence} does not match the EscrowCreate transaction sequence ${actualTxSequence}. Use the transaction sequence (${actualTxSequence}) as OfferSequence in EscrowFinish.`
+                );
+              }
+            }
+          } catch (txError: any) {
+            const errorCode = txError?.data?.error;
+            if (errorCode !== 'txnNotFound') {
+              console.warn('[XRPL Escrow Finish] Could not verify sequence from EscrowCreate transaction:', txError);
+            }
+            // Continue if transaction not found, but log warning
+          }
+        }
+
         console.log('[XRPL Escrow Finish] Escrow verified, proceeding with transaction:', {
           ownerAddress: params.ownerAddress,
           finisherAddress,
           escrowSequence: params.escrowSequence,
+          actualTxSequence: actualTxSequence || 'not verified',
           hasCondition: !!conditionToUse,
           finishAfter: verification.finishAfter,
+          objectSequence: verification.escrowObject ? (verification.escrowObject as any).Sequence : 'unknown',
         });
 
         // EscrowFinish transaction structure:
@@ -990,6 +1071,42 @@ export class XRPLEscrowService {
           Amount: (escrowObject as any).Amount,
         });
 
+        // CRITICAL VALIDATION: Verify the sequence matches the EscrowCreate transaction
+        // Double-check by looking up the transaction again to ensure we have the correct sequence
+        let verifiedSequence = escrowSequence;
+        try {
+          const verifyTxResponse = await (client as any).request({
+            command: 'tx',
+            transaction: txHash,
+          });
+
+          if (verifyTxResponse.result) {
+            const verifyTxResult = verifyTxResponse.result as any;
+            const txSequence = 
+              verifyTxResult.tx_json?.Sequence || 
+              verifyTxResult.Sequence || 
+              verifyTxResult.tx?.Sequence ||
+              null;
+
+            if (txSequence !== null) {
+              if (txSequence !== escrowSequence) {
+                console.error('[XRPL] Sequence mismatch detected:', {
+                  extractedSequence: escrowSequence,
+                  verifiedTxSequence: txSequence,
+                  objectSequence: (escrowObject as any).Sequence,
+                });
+                // Use the verified transaction sequence
+                verifiedSequence = txSequence;
+                console.warn('[XRPL] Using verified transaction sequence:', verifiedSequence);
+              } else {
+                console.log('[XRPL] Sequence verified: matches EscrowCreate transaction');
+              }
+            }
+          }
+        } catch (verifyError) {
+          console.warn('[XRPL] Could not verify sequence from transaction, using extracted sequence:', verifyError);
+        }
+
         // Extract amount from escrow object (it's in drops)
         const escrowAmountDrops = (escrowObject as any).Amount;
         // dropsToXrp expects a string, ensure it's always a string
@@ -1000,8 +1117,15 @@ export class XRPLEscrowService {
         // This is the account sequence number from the EscrowCreate transaction, NOT the escrow object sequence
         // The escrow object has its own sequence, but EscrowFinish requires the transaction sequence
 
+        console.log('[XRPL] Returning escrow details with verified sequence:', {
+          sequence: verifiedSequence,
+          objectSequence: (escrowObject as any).Sequence,
+          originalExtractedSequence: escrowSequence,
+          sequenceSource: verifiedSequence === escrowSequence ? 'original' : 'verified',
+        });
+
         return {
-          sequence: escrowSequence, // Use transaction sequence (account sequence from EscrowCreate), not escrow object sequence
+          sequence: verifiedSequence, // Use verified transaction sequence (account sequence from EscrowCreate), not escrow object sequence
           amount: escrowAmountXrp, // Use amount from escrow object (more reliable than transaction amount)
           destination: (escrowObject as any).Destination || '',
           finishAfter: (escrowObject as any).FinishAfter ? ((escrowObject as any).FinishAfter as number) : undefined,
