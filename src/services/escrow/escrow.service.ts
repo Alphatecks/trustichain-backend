@@ -1368,10 +1368,22 @@ export class EscrowService {
           ownerAddress: actualOwnerAddress,
         });
 
+        console.log('[Escrow Release] Calling getEscrowDetailsByTxHash...', {
+          txHash: escrow.xrpl_escrow_id,
+          ownerAddress: actualOwnerAddress,
+        });
+        
         let escrowDetails = await xrplEscrowService.getEscrowDetailsByTxHash(
           escrow.xrpl_escrow_id,
           actualOwnerAddress
         );
+        
+        console.log('[Escrow Release] getEscrowDetailsByTxHash returned:', {
+          hasDetails: !!escrowDetails,
+          sequence: escrowDetails?.sequence,
+          amount: escrowDetails?.amount,
+          destination: escrowDetails?.destination,
+        });
 
         // If transaction hash lookup failed, try fallback: query account_objects directly
         // This handles escrows created with placeholder hashes
@@ -1634,6 +1646,12 @@ export class EscrowService {
 
         // CRITICAL: Double-verify the sequence is the transaction sequence, not object sequence
         // Query the EscrowCreate transaction directly to ensure we have the correct sequence
+        console.log('[Escrow Release] Starting sequence verification...', {
+          txHash: escrow.xrpl_escrow_id,
+          returnedSequence: escrowDetails.sequence,
+          ownerAddress: actualOwnerAddress,
+        });
+        
         try {
           const { Client } = await import('xrpl');
           const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
@@ -1645,9 +1663,15 @@ export class EscrowService {
           await client.connect();
           
           try {
+            console.log('[Escrow Release] Querying EscrowCreate transaction for sequence verification...');
             const txResponse = await client.request({
               command: 'tx',
               transaction: escrow.xrpl_escrow_id,
+            });
+            
+            console.log('[Escrow Release] Transaction query result:', {
+              hasResult: !!txResponse.result,
+              resultKeys: txResponse.result ? Object.keys(txResponse.result) : [],
             });
             
             if (txResponse.result) {
@@ -1658,6 +1682,14 @@ export class EscrowService {
                 txResult.tx?.Sequence ||
                 null;
               
+              console.log('[Escrow Release] Sequence extraction:', {
+                actualTxSequence,
+                returnedSequence: escrowDetails.sequence,
+                txJsonSequence: txResult.tx_json?.Sequence,
+                txResultSequence: txResult.Sequence,
+                txSequence: txResult.tx?.Sequence,
+              });
+              
               if (actualTxSequence !== null) {
                 if (actualTxSequence !== escrowDetails.sequence) {
                   console.error('[Escrow Release] CRITICAL: Sequence mismatch detected!', {
@@ -1665,20 +1697,37 @@ export class EscrowService {
                     actualTxSequence: actualTxSequence,
                     txHash: escrow.xrpl_escrow_id,
                     ownerAddress: actualOwnerAddress,
+                    difference: Math.abs(actualTxSequence - escrowDetails.sequence),
                   });
                   // Correct the sequence to use the actual transaction sequence
                   escrowDetails.sequence = actualTxSequence;
                   console.log('[Escrow Release] Corrected sequence to transaction sequence:', actualTxSequence);
                 } else {
-                  console.log('[Escrow Release] Sequence verified: matches EscrowCreate transaction');
+                  console.log('[Escrow Release] Sequence verified: matches EscrowCreate transaction', {
+                    sequence: actualTxSequence,
+                  });
                 }
+              } else {
+                console.error('[Escrow Release] CRITICAL: Could not extract sequence from transaction!', {
+                  txHash: escrow.xrpl_escrow_id,
+                  txResultKeys: Object.keys(txResult),
+                  txJsonKeys: txResult.tx_json ? Object.keys(txResult.tx_json) : [],
+                });
               }
+            } else {
+              console.error('[Escrow Release] CRITICAL: Transaction query returned no result!', {
+                txHash: escrow.xrpl_escrow_id,
+              });
             }
           } finally {
             await client.disconnect();
           }
         } catch (verifyError) {
-          console.warn('[Escrow Release] Could not verify sequence from transaction (will proceed with returned sequence):', verifyError);
+          console.error('[Escrow Release] CRITICAL: Sequence verification failed!', {
+            error: verifyError instanceof Error ? verifyError.message : String(verifyError),
+            txHash: escrow.xrpl_escrow_id,
+            returnedSequence: escrowDetails.sequence,
+          });
         }
 
         // Check if escrow has a condition that requires fulfillment
