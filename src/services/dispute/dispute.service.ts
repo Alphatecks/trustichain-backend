@@ -54,6 +54,33 @@ export class DisputeService {
   }
 
   /**
+   * Look up dispute by UUID or case_id (#DSP-YYYY-XXX)
+   */
+  private async lookupDispute(disputeIdInput: string): Promise<{ data: any; error: any }> {
+    const adminClient = supabaseAdmin || supabase;
+    const disputeId = disputeIdInput.trim();
+
+    // Check if it's a UUID
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(disputeId);
+    
+    if (isUUID) {
+      // Query by UUID
+      return await adminClient
+        .from('disputes')
+        .select('id, initiator_user_id, respondent_user_id, case_id')
+        .eq('id', disputeId)
+        .single();
+    } else {
+      // Query by case_id (e.g., #DSP-2025-001)
+      return await adminClient
+        .from('disputes')
+        .select('id, initiator_user_id, respondent_user_id, case_id')
+        .eq('case_id', disputeId)
+        .single();
+    }
+  }
+
+  /**
    * Compute start and end of a month (UTC) from "YYYY-MM" or current month
    */
   private getMonthRange(month?: string): { start: Date; end: Date } {
@@ -772,12 +799,8 @@ export class DisputeService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Verify dispute exists and user has access
-      const { data: dispute, error: disputeError } = await adminClient
-        .from('disputes')
-        .select('id, initiator_user_id, respondent_user_id')
-        .eq('id', disputeId)
-        .single();
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
 
       if (disputeError || !dispute) {
         return {
@@ -880,12 +903,8 @@ export class DisputeService {
 
       console.log('[DEBUG] getEvidence called', { userId, disputeId });
 
-      // Verify dispute exists and user has access
-      const { data: dispute, error: disputeError } = await adminClient
-        .from('disputes')
-        .select('id, initiator_user_id, respondent_user_id')
-        .eq('id', disputeId)
-        .single();
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
 
       if (disputeError || !dispute) {
         console.error('[DEBUG] Dispute not found or error:', { disputeError, disputeId });
@@ -909,6 +928,12 @@ export class DisputeService {
       }
 
       // Get all evidence for the dispute - use dispute.id from database query
+      console.log('[DEBUG] Querying evidence with dispute.id:', { 
+        disputeDbId: dispute.id, 
+        originalDisputeId: disputeId,
+        caseId: dispute.case_id 
+      });
+      
       const { data: evidenceList, error: evidenceError } = await adminClient
         .from('dispute_evidence')
         .select('*')
@@ -916,7 +941,12 @@ export class DisputeService {
         .order('uploaded_at', { ascending: false });
 
       if (evidenceError) {
-        console.error('[DEBUG] Failed to fetch evidence:', { evidenceError, disputeId });
+        console.error('[DEBUG] Failed to fetch evidence:', { 
+          evidenceError, 
+          disputeId,
+          disputeDbId: dispute.id,
+          errorDetails: evidenceError 
+        });
         return {
           success: false,
           message: 'Failed to fetch evidence',
@@ -927,7 +957,15 @@ export class DisputeService {
       console.log('[DEBUG] Evidence query result:', { 
         count: evidenceList?.length || 0, 
         disputeId,
-        evidenceList: evidenceList?.map((e: any) => ({ id: e.id, dispute_id: e.dispute_id, title: e.title }))
+        disputeDbId: dispute.id,
+        caseId: dispute.case_id,
+        evidenceList: evidenceList?.map((e: any) => ({ 
+          id: e.id, 
+          dispute_id: e.dispute_id, 
+          title: e.title,
+          fileName: e.file_name,
+          uploadedAt: e.uploaded_at
+        }))
       });
 
       const evidence: EvidenceItem[] = (evidenceList || []).map((e: any) => ({
@@ -975,12 +1013,8 @@ export class DisputeService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Verify dispute exists and user has access
-      const { data: dispute, error: disputeError } = await adminClient
-        .from('disputes')
-        .select('id, initiator_user_id, respondent_user_id')
-        .eq('id', disputeId)
-        .single();
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
 
       if (disputeError || !dispute) {
         return {
@@ -1087,12 +1121,8 @@ export class DisputeService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Verify dispute exists and user has access
-      const { data: dispute, error: disputeError } = await adminClient
-        .from('disputes')
-        .select('id, initiator_user_id, respondent_user_id')
-        .eq('id', disputeId)
-        .single();
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
 
       if (disputeError || !dispute) {
         return {
