@@ -475,14 +475,14 @@ export class EscrowService {
           });
         }
       } else {
-        // No FinishAfter set - use CancelAfter set to far future (10 years from now)
-        // This satisfies XRPL's requirement while allowing immediate finishing by either party
-        // CancelAfter doesn't prevent finishing - it only allows cancellation after that time
-        const unixTimestamp = Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60); // 10 years in seconds
-        cancelAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
-        finishAfter = undefined;
-        console.log('[Escrow Create] No FinishAfter set - using CancelAfter (far future) to allow immediate release:', {
-          cancelAfter: new Date((cancelAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+        // No FinishAfter set by user - set FinishAfter to current time to satisfy XRPL requirement
+        // Setting FinishAfter to current/past time allows immediate finishing by either party
+        // XRPL requires either Condition or FinishAfter (CancelAfter alone is not enough)
+        const unixTimestamp = Math.floor(Date.now() / 1000);
+        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch (current time)
+        cancelAfter = undefined;
+        console.log('[Escrow Create] No FinishAfter set by user - using current time to allow immediate release:', {
+          finishAfter: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
         });
       }
 
