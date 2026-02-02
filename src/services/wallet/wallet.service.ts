@@ -1027,10 +1027,7 @@ export class WalletService {
    */
   async executeSwap(userId: string, request: SwapExecuteRequest): Promise<SwapExecuteResponse> {
     try {
-      // On testnet, default to internal swaps since DEX has no liquidity
-      const isTestnet = (process.env.XRPL_NETWORK || 'testnet') === 'testnet';
-      const defaultSwapType = isTestnet ? 'internal' : 'onchain';
-      const { amount, fromCurrency, toCurrency, swapType = defaultSwapType, slippageTolerance = 5 } = request;
+      const { amount, fromCurrency, toCurrency, swapType = 'onchain', slippageTolerance = 5 } = request;
 
       if (!amount || amount <= 0) {
         return {
@@ -1280,22 +1277,6 @@ export class WalletService {
     );
 
     if (!dexQuote.success || !dexQuote.data) {
-      // If DEX has no liquidity (common on testnet), fallback to internal swap
-      const isNoLiquidityError = dexQuote.error?.includes('No liquidity') || 
-                                 dexQuote.error?.includes('No path found') ||
-                                 dexQuote.error?.includes('Insufficient liquidity');
-      
-      if (isNoLiquidityError) {
-        console.log(`[Swap] DEX has no liquidity for ${fromCurrency}/${toCurrency}, falling back to internal swap`);
-        return await this.executeInternalSwap(
-          userId,
-          wallet,
-          amount,
-          fromCurrency,
-          toCurrency
-        );
-      }
-
       return {
         success: false,
         message: dexQuote.error || 'Failed to get DEX quote',
