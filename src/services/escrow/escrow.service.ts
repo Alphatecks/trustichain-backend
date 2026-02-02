@@ -2051,7 +2051,7 @@ export class EscrowService {
             finisherSecret = encryptionService.decrypt(destinationWallet.encrypted_wallet_secret);
             
             // CRITICAL: Verify the wallet secret actually corresponds to the destination address
-            const { Wallet } = await import('xrpl');
+            const { Wallet } = await import('xrpl/dist/npm/Wallet');
             const testWallet = Wallet.fromSeed(finisherSecret.trim());
             const walletAddress = testWallet.classicAddress;
             
