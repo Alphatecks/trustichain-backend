@@ -45,6 +45,101 @@ export class XRPLDEXService {
   }
 
   /**
+   * Get DEX price using ripple_path_find (more reliable than book_offers)
+   */
+  private async getDEXPriceViaPathfinding(
+    client: Client,
+    fromCurrency: 'XRP' | 'USDT' | 'USDC',
+    toCurrency: 'XRP' | 'USDT' | 'USDC',
+    amount: number
+  ): Promise<{
+    success: boolean;
+    data?: DEXSwapQuote;
+    error?: string;
+  }> {
+    try {
+      // Build source and destination amounts for pathfinding
+      let sourceAmount: any;
+      let destinationAmount: any;
+
+      if (fromCurrency === 'XRP') {
+        sourceAmount = xrpToDrops(amount.toString());
+      } else {
+        const issuer = this.getIssuer(fromCurrency as 'USDT' | 'USDC');
+        sourceAmount = {
+          currency: 'USD',
+          issuer: issuer,
+          value: amount.toFixed(6),
+        };
+      }
+
+      if (toCurrency === 'XRP') {
+        destinationAmount = { currency: 'XRP' };
+      } else {
+        const issuer = this.getIssuer(toCurrency as 'USDT' | 'USDC');
+        destinationAmount = {
+          currency: 'USD',
+          issuer: issuer,
+        };
+      }
+
+      // Use ripple_path_find to find best path
+      const pathFind = await (client as any).request({
+        command: 'ripple_path_find',
+        source_account: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59', // Dummy account for pathfinding
+        source_currencies: fromCurrency === 'XRP' 
+          ? [{ currency: 'XRP' }]
+          : [{ currency: 'USD', issuer: this.getIssuer(fromCurrency as 'USDT' | 'USDC') }],
+        destination_amount: destinationAmount,
+        source_amount: sourceAmount,
+      });
+
+      if (!pathFind.result.alternatives || pathFind.result.alternatives.length === 0) {
+        return {
+          success: false,
+          error: `No path found for ${fromCurrency}/${toCurrency}`,
+        };
+      }
+
+      // Get the best alternative (first one is usually the best)
+      const bestPath = pathFind.result.alternatives[0];
+      const destinationAmountResult = bestPath.destination_amount;
+
+      let toAmount = 0;
+      if (typeof destinationAmountResult === 'string') {
+        // XRP in drops
+        toAmount = parseFloat((dropsToXrp as any)(destinationAmountResult));
+      } else if (destinationAmountResult && typeof destinationAmountResult === 'object' && 'value' in destinationAmountResult) {
+        // Token amount
+        toAmount = parseFloat(String(destinationAmountResult.value));
+      }
+
+      if (toAmount <= 0) {
+        return {
+          success: false,
+          error: `Invalid path result for ${fromCurrency}/${toCurrency}`,
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          fromAmount: amount,
+          toAmount: toAmount,
+          rate: toAmount / amount,
+          minAmount: toAmount * 0.95, // 5% slippage tolerance
+          estimatedFee: 0.000012, // XRPL transaction fee
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Pathfinding failed',
+      };
+    }
+  }
+
+  /**
    * Check if user has trust line for a token
    */
   async hasTrustLine(
@@ -90,6 +185,24 @@ export class XRPLDEXService {
     
     try {
       await client.connect();
+
+      // Try using ripple_path_find first (more reliable, works even with low liquidity)
+      try {
+        const pathFindResult = await this.getDEXPriceViaPathfinding(
+          client,
+          fromCurrency,
+          toCurrency,
+          amount
+        );
+        if (pathFindResult.success) {
+          await client.disconnect();
+          return pathFindResult;
+        }
+        // If pathfinding fails, fall back to orderbook method
+        console.log('[DEX] Pathfinding failed, falling back to orderbook method');
+      } catch (pathError) {
+        console.log('[DEX] Pathfinding error, falling back to orderbook method:', pathError);
+      }
 
       // Handle token-to-token swaps (route through XRP)
       if (fromCurrency !== 'XRP' && toCurrency !== 'XRP') {
