@@ -805,11 +805,19 @@ export class DisputeService {
         };
       }
 
-      // Insert evidence record
+      console.log('[DEBUG] Adding evidence:', { 
+        disputeId, 
+        disputeDbId: dispute.id, 
+        userId, 
+        title: request.title,
+        evidenceType: request.evidenceType 
+      });
+
+      // Insert evidence record - use dispute.id from the database query, not the parameter
       const { data: evidence, error: evidenceError } = await adminClient
         .from('dispute_evidence')
         .insert({
-          dispute_id: disputeId,
+          dispute_id: dispute.id, // Use the actual dispute ID from database
           title: request.title,
           description: request.description,
           evidence_type: request.evidenceType,
@@ -824,13 +832,15 @@ export class DisputeService {
         .single();
 
       if (evidenceError || !evidence) {
-        console.error('Failed to add evidence:', evidenceError);
+        console.error('[DEBUG] Failed to add evidence:', { evidenceError, disputeId, disputeDbId: dispute.id });
         return {
           success: false,
           message: 'Failed to add evidence',
           error: 'Database error',
         };
       }
+
+      console.log('[DEBUG] Evidence added successfully:', { evidenceId: evidence.id, disputeId: evidence.dispute_id });
 
       return {
         success: true,
@@ -868,6 +878,8 @@ export class DisputeService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
+      console.log('[DEBUG] getEvidence called', { userId, disputeId });
+
       // Verify dispute exists and user has access
       const { data: dispute, error: disputeError } = await adminClient
         .from('disputes')
@@ -876,6 +888,7 @@ export class DisputeService {
         .single();
 
       if (disputeError || !dispute) {
+        console.error('[DEBUG] Dispute not found or error:', { disputeError, disputeId });
         return {
           success: false,
           message: 'Dispute not found or access denied',
@@ -883,8 +896,11 @@ export class DisputeService {
         };
       }
 
+      console.log('[DEBUG] Dispute found:', { disputeId: dispute.id, initiator: dispute.initiator_user_id, respondent: dispute.respondent_user_id });
+
       // Verify user is a party to the dispute
       if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        console.error('[DEBUG] User not a party to dispute:', { userId, initiator: dispute.initiator_user_id, respondent: dispute.respondent_user_id });
         return {
           success: false,
           message: 'You do not have access to this dispute',
@@ -892,21 +908,27 @@ export class DisputeService {
         };
       }
 
-      // Get all evidence for the dispute
+      // Get all evidence for the dispute - use dispute.id from database query
       const { data: evidenceList, error: evidenceError } = await adminClient
         .from('dispute_evidence')
         .select('*')
-        .eq('dispute_id', disputeId)
+        .eq('dispute_id', dispute.id) // Use the actual dispute ID from database
         .order('uploaded_at', { ascending: false });
 
       if (evidenceError) {
-        console.error('Failed to fetch evidence:', evidenceError);
+        console.error('[DEBUG] Failed to fetch evidence:', { evidenceError, disputeId });
         return {
           success: false,
           message: 'Failed to fetch evidence',
           error: 'Database error',
         };
       }
+
+      console.log('[DEBUG] Evidence query result:', { 
+        count: evidenceList?.length || 0, 
+        disputeId,
+        evidenceList: evidenceList?.map((e: any) => ({ id: e.id, dispute_id: e.dispute_id, title: e.title }))
+      });
 
       const evidence: EvidenceItem[] = (evidenceList || []).map((e: any) => ({
         id: e.id,
@@ -931,7 +953,7 @@ export class DisputeService {
         },
       };
     } catch (error) {
-      console.error('Error getting evidence:', error);
+      console.error('[DEBUG] Error getting evidence:', error);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get evidence',
@@ -982,7 +1004,7 @@ export class DisputeService {
         .from('dispute_evidence')
         .select('*')
         .eq('id', evidenceId)
-        .eq('dispute_id', disputeId)
+        .eq('dispute_id', dispute.id) // Use the actual dispute ID from database
         .single();
 
       if (evidenceError || !existingEvidence) {
@@ -1094,7 +1116,7 @@ export class DisputeService {
         .from('dispute_evidence')
         .select('*')
         .eq('id', evidenceId)
-        .eq('dispute_id', disputeId)
+        .eq('dispute_id', dispute.id) // Use the actual dispute ID from database
         .single();
 
       if (evidenceError || !existingEvidence) {
