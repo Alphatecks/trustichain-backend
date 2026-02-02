@@ -304,6 +304,83 @@ export class DisputeController {
       });
     }
   }
+
+  /**
+   * Upload file and add evidence in one call
+   * POST /api/disputes/:disputeId/evidence/upload-and-add
+   */
+  async uploadAndAddEvidence(
+    req: Request,
+    res: Response<AddEvidenceResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const file = (req as any).file;
+
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          message: 'No file provided',
+          error: 'No file provided',
+        });
+        return;
+      }
+
+      // Get metadata from form data
+      const title = req.body.title || '';
+      const description = req.body.description || '';
+      const evidenceType = req.body.evidenceType;
+
+      if (!title || !description || !evidenceType) {
+        res.status(400).json({
+          success: false,
+          message: 'Title, description, and evidence type are required',
+          error: 'Missing required fields',
+        });
+        return;
+      }
+
+      // Step 1: Upload file
+      const uploadResult = await storageService.uploadFile(userId, file);
+
+      if (!uploadResult.success || !uploadResult.data) {
+        res.status(400).json({
+          success: false,
+          message: uploadResult.message || 'Failed to upload file',
+          error: uploadResult.error || 'File upload failed',
+        });
+        return;
+      }
+
+      // Step 2: Create evidence record
+      const addEvidenceRequest: AddEvidenceRequest = {
+        title,
+        description,
+        evidenceType: evidenceType as any,
+        fileUrl: uploadResult.data.fileUrl,
+        fileName: uploadResult.data.fileName,
+        fileType: uploadResult.data.fileType,
+        fileSize: uploadResult.data.fileSize,
+      };
+
+      const result = await disputeService.addEvidence(userId, disputeId, addEvidenceRequest);
+
+      if (result.success) {
+        res.status(201).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
 }
 
 export const disputeController = new DisputeController();

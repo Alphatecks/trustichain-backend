@@ -75,6 +75,21 @@ router.get(
 );
 
 /**
+ * @route   POST /api/disputes/:disputeId/evidence/upload-and-add
+ * @desc    Upload file and add evidence in one call
+ * @access  Private
+ * @body    multipart/form-data with 'file', 'title', 'description', 'evidenceType' fields
+ */
+router.post(
+  '/:disputeId/evidence/upload-and-add',
+  authenticate,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    await disputeController.uploadAndAddEvidence(req, res);
+  })
+);
+
+/**
  * @route   POST /api/disputes/:disputeId/evidence
  * @desc    Add evidence to a dispute
  * @access  Private
