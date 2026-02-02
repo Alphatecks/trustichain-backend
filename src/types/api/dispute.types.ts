@@ -161,6 +161,8 @@ export interface GetEvidenceResponse {
   message: string;
   data?: {
     evidence: EvidenceItem[];
+    disputeDbId?: string; // For debugging - the actual UUID used in database
+    totalCount?: number; // Total number of evidence items found
   };
   error?: string;
 }

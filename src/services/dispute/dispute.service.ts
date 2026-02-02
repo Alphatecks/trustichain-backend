@@ -830,32 +830,50 @@ export class DisputeService {
 
       console.log('[DEBUG] Adding evidence:', { 
         disputeId, 
-        disputeDbId: dispute.id, 
+        disputeDbId: dispute.id,
+        caseId: dispute.case_id,
         userId, 
         title: request.title,
-        evidenceType: request.evidenceType 
+        description: request.description,
+        evidenceType: request.evidenceType,
+        fileUrl: request.fileUrl,
+        fileName: request.fileName
       });
 
       // Insert evidence record - use dispute.id from the database query, not the parameter
+      const insertData = {
+        dispute_id: dispute.id, // Use the actual dispute ID from database
+        title: request.title,
+        description: request.description,
+        evidence_type: request.evidenceType,
+        file_url: request.fileUrl,
+        file_name: request.fileName,
+        file_type: request.fileType,
+        file_size: request.fileSize,
+        uploaded_by_user_id: userId,
+        verified: false,
+      };
+
+      console.log('[DEBUG] Inserting evidence with data:', {
+        dispute_id: insertData.dispute_id,
+        title: insertData.title,
+        evidence_type: insertData.evidence_type,
+        file_name: insertData.file_name
+      });
+
       const { data: evidence, error: evidenceError } = await adminClient
         .from('dispute_evidence')
-        .insert({
-          dispute_id: dispute.id, // Use the actual dispute ID from database
-          title: request.title,
-          description: request.description,
-          evidence_type: request.evidenceType,
-          file_url: request.fileUrl,
-          file_name: request.fileName,
-          file_type: request.fileType,
-          file_size: request.fileSize,
-          uploaded_by_user_id: userId,
-          verified: false,
-        })
+        .insert(insertData)
         .select()
         .single();
 
       if (evidenceError || !evidence) {
-        console.error('[DEBUG] Failed to add evidence:', { evidenceError, disputeId, disputeDbId: dispute.id });
+        console.error('[DEBUG] Failed to add evidence:', { 
+          evidenceError, 
+          disputeId, 
+          disputeDbId: dispute.id,
+          insertData 
+        });
         return {
           success: false,
           message: 'Failed to add evidence',
@@ -863,7 +881,35 @@ export class DisputeService {
         };
       }
 
-      console.log('[DEBUG] Evidence added successfully:', { evidenceId: evidence.id, disputeId: evidence.dispute_id });
+      console.log('[DEBUG] Evidence inserted successfully:', { 
+        evidenceId: evidence.id, 
+        disputeId: evidence.dispute_id,
+        expectedDisputeId: dispute.id,
+        match: evidence.dispute_id === dispute.id
+      });
+
+      // Post-insert verification: verify it was actually saved with correct dispute_id
+      const { data: verifyEvidence, error: verifyError } = await adminClient
+        .from('dispute_evidence')
+        .select('*')
+        .eq('id', evidence.id)
+        .single();
+
+      if (verifyError || !verifyEvidence) {
+        console.error('[DEBUG] Verification query failed after insert:', { 
+          verifyError, 
+          evidenceId: evidence.id 
+        });
+      } else {
+        console.log('[DEBUG] Verification query after insert:', {
+          found: !!verifyEvidence,
+          dispute_id_in_db: verifyEvidence.dispute_id,
+          expected_dispute_id: dispute.id,
+          match: verifyEvidence.dispute_id === dispute.id,
+          title: verifyEvidence.title,
+          evidence_type: verifyEvidence.evidence_type
+        });
+      }
 
       return {
         success: true,
@@ -915,7 +961,13 @@ export class DisputeService {
         };
       }
 
-      console.log('[DEBUG] Dispute found:', { disputeId: dispute.id, initiator: dispute.initiator_user_id, respondent: dispute.respondent_user_id });
+      console.log('[DEBUG] Dispute found:', { 
+        disputeId: dispute.id, 
+        caseId: dispute.case_id,
+        originalInput: disputeId,
+        initiator: dispute.initiator_user_id, 
+        respondent: dispute.respondent_user_id 
+      });
 
       // Verify user is a party to the dispute
       if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
@@ -931,9 +983,29 @@ export class DisputeService {
       console.log('[DEBUG] Querying evidence with dispute.id:', { 
         disputeDbId: dispute.id, 
         originalDisputeId: disputeId,
-        caseId: dispute.case_id 
+        caseId: dispute.case_id,
+        userId
       });
+
+      // First, get a count of all evidence for this dispute
+      const { count: totalCount, error: countError } = await adminClient
+        .from('dispute_evidence')
+        .select('*', { count: 'exact', head: true })
+        .eq('dispute_id', dispute.id);
+
+      if (countError) {
+        console.error('[DEBUG] Failed to get evidence count:', { 
+          countError, 
+          disputeDbId: dispute.id 
+        });
+      } else {
+        console.log('[DEBUG] Total evidence count for dispute:', {
+          disputeDbId: dispute.id,
+          totalCount: totalCount || 0
+        });
+      }
       
+      // Get all evidence records
       const { data: evidenceList, error: evidenceError } = await adminClient
         .from('dispute_evidence')
         .select('*')
@@ -954,19 +1026,33 @@ export class DisputeService {
         };
       }
 
+      const returnedCount = evidenceList?.length || 0;
       console.log('[DEBUG] Evidence query result:', { 
-        count: evidenceList?.length || 0, 
+        returnedCount,
+        totalCount: totalCount || 0,
+        match: returnedCount === (totalCount || 0),
         disputeId,
         disputeDbId: dispute.id,
         caseId: dispute.case_id,
         evidenceList: evidenceList?.map((e: any) => ({ 
           id: e.id, 
-          dispute_id: e.dispute_id, 
+          dispute_id: e.dispute_id,
+          dispute_id_match: e.dispute_id === dispute.id,
           title: e.title,
           fileName: e.file_name,
+          evidence_type: e.evidence_type,
           uploadedAt: e.uploaded_at
         }))
       });
+
+      // Log any mismatch between count and returned records
+      if (returnedCount !== (totalCount || 0)) {
+        console.warn('[DEBUG] WARNING: Count mismatch detected!', {
+          totalCount: totalCount || 0,
+          returnedCount,
+          disputeDbId: dispute.id
+        });
+      }
 
       const evidence: EvidenceItem[] = (evidenceList || []).map((e: any) => ({
         id: e.id,
@@ -988,6 +1074,8 @@ export class DisputeService {
         message: 'Evidence retrieved successfully',
         data: {
           evidence,
+          disputeDbId: dispute.id, // For debugging - the actual UUID used in database
+          totalCount: totalCount || 0, // Total number of evidence items found
         },
       };
     } catch (error) {
