@@ -2049,6 +2049,45 @@ export class EscrowService {
           // Destination has wallet secret, decrypt it
           try {
             finisherSecret = encryptionService.decrypt(destinationWallet.encrypted_wallet_secret);
+            
+            // CRITICAL: Verify the wallet secret actually corresponds to the destination address
+            const { Wallet } = await import('xrpl');
+            const testWallet = Wallet.fromSeed(finisherSecret.trim());
+            const walletAddress = testWallet.classicAddress;
+            
+            console.log('[Escrow Release] CRITICAL: Verifying destination wallet secret matches address:', {
+              databaseAddress: finisherAddress,
+              walletFromSecret: walletAddress,
+              matches: walletAddress === finisherAddress,
+              escrowDestination: escrowDetails.destination,
+            });
+            
+            if (walletAddress !== finisherAddress) {
+              console.error('[Escrow Release] CRITICAL: Wallet secret does not match destination address!', {
+                expectedAddress: finisherAddress,
+                actualAddress: walletAddress,
+                escrowDestination: escrowDetails.destination,
+              });
+              return {
+                success: false,
+                message: `Cannot release escrow: The destination wallet secret does not match the destination address. Expected ${finisherAddress} but secret corresponds to ${walletAddress}. This is a data integrity issue.`,
+                error: 'Wallet secret address mismatch',
+              };
+            }
+            
+            if (walletAddress !== escrowDetails.destination) {
+              console.error('[Escrow Release] CRITICAL: Wallet address does not match escrow destination!', {
+                walletAddress: walletAddress,
+                escrowDestination: escrowDetails.destination,
+              });
+              return {
+                success: false,
+                message: `Cannot release escrow: The destination wallet address (${walletAddress}) does not match the escrow destination (${escrowDetails.destination}) on XRPL.`,
+                error: 'Wallet address does not match escrow destination',
+              };
+            }
+            
+            console.log('[Escrow Release] Destination wallet secret verified successfully');
           } catch (decryptError) {
             console.error('[Escrow Release] Failed to decrypt destination wallet secret:', decryptError);
             return {
