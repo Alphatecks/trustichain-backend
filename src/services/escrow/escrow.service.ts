@@ -2041,8 +2041,87 @@ export class EscrowService {
           }
         } else {
           // Owner can finish (either no FinishAfter or FinishAfter has passed)
-          finisherAddress = platformAddress;
-          finisherSecret = platformSecret;
+          // Get owner's wallet (User A who created the escrow)
+          const { data: ownerWallet } = await adminClient
+            .from('wallets')
+            .select('xrpl_address, encrypted_wallet_secret')
+            .eq('user_id', escrow.user_id)
+            .single();
+
+          if (!ownerWallet) {
+            return {
+              success: false,
+              message: 'Cannot release escrow: Owner wallet not found',
+              error: 'Owner wallet not found',
+            };
+          }
+
+          finisherAddress = ownerWallet.xrpl_address;
+          
+          // Verify owner address matches escrow owner
+          if (finisherAddress !== actualOwnerAddress) {
+            return {
+              success: false,
+              message: `Cannot release escrow: Owner wallet address (${finisherAddress}) does not match escrow owner (${actualOwnerAddress})`,
+              error: 'Owner address mismatch',
+            };
+          }
+
+          // If owner doesn't have wallet secret, use XUMM for signing
+          if (!ownerWallet.encrypted_wallet_secret) {
+            console.log('[Escrow Release] Owner wallet secret not available, creating XUMM payload for user signing');
+            
+            // Prepare EscrowFinish transaction for XUMM signing
+            const escrowFinishTx = await xrplEscrowService.prepareEscrowFinishTransaction({
+              ownerAddress: actualOwnerAddress, // Original owner from EscrowCreate (always required)
+              finisherAddress: finisherAddress, // Owner address (who will sign)
+              escrowSequence: escrowDetails.sequence,
+              condition: escrowDetails.condition,
+              fulfillment: undefined,
+            });
+
+            // Create XUMM payload
+            const xummPayload = await xummService.createPayload(escrowFinishTx.transaction);
+
+            // Create pending transaction record
+            await adminClient
+              .from('transactions')
+              .insert({
+                user_id: userId,
+                type: 'escrow_release',
+                amount_xrp: parseFloat(escrow.amount_xrp),
+                amount_usd: parseFloat(escrow.amount_usd),
+                status: 'pending',
+                escrow_id: escrowId,
+                description: `Escrow release pending XUMM signature | XUMM_UUID:${xummPayload.uuid}${notes ? ` | Notes: ${notes}` : ''}`,
+              })
+              .select()
+              .single();
+
+            return {
+              success: true,
+              message: 'Please sign the transaction in your Xaman (XUMM) wallet to release the escrow',
+              data: {
+                requiresSigning: true,
+                xummUrl: xummPayload.next.always,
+                xummUuid: xummPayload.uuid,
+                qrCode: xummPayload.refs?.qr_png || xummPayload.refs?.qr_uri || null,
+                instructions: 'Open the Xaman app and sign the EscrowFinish transaction to release the escrow funds.',
+              } as any,
+            };
+          }
+
+          // Owner has wallet secret, decrypt it
+          try {
+            finisherSecret = encryptionService.decrypt(ownerWallet.encrypted_wallet_secret);
+          } catch (decryptError) {
+            console.error('[Escrow Release] Failed to decrypt owner wallet secret:', decryptError);
+            return {
+              success: false,
+              message: 'Cannot release escrow: Failed to decrypt owner wallet secret',
+              error: 'Wallet secret decryption failed',
+            };
+          }
         }
 
         // Finish escrow on XRPL
