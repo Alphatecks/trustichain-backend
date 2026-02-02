@@ -417,12 +417,14 @@ export class EscrowService {
       // Create escrow on XRPL using user's wallet
       // If user has encrypted_wallet_secret, auto-sign the transaction
       // Otherwise, use XUMM for user signing
-      // XRPL does NOT require FinishAfter or CancelAfter - escrows can be created without either
-      // Only set FinishAfter if user explicitly provides a release date
+      // XRPL REQUIRES either FinishAfter or CancelAfter to be specified
+      // If user provides a date, use FinishAfter
+      // If user doesn't provide a date, use CancelAfter set to far future (allows immediate finishing)
       // XRPL uses Ripple Epoch (seconds since Jan 1, 2000), not Unix Epoch (seconds since Jan 1, 1970)
       // Convert Unix timestamp to Ripple Epoch by subtracting 946684800 seconds (30 years difference)
       const RIPPLE_EPOCH_OFFSET = 946684800; // Seconds between Unix Epoch (1970) and Ripple Epoch (2000)
       let finishAfter: number | undefined;
+      let cancelAfter: number | undefined;
       
       console.log('[Escrow Create] Expected release date check:', {
         hasExpectedReleaseDate: !!request.expectedReleaseDate,
@@ -473,9 +475,15 @@ export class EscrowService {
           });
         }
       } else {
-        // No FinishAfter set - escrow can be finished immediately by either owner or destination
+        // No FinishAfter set - use CancelAfter set to far future (10 years from now)
+        // This satisfies XRPL's requirement while allowing immediate finishing by either party
+        // CancelAfter doesn't prevent finishing - it only allows cancellation after that time
+        const unixTimestamp = Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60); // 10 years in seconds
+        cancelAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
         finishAfter = undefined;
-        console.log('[Escrow Create] No FinishAfter set - escrow can be released immediately by either party');
+        console.log('[Escrow Create] No FinishAfter set - using CancelAfter (far future) to allow immediate release:', {
+          cancelAfter: new Date((cancelAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+        });
       }
 
       console.log('[Escrow Create] Creating escrow on XRPL using user wallet:', {
@@ -502,7 +510,8 @@ export class EscrowService {
             fromAddress: userWalletAddress,
             toAddress: counterpartyWalletAddress,
             amountXrp,
-            finishAfter, // XRPL requires either FinishAfter or CancelAfter
+            finishAfter, // Set if user provided a release date
+            cancelAfter, // Set if user didn't provide a date (far future to allow immediate finishing)
             walletSecret: trimmedSecret,
           });
 
@@ -540,6 +549,7 @@ export class EscrowService {
             toAddress: counterpartyWalletAddress,
             amountXrp,
             finishAfter,
+            cancelAfter,
           });
 
           // Create XUMM payload
