@@ -475,14 +475,16 @@ export class EscrowService {
           });
         }
       } else {
-        // No FinishAfter set by user - set FinishAfter to current time to satisfy XRPL requirement
-        // Setting FinishAfter to current/past time allows immediate finishing by either party
+        // No FinishAfter set by user - set FinishAfter to 1 minute ago to satisfy XRPL requirement
+        // Setting FinishAfter to past time guarantees it's immediately passable, allowing immediate finishing by either party
         // XRPL requires either Condition or FinishAfter (CancelAfter alone is not enough)
-        const unixTimestamp = Math.floor(Date.now() / 1000);
-        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch (current time)
+        // Using 1 minute in the past ensures finishAfterPassed is always true, even if there's slight clock skew
+        const unixTimestamp = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
+        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
         cancelAfter = undefined;
-        console.log('[Escrow Create] No FinishAfter set by user - using current time to allow immediate release:', {
+        console.log('[Escrow Create] No FinishAfter set by user - using 1 minute ago to guarantee immediate release:', {
           finishAfter: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+          note: 'FinishAfter is in the past, so finishAfterPassed will always be true, allowing immediate release by either party',
         });
       }
 
