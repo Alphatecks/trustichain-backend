@@ -110,13 +110,23 @@ router.post('/:id/cancel', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/escrow/validate-emails
- * @desc    Validate payer and counterparty emails before creating escrow
+ * @route   POST /api/escrow/validate-payer-email
+ * @desc    Validate payer email matches authenticated user's email
  * @access  Private
- * @body    { payerEmail?: string, counterpartyEmail?: string }
+ * @body    { payerEmail: string }
  */
-router.post('/validate-emails', authenticate, asyncHandler(async (req, res) => {
-  await escrowController.validateEmails(req, res);
+router.post('/validate-payer-email', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.validatePayerEmail(req, res);
+}));
+
+/**
+ * @route   POST /api/escrow/validate-counterparty-email
+ * @desc    Validate counterparty email exists in database
+ * @access  Private
+ * @body    { counterpartyEmail: string }
+ */
+router.post('/validate-counterparty-email', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.validateCounterpartyEmail(req, res);
 }));
 
 export default router;
