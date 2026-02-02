@@ -12,6 +12,7 @@ import { exchangeService } from '../exchange/exchange.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 import { encryptionService } from '../encryption/encryption.service';
+import { emailService } from '../email.service';
 
 export class EscrowService {
   /**
@@ -817,6 +818,66 @@ export class EscrowService {
           }
         } catch (notifyError) {
           console.warn('Failed to create escrow created notifications:', notifyError);
+        }
+
+        // Send emails to payer and counterparty
+        try {
+          // Get payer user details
+          const { data: payerUser } = await adminClient
+            .from('users')
+            .select('email, full_name')
+            .eq('id', userId)
+            .single();
+
+          // Get counterparty user details
+          let counterpartyUser: { email: string; full_name: string } | null = null;
+          if (counterpartyUserId) {
+            const { data: counterparty } = await adminClient
+              .from('users')
+              .select('email, full_name')
+              .eq('id', counterpartyUserId)
+              .single();
+            counterpartyUser = counterparty;
+          }
+
+          // Send email to payer (confirmation)
+          if (payerUser?.email) {
+            const payerEmailToUse = request.payerEmail || payerUser.email;
+            const payerNameToUse = request.payerName || payerUser.full_name;
+            
+            await emailService.sendEscrowCreationConfirmationToPayer(
+              payerEmailToUse,
+              payerNameToUse,
+              escrow.id,
+              amountXrp,
+              amountUsd,
+              request.counterpartyName || counterpartyUser?.full_name
+            ).catch((emailError) => {
+              console.error('[Escrow Create] Failed to send email to payer:', emailError);
+              // Don't fail escrow creation if email fails
+            });
+          }
+
+          // Send email to counterparty (notification)
+          if (counterpartyUser?.email) {
+            const counterpartyEmailToUse = request.counterpartyEmail || counterpartyUser.email;
+            const counterpartyNameToUse = request.counterpartyName || counterpartyUser.full_name;
+            
+            await emailService.sendEscrowCreationNotificationToCounterparty(
+              counterpartyEmailToUse,
+              counterpartyNameToUse,
+              escrow.id,
+              amountXrp,
+              amountUsd,
+              request.payerName || payerUser?.full_name
+            ).catch((emailError) => {
+              console.error('[Escrow Create] Failed to send email to counterparty:', emailError);
+              // Don't fail escrow creation if email fails
+            });
+          }
+        } catch (emailError) {
+          console.error('[Escrow Create] Error sending escrow creation emails:', emailError);
+          // Don't fail escrow creation if email sending fails
         }
       }
 

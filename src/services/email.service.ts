@@ -205,6 +205,210 @@ export class EmailService {
       return { success: false, error: errorMessage };
     }
   }
+
+  /**
+   * Send escrow creation confirmation email to payer
+   * @param email - Payer email address
+   * @param payerName - Payer's full name
+   * @param escrowId - Escrow ID
+   * @param amountXrp - Escrow amount in XRP
+   * @param amountUsd - Escrow amount in USD
+   * @param counterpartyName - Counterparty's name
+   */
+  async sendEscrowCreationConfirmationToPayer(
+    email: string,
+    payerName: string,
+    escrowId: string,
+    amountXrp: number,
+    amountUsd: number,
+    counterpartyName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend) {
+        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      console.log(`Attempting to send escrow creation confirmation email to payer: ${email}`);
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: 'Escrow Created Successfully - TrustiChain',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Escrow Created</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: white; margin: 0;">Escrow Created Successfully!</h1>
+            </div>
+            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+              <p>Hi ${payerName},</p>
+              <p>Your escrow has been created successfully on TrustiChain.</p>
+              <div style="background: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 20px 0;">
+                <p style="margin: 5px 0;"><strong>Escrow ID:</strong> ${escrowId}</p>
+                <p style="margin: 5px 0;"><strong>Amount:</strong> ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)</p>
+                ${counterpartyName ? `<p style="margin: 5px 0;"><strong>Counterparty:</strong> ${counterpartyName}</p>` : ''}
+              </div>
+              <p>You can track the status of this escrow in your TrustiChain dashboard.</p>
+              <p style="font-size: 12px; color: #666; margin-top: 30px;">
+                If you did not create this escrow, please contact support immediately.
+              </p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Hi ${payerName},
+          
+          Your escrow has been created successfully on TrustiChain.
+          
+          Escrow ID: ${escrowId}
+          Amount: ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)
+          ${counterpartyName ? `Counterparty: ${counterpartyName}` : ''}
+          
+          You can track the status of this escrow in your TrustiChain dashboard.
+          
+          If you did not create this escrow, please contact support immediately.
+          
+          © ${new Date().getFullYear()} TrustiChain. All rights reserved.
+        `,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+
+      console.log('Escrow creation confirmation email sent successfully to payer:', {
+        id: data?.id,
+        to: email,
+      });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send escrow creation confirmation email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Send escrow creation notification email to counterparty
+   * @param email - Counterparty email address
+   * @param counterpartyName - Counterparty's full name
+   * @param escrowId - Escrow ID
+   * @param amountXrp - Escrow amount in XRP
+   * @param amountUsd - Escrow amount in USD
+   * @param payerName - Payer's name
+   */
+  async sendEscrowCreationNotificationToCounterparty(
+    email: string,
+    counterpartyName: string,
+    escrowId: string,
+    amountXrp: number,
+    amountUsd: number,
+    payerName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend) {
+        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      console.log(`Attempting to send escrow creation notification email to counterparty: ${email}`);
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: 'New Escrow Created - TrustiChain',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>New Escrow Created</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: white; margin: 0;">New Escrow Created</h1>
+            </div>
+            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+              <p>Hi ${counterpartyName},</p>
+              <p>A new escrow has been created with you as the counterparty on TrustiChain.</p>
+              <div style="background: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 20px 0;">
+                <p style="margin: 5px 0;"><strong>Escrow ID:</strong> ${escrowId}</p>
+                <p style="margin: 5px 0;"><strong>Amount:</strong> ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)</p>
+                ${payerName ? `<p style="margin: 5px 0;"><strong>From:</strong> ${payerName}</p>` : ''}
+              </div>
+              <p>Please log in to your TrustiChain account to view the escrow details and take necessary actions.</p>
+              <p style="font-size: 12px; color: #666; margin-top: 30px;">
+                If you were not expecting this escrow, please contact support immediately.
+              </p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Hi ${counterpartyName},
+          
+          A new escrow has been created with you as the counterparty on TrustiChain.
+          
+          Escrow ID: ${escrowId}
+          Amount: ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)
+          ${payerName ? `From: ${payerName}` : ''}
+          
+          Please log in to your TrustiChain account to view the escrow details and take necessary actions.
+          
+          If you were not expecting this escrow, please contact support immediately.
+          
+          © ${new Date().getFullYear()} TrustiChain. All rights reserved.
+        `,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+
+      console.log('Escrow creation notification email sent successfully to counterparty:', {
+        id: data?.id,
+        to: email,
+      });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send escrow creation notification email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
 }
 
 export const emailService = new EmailService();
