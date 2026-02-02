@@ -482,7 +482,7 @@ export class EscrowService {
         userWalletAddress,
         toAddress: counterpartyWalletAddress,
         amountXrp,
-        finishAfter: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
+        finishAfter: finishAfter ? new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString() : undefined,
         hasEncryptedSecret,
       });
 
