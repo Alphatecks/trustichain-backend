@@ -444,6 +444,7 @@ export class XRPLEscrowService {
         console.log('[XRPL Escrow Finish] Verifying escrow exists before finishing:', {
           ownerAddress: params.ownerAddress,
           finisherAddress,
+          walletAddress: wallet.classicAddress,
           escrowSequence: params.escrowSequence,
           expectedTxHash: params.expectedTxHash,
         });
@@ -454,6 +455,23 @@ export class XRPLEscrowService {
           finisherAddress,
           expectedTxHash: params.expectedTxHash,
         });
+
+        // CRITICAL: If finishing as destination, verify the destination matches
+        if (finisherAddress !== params.ownerAddress && verification.escrowObject) {
+          const escrowObj = verification.escrowObject as any;
+          const escrowDestination = escrowObj.Destination;
+          if (escrowDestination && escrowDestination !== finisherAddress) {
+            await client.disconnect();
+            throw new Error(
+              `CRITICAL: Finisher address (${finisherAddress}) does not match escrow destination (${escrowDestination}). Cannot finish escrow.`
+            );
+          }
+          console.log('[XRPL Escrow Finish] Destination verification passed:', {
+            finisherAddress,
+            escrowDestination,
+            matches: escrowDestination === finisherAddress,
+          });
+        }
 
         if (!verification.exists) {
           if (verification.alreadyFinished) {
@@ -1112,6 +1130,8 @@ export class XRPLEscrowService {
         console.log('[XRPL] Preparing EscrowFinish transaction:', {
           ownerAddress: params.ownerAddress,
           finisherAddress: finisherAddress,
+          walletAddress: wallet.classicAddress,
+          walletMatchesFinisher: wallet.classicAddress === finisherAddress,
           escrowSequence: params.escrowSequence,
           escrowSequenceType: typeof params.escrowSequence,
           hasCondition: !!params.condition,
@@ -1120,6 +1140,13 @@ export class XRPLEscrowService {
         });
 
         console.log('[XRPL] EscrowFinish transaction before autofill:', JSON.stringify(escrowFinish, null, 2));
+        console.log('[XRPL] CRITICAL: Wallet address check:', {
+          walletClassicAddress: wallet.classicAddress,
+          finisherAddress: finisherAddress,
+          ownerAddress: params.ownerAddress,
+          matches: wallet.classicAddress === finisherAddress,
+          isDestination: finisherAddress !== params.ownerAddress,
+        });
 
         // Manually fill required fields (Sequence, Fee)
         // The client might have been disconnected in error handling paths, so try-catch and reconnect if needed
@@ -1149,6 +1176,17 @@ export class XRPLEscrowService {
 
         // Sign transaction using xrpl.Wallet
         const { tx_blob } = wallet.sign(escrowFinish);
+
+        console.log('[XRPL] EscrowFinish transaction after signing (final):', {
+          TransactionType: escrowFinish.TransactionType,
+          Account: escrowFinish.Account,
+          Owner: escrowFinish.Owner,
+          OfferSequence: escrowFinish.OfferSequence,
+          Sequence: escrowFinish.Sequence,
+          walletAddress: wallet.classicAddress,
+          finisherAddress: finisherAddress,
+          ownerAddress: params.ownerAddress,
+        });
 
         // Submit transaction
         const submitResult = await (client as any).request({

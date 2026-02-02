@@ -1974,12 +1974,24 @@ export class EscrowService {
           
           // Verify destination address matches escrow destination
           if (finisherAddress !== escrowDetails.destination) {
+            console.error('[Escrow Release] CRITICAL: Destination address mismatch!', {
+              databaseDestination: finisherAddress,
+              escrowDestination: escrowDetails.destination,
+              escrowId: escrowId,
+              txHash: escrow.xrpl_escrow_id,
+            });
             return {
               success: false,
-              message: `Cannot release escrow: Destination wallet address (${finisherAddress}) does not match escrow destination (${escrowDetails.destination})`,
+              message: `Cannot release escrow: Destination wallet address (${finisherAddress}) does not match escrow destination (${escrowDetails.destination}). Please contact support.`,
               error: 'Destination address mismatch',
             };
           }
+
+          console.log('[Escrow Release] Destination address verified:', {
+            destinationAddress: finisherAddress,
+            matchesEscrowDestination: finisherAddress === escrowDetails.destination,
+            hasWalletSecret: !!destinationWallet.encrypted_wallet_secret,
+          });
 
           // If destination doesn't have wallet secret, use XUMM for signing
           if (!destinationWallet.encrypted_wallet_secret) {
