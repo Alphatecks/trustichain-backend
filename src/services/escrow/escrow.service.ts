@@ -417,8 +417,8 @@ export class EscrowService {
       // Create escrow on XRPL using user's wallet
       // If user has encrypted_wallet_secret, auto-sign the transaction
       // Otherwise, use XUMM for user signing
-      // XRPL requires either FinishAfter or CancelAfter to be specified
-      // Use expectedReleaseDate if provided, otherwise set a default (30 days from now)
+      // XRPL does NOT require FinishAfter or CancelAfter - escrows can be created without either
+      // Only set FinishAfter if user explicitly provides a release date
       // XRPL uses Ripple Epoch (seconds since Jan 1, 2000), not Unix Epoch (seconds since Jan 1, 1970)
       // Convert Unix timestamp to Ripple Epoch by subtracting 946684800 seconds (30 years difference)
       const RIPPLE_EPOCH_OFFSET = 946684800; // Seconds between Unix Epoch (1970) and Ripple Epoch (2000)
@@ -451,15 +451,14 @@ export class EscrowService {
         
         // Validate that the date is not in the past
         if (releaseDate < now) {
-          console.warn('[Escrow Create] Expected release date is in the past, using default 30 days:', {
+          console.warn('[Escrow Create] Expected release date is in the past, not setting FinishAfter (escrow can be released immediately):', {
             providedDate: request.expectedReleaseDate,
             parsedDate: releaseDate.toISOString(),
             parsedDateLocal: releaseDate.toString(),
             currentDate: now.toISOString(),
           });
-          // Use default instead of invalid past date
-          const unixTimestamp = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
-          finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
+          // Don't set FinishAfter if date is in the past - allow immediate release
+          finishAfter = undefined;
         } else {
           const unixTimestamp = Math.floor(releaseDate.getTime() / 1000);
           finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
@@ -474,15 +473,9 @@ export class EscrowService {
           });
         }
       } else {
-        // Default: 30 days from now (allows escrow to be released after this time)
-        // This satisfies XRPL's requirement while allowing reasonable release time
-        const unixTimestamp = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
-        finishAfter = unixTimestamp - RIPPLE_EPOCH_OFFSET; // Convert to Ripple Epoch
-        console.log('[Escrow Create] Using default 30-day finishAfter:', {
-          unixTimestamp,
-          rippleEpoch: finishAfter,
-          rippleEpochDate: new Date((finishAfter + RIPPLE_EPOCH_OFFSET) * 1000).toISOString(),
-        });
+        // No FinishAfter set - escrow can be finished immediately by either owner or destination
+        finishAfter = undefined;
+        console.log('[Escrow Create] No FinishAfter set - escrow can be released immediately by either party');
       }
 
       console.log('[Escrow Create] Creating escrow on XRPL using user wallet:', {
@@ -1904,22 +1897,22 @@ export class EscrowService {
             });
 
             // XRPL Rule: 
-            // - Owner can finish at any time (before or after FinishAfter)
-            // - Destination can only finish after FinishAfter has passed (if FinishAfter is set)
-            // NOTE: This is the CORRECT interpretation based on XRPL behavior
+            // - Destination can finish at any time (before or after FinishAfter)
+            // - Owner can only finish after FinishAfter has passed (if FinishAfter is set)
+            // - If no FinishAfter is set, either party can finish immediately
             if (!finishAfterPassed) {
-              // Before FinishAfter: Owner can finish, Destination cannot
+              // Before FinishAfter: Destination can finish, Owner cannot
               if (isRequesterOwner) {
-                // Owner can finish before FinishAfter
-                requiresDestination = false;
-              } else if (isRequesterDestination) {
-                // Destination trying to finish before FinishAfter - must use owner to finish
-                console.log('[Escrow Release] Destination attempting to finish before FinishAfter - will use owner to finish:', {
+                // Owner trying to finish before FinishAfter - must use destination to finish
+                console.log('[Escrow Release] Owner attempting to finish before FinishAfter - will use destination to finish:', {
                   finishAfterDate: new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString(),
                   currentDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
                 });
-                // Force owner to finish since destination cannot finish before FinishAfter
-                requiresDestination = false;
+                // Force destination to finish since owner cannot finish before FinishAfter
+                requiresDestination = true;
+              } else if (isRequesterDestination) {
+                // Destination can finish before FinishAfter
+                requiresDestination = true;
               }
             } else {
               // After FinishAfter, either party can finish
