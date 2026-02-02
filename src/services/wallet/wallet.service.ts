@@ -88,6 +88,63 @@ export class WalletService {
   }
 
   /**
+   * Sync balances from XRPL while preserving internal swap balances
+   * Internal swaps (database-only) update the database but not XRPL,
+   * so we need to preserve USDT/USDC balances from the database when syncing
+   */
+  private async syncBalancesFromXRPL(userId: string, walletId: string, xrplAddress: string): Promise<void> {
+    const adminClient = supabaseAdmin || supabase;
+
+    // Check if user has any completed internal swaps to preserve
+    const { data: internalSwaps } = await adminClient
+      .from('transactions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('type', 'swap')
+      .eq('status', 'completed')
+      .is('xrpl_tx_hash', null) // Internal swaps have no xrpl_tx_hash
+      .limit(1);
+
+    const hasInternalSwaps = internalSwaps && internalSwaps.length > 0;
+
+    // Get current wallet balances from database (needed to preserve internal swap balances)
+    const { data: wallet } = await adminClient
+      .from('wallets')
+      .select('balance_usdt, balance_usdc')
+      .eq('id', walletId)
+      .single();
+
+    // Get balances from XRPL
+    const balances = await xrplWalletService.getAllBalances(xrplAddress);
+
+    // Update balances: sync XRP always, but preserve token balances if internal swaps exist
+    if (hasInternalSwaps && wallet) {
+      // Preserve internal swap balances for tokens, but sync XRP
+      await adminClient
+        .from('wallets')
+        .update({
+          balance_xrp: balances.xrp,  // Always sync XRP from XRPL
+          // Preserve USDT/USDC from database (internal swaps)
+          balance_usdt: wallet.balance_usdt || balances.usdt,
+          balance_usdc: wallet.balance_usdc || balances.usdc,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', walletId);
+    } else {
+      // No internal swaps, safe to sync all from XRPL
+      await adminClient
+        .from('wallets')
+        .update({
+          balance_xrp: balances.xrp,
+          balance_usdt: balances.usdt,
+          balance_usdc: balances.usdc,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', walletId);
+    }
+  }
+
+  /**
    * Connect a wallet to a user
    */
   async connectWallet(userId: string, request: { walletAddress: string }): Promise<{
@@ -486,21 +543,12 @@ export class WalletService {
         if (status === 'completed') {
           const { data: wallet } = await adminClient
             .from('wallets')
-            .select('xrpl_address')
+            .select('id, xrpl_address')
             .eq('user_id', userId)
             .single();
 
           if (wallet) {
-            const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-            await adminClient
-              .from('wallets')
-              .update({
-                balance_xrp: balances.xrp,
-                balance_usdt: balances.usdt,
-                balance_usdc: balances.usdc,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('user_id', userId);
+            await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
           }
         }
 
@@ -532,21 +580,12 @@ export class WalletService {
         // Update wallet balance
         const { data: wallet } = await adminClient
           .from('wallets')
-          .select('xrpl_address')
+          .select('id, xrpl_address')
           .eq('user_id', userId)
           .single();
 
         if (wallet) {
-          const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-          await adminClient
-            .from('wallets')
-            .update({
-              balance_xrp: balances.xrp,
-              balance_usdt: balances.usdt,
-              balance_usdc: balances.usdc,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', userId);
+          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
         }
 
         return {
@@ -971,7 +1010,7 @@ export class WalletService {
    */
   async executeSwap(userId: string, request: SwapExecuteRequest): Promise<SwapExecuteResponse> {
     try {
-      const { amount, fromCurrency, toCurrency, swapType = 'internal', slippageTolerance = 5 } = request;
+      const { amount, fromCurrency, toCurrency, swapType = 'onchain', slippageTolerance = 5 } = request;
 
       if (!amount || amount <= 0) {
         return {
@@ -1385,45 +1424,7 @@ export class WalletService {
           .eq('id', transaction.id);
 
         // Sync balances from XRPL, but preserve internal swap balances
-        // Check if user has any internal swaps to preserve
-        const { data: internalSwaps } = await adminClient
-          .from('transactions')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('type', 'swap')
-          .eq('status', 'completed')
-          .is('xrpl_tx_hash', null) // Internal swaps have no xrpl_tx_hash
-          .limit(1);
-
-        const hasInternalSwaps = internalSwaps && internalSwaps.length > 0;
-        
-        const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-        
-        // Update balances: sync XRP always, but preserve token balances if internal swaps exist
-        if (hasInternalSwaps) {
-          // Preserve internal swap balances for tokens, but sync XRP
-          await adminClient
-            .from('wallets')
-            .update({
-              balance_xrp: balances.xrp,  // Always sync XRP from XRPL
-              // Preserve USDT/USDC from database (internal swaps)
-              balance_usdt: wallet.balance_usdt || balances.usdt,
-              balance_usdc: wallet.balance_usdc || balances.usdc,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', wallet.id);
-        } else {
-          // No internal swaps, safe to sync all from XRPL
-          await adminClient
-            .from('wallets')
-            .update({
-              balance_xrp: balances.xrp,
-              balance_usdt: balances.usdt,
-              balance_usdc: balances.usdc,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', wallet.id);
-        }
+        await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
 
         // Create notification
         try {
@@ -1840,29 +1841,14 @@ export class WalletService {
           // #endregion
           const { data: wallet } = await adminClient
             .from('wallets')
-            .select('xrpl_address')
+            .select('id, xrpl_address')
             .eq('user_id', userId)
             .single();
 
           if (wallet) {
+            await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
             // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:372',message:'getXUMMPayloadStatus: Fetching balances from XRPL',data:{xrplAddress:wallet.xrpl_address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
-            const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:373',message:'getXUMMPayloadStatus: Got balances from XRPL',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
-            await adminClient
-              .from('wallets')
-              .update({
-                balance_xrp: balances.xrp,
-                balance_usdt: balances.usdt,
-                balance_usdc: balances.usdc,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('user_id', userId);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:381',message:'getXUMMPayloadStatus: Updated wallet balance in DB',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:381',message:'getXUMMPayloadStatus: Updated wallet balance in DB',data:{walletId:wallet.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
             // #endregion
           }
         }
@@ -1908,37 +1894,20 @@ export class WalletService {
         // #endregion
         const { data: wallet } = await adminClient
           .from('wallets')
-          .select('xrpl_address')
+          .select('id, xrpl_address')
           .eq('user_id', userId)
           .single();
 
         if (wallet) {
+          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
           // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:450',message:'getXUMMPayloadStatus: Fetching balances from XRPL (auto-submitted)',data:{xrplAddress:wallet.xrpl_address},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
-          const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:451',message:'getXUMMPayloadStatus: Got balances from XRPL (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
-          await adminClient
-            .from('wallets')
-            .update({
-              balance_xrp: balances.xrp,
-              balance_usdt: balances.usdt,
-              balance_usdc: balances.usdc,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', userId);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:459',message:'getXUMMPayloadStatus: Updated wallet balance in DB (auto-submitted)',data:{xrp:balances.xrp,usdt:balances.usdt,usdc:balances.usdc},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:459',message:'getXUMMPayloadStatus: Updated wallet balance in DB (auto-submitted)',data:{walletId:wallet.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
           // #endregion
           
           console.log('[XUMM Fix] Balance updated successfully for auto-submitted transaction:', {
             transactionId,
             userId,
-            xrp: balances.xrp,
-            usdt: balances.usdt,
-            usdc: balances.usdc,
+            walletId: wallet.id,
             txid: payloadStatus.response.txid,
           });
         }
@@ -2521,16 +2490,7 @@ export class WalletService {
       // Update result check removed (variable no longer declared)
 
       // Update wallet balance after withdrawal
-      const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-      await adminClient
-        .from('wallets')
-        .update({
-          balance_xrp: balances.xrp,
-          balance_usdt: balances.usdt,
-          balance_usdc: balances.usdc,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', wallet.id);
+      await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
 
       // Create transaction record for the receiver (if destination is a TrustiChain user)
       try {
@@ -2557,16 +2517,15 @@ export class WalletService {
             .single();
 
           // Update receiver's wallet balance
-          const receiverBalances = await xrplWalletService.getAllBalances(request.destinationAddress);
-          await adminClient
+          const { data: receiverWalletData } = await adminClient
             .from('wallets')
-            .update({
-              balance_xrp: receiverBalances.xrp,
-              balance_usdt: receiverBalances.usdt,
-              balance_usdc: receiverBalances.usdc,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', receiverWallet.user_id);
+            .select('id')
+            .eq('user_id', receiverWallet.user_id)
+            .single();
+
+          if (receiverWalletData) {
+            await this.syncBalancesFromXRPL(receiverWallet.user_id, receiverWalletData.id, request.destinationAddress);
+          }
 
           // Create notification for receiver
           try {
@@ -2693,7 +2652,7 @@ export class WalletService {
       // Get user's wallet address
       const { data: wallet } = await adminClient
         .from('wallets')
-        .select('xrpl_address')
+        .select('id, xrpl_address')
         .eq('user_id', userId)
         .single();
 
@@ -2777,16 +2736,7 @@ export class WalletService {
                 });
 
               // Update wallet balance
-              const balances = await xrplWalletService.getAllBalances(wallet.xrpl_address);
-              await adminClient
-                .from('wallets')
-                .update({
-                  balance_xrp: balances.xrp,
-                  balance_usdt: balances.usdt,
-                  balance_usdc: balances.usdc,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('user_id', userId);
+              await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
             }
           } finally {
             await client.disconnect();
