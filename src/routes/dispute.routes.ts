@@ -75,6 +75,60 @@ router.get(
 );
 
 /**
+ * @route   POST /api/disputes/:disputeId/evidence
+ * @desc    Add evidence to a dispute
+ * @access  Private
+ * @body    AddEvidenceRequest - Evidence details including title, description, type, and file info
+ */
+router.post(
+  '/:disputeId/evidence',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.addEvidence(req, res);
+  })
+);
+
+/**
+ * @route   GET /api/disputes/:disputeId/evidence
+ * @desc    Get all evidence for a dispute
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/evidence',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getEvidence(req, res);
+  })
+);
+
+/**
+ * @route   PUT /api/disputes/:disputeId/evidence/:evidenceId
+ * @desc    Update evidence metadata
+ * @access  Private
+ * @body    UpdateEvidenceRequest - Updated evidence metadata
+ */
+router.put(
+  '/:disputeId/evidence/:evidenceId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.updateEvidence(req, res);
+  })
+);
+
+/**
+ * @route   DELETE /api/disputes/:disputeId/evidence/:evidenceId
+ * @desc    Delete evidence from a dispute
+ * @access  Private
+ */
+router.delete(
+  '/:disputeId/evidence/:evidenceId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.deleteEvidence(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private

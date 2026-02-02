@@ -116,4 +116,72 @@ export interface UploadEvidenceResponse {
   error?: string;
 }
 
+export type EvidenceType = 
+  | 'original_agreement' 
+  | 'final_deliverable' 
+  | 'reference_images' 
+  | 'work_progress_timeline' 
+  | 'chat_screenshots' 
+  | 'email_communications';
+
+export interface EvidenceItem {
+  id: string;
+  disputeId: string;
+  title: string;
+  description: string;
+  evidenceType: EvidenceType;
+  fileUrl: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  verified: boolean;
+  uploadedAt: string;
+  uploadedByUserId: string;
+}
+
+export interface AddEvidenceRequest {
+  title: string;
+  description: string;
+  evidenceType: EvidenceType;
+  fileUrl: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}
+
+export interface AddEvidenceResponse {
+  success: boolean;
+  message: string;
+  data?: EvidenceItem;
+  error?: string;
+}
+
+export interface GetEvidenceResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    evidence: EvidenceItem[];
+  };
+  error?: string;
+}
+
+export interface UpdateEvidenceRequest {
+  title?: string;
+  description?: string;
+  evidenceType?: EvidenceType;
+}
+
+export interface UpdateEvidenceResponse {
+  success: boolean;
+  message: string;
+  data?: EvidenceItem;
+  error?: string;
+}
+
+export interface DeleteEvidenceResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 

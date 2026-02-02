@@ -12,6 +12,13 @@ import {
   DisputeListItem,
   CreateDisputeRequest,
   CreateDisputeResponse,
+  EvidenceItem,
+  AddEvidenceRequest,
+  AddEvidenceResponse,
+  GetEvidenceResponse,
+  UpdateEvidenceRequest,
+  UpdateEvidenceResponse,
+  DeleteEvidenceResponse,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -749,6 +756,389 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to create dispute',
         error: error instanceof Error ? error.message : 'Failed to create dispute',
+      };
+    }
+  }
+
+  /**
+   * Add evidence to a dispute
+   * POST /api/disputes/:disputeId/evidence
+   */
+  async addEvidence(
+    userId: string,
+    disputeId: string,
+    request: AddEvidenceRequest
+  ): Promise<AddEvidenceResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await adminClient
+        .from('disputes')
+        .select('id, initiator_user_id, respondent_user_id')
+        .eq('id', disputeId)
+        .single();
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Validate required fields
+      if (!request.title || !request.description || !request.evidenceType || !request.fileUrl) {
+        return {
+          success: false,
+          message: 'Title, description, evidence type, and file URL are required',
+          error: 'Missing required fields',
+        };
+      }
+
+      // Insert evidence record
+      const { data: evidence, error: evidenceError } = await adminClient
+        .from('dispute_evidence')
+        .insert({
+          dispute_id: disputeId,
+          title: request.title,
+          description: request.description,
+          evidence_type: request.evidenceType,
+          file_url: request.fileUrl,
+          file_name: request.fileName,
+          file_type: request.fileType,
+          file_size: request.fileSize,
+          uploaded_by_user_id: userId,
+          verified: false,
+        })
+        .select()
+        .single();
+
+      if (evidenceError || !evidence) {
+        console.error('Failed to add evidence:', evidenceError);
+        return {
+          success: false,
+          message: 'Failed to add evidence',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Evidence added successfully',
+        data: {
+          id: evidence.id,
+          disputeId: evidence.dispute_id,
+          title: evidence.title,
+          description: evidence.description || '',
+          evidenceType: evidence.evidence_type as any,
+          fileUrl: evidence.file_url,
+          fileName: evidence.file_name,
+          fileType: evidence.file_type || '',
+          fileSize: evidence.file_size || 0,
+          verified: evidence.verified || false,
+          uploadedAt: evidence.uploaded_at,
+          uploadedByUserId: evidence.uploaded_by_user_id || '',
+        },
+      };
+    } catch (error) {
+      console.error('Error adding evidence:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to add evidence',
+        error: error instanceof Error ? error.message : 'Failed to add evidence',
+      };
+    }
+  }
+
+  /**
+   * Get all evidence for a dispute
+   * GET /api/disputes/:disputeId/evidence
+   */
+  async getEvidence(userId: string, disputeId: string): Promise<GetEvidenceResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await adminClient
+        .from('disputes')
+        .select('id, initiator_user_id, respondent_user_id')
+        .eq('id', disputeId)
+        .single();
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get all evidence for the dispute
+      const { data: evidenceList, error: evidenceError } = await adminClient
+        .from('dispute_evidence')
+        .select('*')
+        .eq('dispute_id', disputeId)
+        .order('uploaded_at', { ascending: false });
+
+      if (evidenceError) {
+        console.error('Failed to fetch evidence:', evidenceError);
+        return {
+          success: false,
+          message: 'Failed to fetch evidence',
+          error: 'Database error',
+        };
+      }
+
+      const evidence: EvidenceItem[] = (evidenceList || []).map((e: any) => ({
+        id: e.id,
+        disputeId: e.dispute_id,
+        title: e.title || '',
+        description: e.description || '',
+        evidenceType: e.evidence_type as any,
+        fileUrl: e.file_url,
+        fileName: e.file_name,
+        fileType: e.file_type || '',
+        fileSize: e.file_size || 0,
+        verified: e.verified || false,
+        uploadedAt: e.uploaded_at,
+        uploadedByUserId: e.uploaded_by_user_id || '',
+      }));
+
+      return {
+        success: true,
+        message: 'Evidence retrieved successfully',
+        data: {
+          evidence,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting evidence:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get evidence',
+        error: error instanceof Error ? error.message : 'Failed to get evidence',
+      };
+    }
+  }
+
+  /**
+   * Update evidence metadata
+   * PUT /api/disputes/:disputeId/evidence/:evidenceId
+   */
+  async updateEvidence(
+    userId: string,
+    disputeId: string,
+    evidenceId: string,
+    request: UpdateEvidenceRequest
+  ): Promise<UpdateEvidenceResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await adminClient
+        .from('disputes')
+        .select('id, initiator_user_id, respondent_user_id')
+        .eq('id', disputeId)
+        .single();
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Verify evidence exists and belongs to the dispute
+      const { data: existingEvidence, error: evidenceError } = await adminClient
+        .from('dispute_evidence')
+        .select('*')
+        .eq('id', evidenceId)
+        .eq('dispute_id', disputeId)
+        .single();
+
+      if (evidenceError || !existingEvidence) {
+        return {
+          success: false,
+          message: 'Evidence not found',
+          error: 'Evidence not found',
+        };
+      }
+
+      // Verify user uploaded the evidence (only the uploader can update)
+      if (existingEvidence.uploaded_by_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You can only update evidence you uploaded',
+          error: 'Access denied',
+        };
+      }
+
+      // Build update object
+      const updateData: any = {};
+      if (request.title !== undefined) updateData.title = request.title;
+      if (request.description !== undefined) updateData.description = request.description;
+      if (request.evidenceType !== undefined) updateData.evidence_type = request.evidenceType;
+
+      // Update evidence
+      const { data: updatedEvidence, error: updateError } = await adminClient
+        .from('dispute_evidence')
+        .update(updateData)
+        .eq('id', evidenceId)
+        .select()
+        .single();
+
+      if (updateError || !updatedEvidence) {
+        console.error('Failed to update evidence:', updateError);
+        return {
+          success: false,
+          message: 'Failed to update evidence',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Evidence updated successfully',
+        data: {
+          id: updatedEvidence.id,
+          disputeId: updatedEvidence.dispute_id,
+          title: updatedEvidence.title || '',
+          description: updatedEvidence.description || '',
+          evidenceType: updatedEvidence.evidence_type as any,
+          fileUrl: updatedEvidence.file_url,
+          fileName: updatedEvidence.file_name,
+          fileType: updatedEvidence.file_type || '',
+          fileSize: updatedEvidence.file_size || 0,
+          verified: updatedEvidence.verified || false,
+          uploadedAt: updatedEvidence.uploaded_at,
+          uploadedByUserId: updatedEvidence.uploaded_by_user_id || '',
+        },
+      };
+    } catch (error) {
+      console.error('Error updating evidence:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to update evidence',
+        error: error instanceof Error ? error.message : 'Failed to update evidence',
+      };
+    }
+  }
+
+  /**
+   * Delete evidence
+   * DELETE /api/disputes/:disputeId/evidence/:evidenceId
+   */
+  async deleteEvidence(
+    userId: string,
+    disputeId: string,
+    evidenceId: string
+  ): Promise<DeleteEvidenceResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await adminClient
+        .from('disputes')
+        .select('id, initiator_user_id, respondent_user_id')
+        .eq('id', disputeId)
+        .single();
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Verify evidence exists and belongs to the dispute
+      const { data: existingEvidence, error: evidenceError } = await adminClient
+        .from('dispute_evidence')
+        .select('*')
+        .eq('id', evidenceId)
+        .eq('dispute_id', disputeId)
+        .single();
+
+      if (evidenceError || !existingEvidence) {
+        return {
+          success: false,
+          message: 'Evidence not found',
+          error: 'Evidence not found',
+        };
+      }
+
+      // Verify user uploaded the evidence (only the uploader can delete)
+      if (existingEvidence.uploaded_by_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You can only delete evidence you uploaded',
+          error: 'Access denied',
+        };
+      }
+
+      // Delete evidence
+      const { error: deleteError } = await adminClient
+        .from('dispute_evidence')
+        .delete()
+        .eq('id', evidenceId);
+
+      if (deleteError) {
+        console.error('Failed to delete evidence:', deleteError);
+        return {
+          success: false,
+          message: 'Failed to delete evidence',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Evidence deleted successfully',
+      };
+    } catch (error) {
+      console.error('Error deleting evidence:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to delete evidence',
+        error: error instanceof Error ? error.message : 'Failed to delete evidence',
       };
     }
   }
