@@ -1904,21 +1904,22 @@ export class EscrowService {
             });
 
             // XRPL Rule: 
-            // - Destination can finish at any time (before or after FinishAfter)
-            // - Owner can only finish after FinishAfter has passed
+            // - Owner can finish at any time (before or after FinishAfter)
+            // - Destination can only finish after FinishAfter has passed (if FinishAfter is set)
+            // NOTE: This is the CORRECT interpretation based on XRPL behavior
             if (!finishAfterPassed) {
-              // Before FinishAfter: Destination can finish, Owner cannot
+              // Before FinishAfter: Owner can finish, Destination cannot
               if (isRequesterOwner) {
-                // Owner trying to finish before FinishAfter - must use destination to finish
-                console.log('[Escrow Release] Owner attempting to finish before FinishAfter - will use destination to finish:', {
+                // Owner can finish before FinishAfter
+                requiresDestination = false;
+              } else if (isRequesterDestination) {
+                // Destination trying to finish before FinishAfter - must use owner to finish
+                console.log('[Escrow Release] Destination attempting to finish before FinishAfter - will use owner to finish:', {
                   finishAfterDate: new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString(),
                   currentDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
                 });
-                // Force destination to finish since owner cannot finish before FinishAfter
-                requiresDestination = true;
-              } else if (isRequesterDestination) {
-                // Destination can finish before FinishAfter
-                requiresDestination = true;
+                // Force owner to finish since destination cannot finish before FinishAfter
+                requiresDestination = false;
               }
             } else {
               // After FinishAfter, either party can finish
