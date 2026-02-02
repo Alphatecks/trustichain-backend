@@ -1906,19 +1906,16 @@ export class EscrowService {
             // XRPL Rule: 
             // - Destination can finish at any time (before or after FinishAfter)
             // - Owner can only finish after FinishAfter has passed
-            // However, we'll let XRPL enforce this rule rather than blocking at application level
-            // This allows for edge cases and better error messages from XRPL
             if (!finishAfterPassed) {
               // Before FinishAfter: Destination can finish, Owner cannot
               if (isRequesterOwner) {
-                // Owner trying to finish before FinishAfter - XRPL will reject this
-                // We'll allow the attempt but log a warning
-                console.warn('[Escrow Release] Owner attempting to finish before FinishAfter - XRPL may reject:', {
+                // Owner trying to finish before FinishAfter - must use destination to finish
+                console.log('[Escrow Release] Owner attempting to finish before FinishAfter - will use destination to finish:', {
                   finishAfterDate: new Date((escrowDetails.finishAfter + 946684800) * 1000).toISOString(),
                   currentDate: new Date((currentLedgerTime + 946684800) * 1000).toISOString(),
                 });
-                // Don't require destination, let XRPL reject if needed
-                requiresDestination = false;
+                // Force destination to finish since owner cannot finish before FinishAfter
+                requiresDestination = true;
               } else if (isRequesterDestination) {
                 // Destination can finish before FinishAfter
                 requiresDestination = true;
@@ -1945,11 +1942,20 @@ export class EscrowService {
         let finisherSecret: string;
         let isFinishingAsDestination = false;
 
-        if (requiresDestination && isRequesterDestination) {
-          // Destination needs to finish before FinishAfter
+        if (requiresDestination) {
+          // Destination needs to finish (either because FinishAfter hasn't passed, or destination is requesting)
+          // If owner is requesting but FinishAfter hasn't passed, we'll use destination to finish
           isFinishingAsDestination = true;
           
           // Get destination wallet address and secret
+          if (!escrow.counterparty_id) {
+            return {
+              success: false,
+              message: 'Cannot release escrow: No counterparty (destination) found. Escrow must have a destination to finish before FinishAfter time.',
+              error: 'No counterparty found',
+            };
+          }
+
           const { data: destinationWallet } = await adminClient
             .from('wallets')
             .select('xrpl_address, encrypted_wallet_secret')
