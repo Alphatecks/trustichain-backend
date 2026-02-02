@@ -15,6 +15,7 @@ import {
 } from '../types/api/escrow.types';
 import type { TransactionType } from '../types/api/transaction.types';
 import { escrowService } from '../services/escrow/escrow.service';
+import { supabase, supabaseAdmin } from '../config/supabase';
 
 export class EscrowController {
   /**
@@ -305,6 +306,93 @@ export class EscrowController {
       } else {
         res.status(400).json(result);
       }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Validate emails for escrow creation
+   * POST /api/escrow/validate-emails
+   */
+  async validateEmails(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const { payerEmail, counterpartyEmail } = req.body;
+
+      const adminClient = supabaseAdmin || supabase;
+
+      // Get authenticated user's email from database
+      const { data: userData, error: userError } = await adminClient
+        .from('users')
+        .select('email')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !userData) {
+        res.status(400).json({
+          success: false,
+          message: 'Failed to fetch user email for validation',
+          error: 'User email lookup failed',
+        });
+        return;
+      }
+
+      const validationResults: {
+        payerEmailValid: boolean;
+        payerEmailMessage?: string;
+        counterpartyEmailValid: boolean;
+        counterpartyEmailMessage?: string;
+        counterpartyUserId?: string;
+      } = {
+        payerEmailValid: true,
+        counterpartyEmailValid: true,
+      };
+
+      // Validate payer email matches authenticated user's email
+      if (payerEmail) {
+        const normalizedPayerEmail = payerEmail.toLowerCase().trim();
+        const normalizedUserEmail = userData.email.toLowerCase().trim();
+        
+        if (normalizedPayerEmail !== normalizedUserEmail) {
+          validationResults.payerEmailValid = false;
+          validationResults.payerEmailMessage = `Payer email (${payerEmail}) does not match your registered email (${userData.email})`;
+        }
+      }
+
+      // Validate counterparty email exists in database
+      if (counterpartyEmail) {
+        const normalizedCounterpartyEmail = counterpartyEmail.toLowerCase().trim();
+        
+        const { data: counterpartyUser, error: counterpartyError } = await adminClient
+          .from('users')
+          .select('id, email')
+          .eq('email', normalizedCounterpartyEmail)
+          .maybeSingle();
+
+        if (counterpartyError || !counterpartyUser) {
+          validationResults.counterpartyEmailValid = false;
+          validationResults.counterpartyEmailMessage = `Counterparty email (${counterpartyEmail}) does not exist in the system. The receiver must be a registered user.`;
+        } else {
+          validationResults.counterpartyUserId = counterpartyUser.id;
+        }
+      }
+
+      const allValid = validationResults.payerEmailValid && validationResults.counterpartyEmailValid;
+
+      res.status(allValid ? 200 : 400).json({
+        success: allValid,
+        message: allValid 
+          ? 'All emails are valid' 
+          : 'Email validation failed',
+        data: validationResults,
+        error: allValid ? undefined : 'Email validation failed',
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.status(500).json({

@@ -269,6 +269,67 @@ export class EscrowService {
         };
       }
 
+      // Validate emails if provided
+      if (request.payerEmail || request.counterpartyEmail) {
+        // Get authenticated user's email from database
+        const { data: userData, error: userError } = await adminClient
+          .from('users')
+          .select('email')
+          .eq('id', userId)
+          .single();
+
+        if (userError || !userData) {
+          return {
+            success: false,
+            message: 'Failed to fetch user email for validation',
+            error: 'User email lookup failed',
+          };
+        }
+
+        // Validate payer email matches authenticated user's email
+        if (request.payerEmail) {
+          const normalizedPayerEmail = request.payerEmail.toLowerCase().trim();
+          const normalizedUserEmail = userData.email.toLowerCase().trim();
+          
+          if (normalizedPayerEmail !== normalizedUserEmail) {
+            return {
+              success: false,
+              message: `Payer email (${request.payerEmail}) does not match your registered email (${userData.email})`,
+              error: 'Payer email mismatch',
+            };
+          }
+        }
+
+        // Validate counterparty email exists in database
+        if (request.counterpartyEmail) {
+          const normalizedCounterpartyEmail = request.counterpartyEmail.toLowerCase().trim();
+          
+          const { data: counterpartyUser, error: counterpartyError } = await adminClient
+            .from('users')
+            .select('id, email')
+            .eq('email', normalizedCounterpartyEmail)
+            .maybeSingle();
+
+          if (counterpartyError || !counterpartyUser) {
+            return {
+              success: false,
+              message: `Counterparty email (${request.counterpartyEmail}) does not exist in the system. The receiver must be a registered user.`,
+              error: 'Counterparty email not found',
+            };
+          }
+
+          // Optional: Verify counterparty email matches the counterparty user we found by wallet
+          // This ensures consistency between wallet lookup and email lookup
+          if (counterpartyUser.id !== counterpartyUserId) {
+            console.warn('[Escrow Create] Counterparty email user ID does not match wallet lookup user ID:', {
+              emailUserId: counterpartyUser.id,
+              walletUserId: counterpartyUserId,
+            });
+            // We'll still proceed but log the warning
+          }
+        }
+      }
+
       // Validate "Time based" release type requirements
       if (request.releaseType === 'Time based') {
         if (!request.expectedReleaseDate) {
