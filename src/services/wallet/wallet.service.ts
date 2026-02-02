@@ -96,7 +96,7 @@ export class WalletService {
     const adminClient = supabaseAdmin || supabase;
 
     // Check if user has any completed internal swaps to preserve
-    const { data: internalSwaps } = await adminClient
+    const { data: internalSwaps, error: swapCheckError } = await adminClient
       .from('transactions')
       .select('id')
       .eq('user_id', userId)
@@ -104,6 +104,10 @@ export class WalletService {
       .eq('status', 'completed')
       .is('xrpl_tx_hash', null) // Internal swaps have no xrpl_tx_hash
       .limit(1);
+
+    if (swapCheckError) {
+      console.error('[Sync] Error checking for internal swaps:', swapCheckError);
+    }
 
     const hasInternalSwaps = internalSwaps && internalSwaps.length > 0;
 
@@ -120,6 +124,14 @@ export class WalletService {
     // Update balances: sync XRP always, but preserve token balances if internal swaps exist
     if (hasInternalSwaps && wallet) {
       // Preserve internal swap balances for tokens, but sync XRP
+      console.log('[Sync] Preserving internal swap balances:', {
+        userId,
+        hasInternalSwaps: true,
+        dbUsdt: wallet.balance_usdt,
+        dbUsdc: wallet.balance_usdc,
+        xrplUsdt: balances.usdt,
+        xrplUsdc: balances.usdc,
+      });
       await adminClient
         .from('wallets')
         .update({
@@ -132,6 +144,11 @@ export class WalletService {
         .eq('id', walletId);
     } else {
       // No internal swaps, safe to sync all from XRPL
+      console.log('[Sync] No internal swaps found, syncing all balances from XRPL:', {
+        userId,
+        hasInternalSwaps: false,
+        xrplBalances: balances,
+      });
       await adminClient
         .from('wallets')
         .update({
@@ -1010,7 +1027,10 @@ export class WalletService {
    */
   async executeSwap(userId: string, request: SwapExecuteRequest): Promise<SwapExecuteResponse> {
     try {
-      const { amount, fromCurrency, toCurrency, swapType = 'onchain', slippageTolerance = 5 } = request;
+      // On testnet, default to internal swaps since DEX has no liquidity
+      const isTestnet = (process.env.XRPL_NETWORK || 'testnet') === 'testnet';
+      const defaultSwapType = isTestnet ? 'internal' : 'onchain';
+      const { amount, fromCurrency, toCurrency, swapType = defaultSwapType, slippageTolerance = 5 } = request;
 
       if (!amount || amount <= 0) {
         return {
