@@ -373,4 +373,66 @@ export interface DeleteTimelineEventResponse {
   error?: string;
 }
 
+// Final Verdict Types
+export type VerdictStatus = 'pending' | 'decision_pending' | 'decision_made' | 'under_review';
+export type DecisionOutcome = 'favor_initiator' | 'favor_respondent' | 'partial' | 'dismissed' | 'other';
+
+export interface FinalVerdict {
+  disputeId: string;
+  verdictStatus: VerdictStatus;
+  mediatorUserId?: string;
+  mediatorName?: string;
+  decisionDeadline?: string; // ISO timestamp
+  finalVerdict?: string;
+  decisionDate?: string; // ISO timestamp
+  decisionSummary?: string;
+  decisionOutcome?: DecisionOutcome;
+  hoursRemaining?: number; // Calculated hours until deadline
+  isOverdue?: boolean; // Whether deadline has passed
+}
+
+export interface GetFinalVerdictResponse {
+  success: boolean;
+  message: string;
+  data?: FinalVerdict;
+  error?: string;
+}
+
+export interface AssignMediatorRequest {
+  mediatorUserId: string;
+  decisionDeadlineHours?: number; // Default 24 hours
+}
+
+export interface AssignMediatorResponse {
+  success: boolean;
+  message: string;
+  data?: FinalVerdict;
+  error?: string;
+}
+
+export interface SubmitFinalVerdictRequest {
+  finalVerdict: string;
+  decisionSummary?: string;
+  decisionOutcome: DecisionOutcome;
+}
+
+export interface SubmitFinalVerdictResponse {
+  success: boolean;
+  message: string;
+  data?: FinalVerdict;
+  error?: string;
+}
+
+export interface UpdateVerdictStatusRequest {
+  verdictStatus: VerdictStatus;
+  decisionDeadlineHours?: number; // For decision_pending status
+}
+
+export interface UpdateVerdictStatusResponse {
+  success: boolean;
+  message: string;
+  data?: FinalVerdict;
+  error?: string;
+}
+
 

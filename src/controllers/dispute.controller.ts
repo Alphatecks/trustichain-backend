@@ -26,6 +26,13 @@ import {
   CreateTimelineEventResponse,
   GetTimelineEventsResponse,
   DeleteTimelineEventResponse,
+  GetFinalVerdictResponse,
+  AssignMediatorRequest,
+  AssignMediatorResponse,
+  SubmitFinalVerdictRequest,
+  SubmitFinalVerdictResponse,
+  UpdateVerdictStatusRequest,
+  UpdateVerdictStatusResponse,
 } from '../types/api/dispute.types';
 import { disputeService } from '../services/dispute/dispute.service';
 import { storageService } from '../services/storage/storage.service';
@@ -690,6 +697,129 @@ export class DisputeController {
         res.status(200).json(result);
       } else {
         const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' || result.error === 'Timeline event not found' || result.error === 'Cannot delete system event' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get final verdict status for a dispute
+   * GET /api/disputes/:disputeId/verdict
+   */
+  async getFinalVerdict(
+    req: Request,
+    res: Response<GetFinalVerdictResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+
+      const result = await disputeService.getFinalVerdict(userId, disputeId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Assign mediator to dispute
+   * POST /api/disputes/:disputeId/verdict/assign-mediator
+   */
+  async assignMediator(
+    req: Request,
+    res: Response<AssignMediatorResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const request = req.body as AssignMediatorRequest;
+
+      const result = await disputeService.assignMediator(userId, disputeId, request);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Update verdict status
+   * PUT /api/disputes/:disputeId/verdict/status
+   */
+  async updateVerdictStatus(
+    req: Request,
+    res: Response<UpdateVerdictStatusResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const request = req.body as UpdateVerdictStatusRequest;
+
+      const result = await disputeService.updateVerdictStatus(userId, disputeId, request);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Submit final verdict/decision
+   * POST /api/disputes/:disputeId/verdict/submit
+   */
+  async submitFinalVerdict(
+    req: Request,
+    res: Response<SubmitFinalVerdictResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const request = req.body as SubmitFinalVerdictRequest;
+
+      const result = await disputeService.submitFinalVerdict(userId, disputeId, request);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
         res.status(statusCode).json(result);
       }
     } catch (error) {

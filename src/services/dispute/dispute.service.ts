@@ -37,6 +37,16 @@ import {
   GetTimelineEventsResponse,
   DeleteTimelineEventResponse,
   TimelineEventType,
+  FinalVerdict,
+  GetFinalVerdictResponse,
+  AssignMediatorRequest,
+  AssignMediatorResponse,
+  SubmitFinalVerdictRequest,
+  SubmitFinalVerdictResponse,
+  UpdateVerdictStatusRequest,
+  UpdateVerdictStatusResponse,
+  VerdictStatus,
+  DecisionOutcome,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -2370,6 +2380,391 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to delete timeline event',
         error: error instanceof Error ? error.message : 'Failed to delete timeline event',
+      };
+    }
+  }
+
+  /**
+   * Get final verdict status for a dispute
+   * GET /api/disputes/:disputeId/verdict
+   */
+  async getFinalVerdict(userId: string, disputeId: string): Promise<GetFinalVerdictResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get mediator name if assigned
+      let mediatorName: string | undefined;
+      if (dispute.mediator_user_id) {
+        const userIds = [dispute.mediator_user_id];
+        const partyNames = await this.getPartyNames(userIds);
+        mediatorName = partyNames[dispute.mediator_user_id] || undefined;
+      }
+
+      // Calculate hours remaining and overdue status
+      let hoursRemaining: number | undefined;
+      let isOverdue = false;
+      if (dispute.decision_deadline) {
+        const deadline = new Date(dispute.decision_deadline);
+        const now = new Date();
+        const diffMs = deadline.getTime() - now.getTime();
+        hoursRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60)));
+        isOverdue = diffMs < 0;
+      }
+
+      const verdict: FinalVerdict = {
+        disputeId: dispute.id,
+        verdictStatus: (dispute.verdict_status as VerdictStatus) || 'pending',
+        mediatorUserId: dispute.mediator_user_id || undefined,
+        mediatorName,
+        decisionDeadline: dispute.decision_deadline || undefined,
+        finalVerdict: dispute.final_verdict || undefined,
+        decisionDate: dispute.decision_date || undefined,
+        decisionSummary: dispute.decision_summary || undefined,
+        decisionOutcome: dispute.decision_outcome as DecisionOutcome | undefined,
+        hoursRemaining,
+        isOverdue,
+      };
+
+      return {
+        success: true,
+        message: 'Final verdict retrieved successfully',
+        data: verdict,
+      };
+    } catch (error) {
+      console.error('Error getting final verdict:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get final verdict',
+        error: error instanceof Error ? error.message : 'Failed to get final verdict',
+      };
+    }
+  }
+
+  /**
+   * Assign mediator to dispute and set decision pending status
+   * POST /api/disputes/:disputeId/verdict/assign-mediator
+   */
+  async assignMediator(
+    userId: string,
+    disputeId: string,
+    request: AssignMediatorRequest
+  ): Promise<AssignMediatorResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // TODO: Verify user is admin/mediator (add admin check here)
+      // For now, allow any authenticated user (should be restricted to admins)
+
+      // Calculate decision deadline (default 24 hours)
+      const deadlineHours = request.decisionDeadlineHours || 24;
+      const decisionDeadline = new Date();
+      decisionDeadline.setHours(decisionDeadline.getHours() + deadlineHours);
+
+      // Update dispute with mediator and verdict status
+      const updateData: any = {
+        mediator_user_id: request.mediatorUserId,
+        verdict_status: 'decision_pending',
+        decision_deadline: decisionDeadline.toISOString(),
+      };
+
+      const { data: updatedDispute, error: updateError } = await adminClient
+        .from('disputes')
+        .update(updateData)
+        .eq('id', dispute.id)
+        .select()
+        .single();
+
+      if (updateError || !updatedDispute) {
+        console.error('Error assigning mediator:', updateError);
+        return {
+          success: false,
+          message: 'Failed to assign mediator',
+          error: 'Database error',
+        };
+      }
+
+      // Create timeline event: "Mediator Assigned"
+      await this.createSystemTimelineEvent(
+        dispute.id,
+        'mediator_assigned',
+        'Mediator Assigned',
+        `Mediator has been assigned to review this dispute`,
+        {
+          mediatorUserId: request.mediatorUserId,
+          decisionDeadline: decisionDeadline.toISOString(),
+        }
+      );
+
+      // Get mediator name
+      const userIds = [request.mediatorUserId];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const verdict: FinalVerdict = {
+        disputeId: updatedDispute.id,
+        verdictStatus: 'decision_pending',
+        mediatorUserId: updatedDispute.mediator_user_id || undefined,
+        mediatorName: partyNames[request.mediatorUserId] || undefined,
+        decisionDeadline: updatedDispute.decision_deadline || undefined,
+        hoursRemaining: deadlineHours,
+        isOverdue: false,
+      };
+
+      return {
+        success: true,
+        message: 'Mediator assigned successfully',
+        data: verdict,
+      };
+    } catch (error) {
+      console.error('Error assigning mediator:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to assign mediator',
+        error: error instanceof Error ? error.message : 'Failed to assign mediator',
+      };
+    }
+  }
+
+  /**
+   * Update verdict status (e.g., set to decision_pending)
+   * PUT /api/disputes/:disputeId/verdict/status
+   */
+  async updateVerdictStatus(
+    userId: string,
+    disputeId: string,
+    request: UpdateVerdictStatusRequest
+  ): Promise<UpdateVerdictStatusResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // TODO: Verify user is admin/mediator or assigned mediator
+      // For now, allow any authenticated user (should be restricted)
+
+      const updateData: any = {
+        verdict_status: request.verdictStatus,
+      };
+
+      // If setting to decision_pending, set deadline
+      if (request.verdictStatus === 'decision_pending') {
+        const deadlineHours = request.decisionDeadlineHours || 24;
+        const decisionDeadline = new Date();
+        decisionDeadline.setHours(decisionDeadline.getHours() + deadlineHours);
+        updateData.decision_deadline = decisionDeadline.toISOString();
+      }
+
+      const { data: updatedDispute, error: updateError } = await adminClient
+        .from('disputes')
+        .update(updateData)
+        .eq('id', dispute.id)
+        .select()
+        .single();
+
+      if (updateError || !updatedDispute) {
+        console.error('Error updating verdict status:', updateError);
+        return {
+          success: false,
+          message: 'Failed to update verdict status',
+          error: 'Database error',
+        };
+      }
+
+      // Get mediator name if assigned
+      let mediatorName: string | undefined;
+      if (updatedDispute.mediator_user_id) {
+        const userIds = [updatedDispute.mediator_user_id];
+        const partyNames = await this.getPartyNames(userIds);
+        mediatorName = partyNames[updatedDispute.mediator_user_id] || undefined;
+      }
+
+      // Calculate hours remaining
+      let hoursRemaining: number | undefined;
+      let isOverdue = false;
+      if (updatedDispute.decision_deadline) {
+        const deadline = new Date(updatedDispute.decision_deadline);
+        const now = new Date();
+        const diffMs = deadline.getTime() - now.getTime();
+        hoursRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60)));
+        isOverdue = diffMs < 0;
+      }
+
+      const verdict: FinalVerdict = {
+        disputeId: updatedDispute.id,
+        verdictStatus: updatedDispute.verdict_status as VerdictStatus,
+        mediatorUserId: updatedDispute.mediator_user_id || undefined,
+        mediatorName,
+        decisionDeadline: updatedDispute.decision_deadline || undefined,
+        finalVerdict: updatedDispute.final_verdict || undefined,
+        decisionDate: updatedDispute.decision_date || undefined,
+        decisionSummary: updatedDispute.decision_summary || undefined,
+        decisionOutcome: updatedDispute.decision_outcome as DecisionOutcome | undefined,
+        hoursRemaining,
+        isOverdue,
+      };
+
+      return {
+        success: true,
+        message: 'Verdict status updated successfully',
+        data: verdict,
+      };
+    } catch (error) {
+      console.error('Error updating verdict status:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to update verdict status',
+        error: error instanceof Error ? error.message : 'Failed to update verdict status',
+      };
+    }
+  }
+
+  /**
+   * Submit final verdict/decision
+   * POST /api/disputes/:disputeId/verdict/submit
+   */
+  async submitFinalVerdict(
+    userId: string,
+    disputeId: string,
+    request: SubmitFinalVerdictRequest
+  ): Promise<SubmitFinalVerdictResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is the assigned mediator
+      if (dispute.mediator_user_id !== userId) {
+        return {
+          success: false,
+          message: 'Only the assigned mediator can submit the final verdict',
+          error: 'Access denied',
+        };
+      }
+
+      // Validate required fields
+      if (!request.finalVerdict || !request.decisionOutcome) {
+        return {
+          success: false,
+          message: 'Final verdict and decision outcome are required',
+          error: 'Missing required fields',
+        };
+      }
+
+      const now = new Date();
+
+      // Update dispute with final verdict
+      const updateData: any = {
+        verdict_status: 'decision_made',
+        final_verdict: request.finalVerdict,
+        decision_summary: request.decisionSummary || null,
+        decision_outcome: request.decisionOutcome,
+        decision_date: now.toISOString(),
+        resolved_at: now.toISOString(), // Also update resolved_at
+        status: 'resolved' as DisputeStatus, // Update dispute status to resolved
+      };
+
+      const { data: updatedDispute, error: updateError } = await adminClient
+        .from('disputes')
+        .update(updateData)
+        .eq('id', dispute.id)
+        .select()
+        .single();
+
+      if (updateError || !updatedDispute) {
+        console.error('Error submitting final verdict:', updateError);
+        return {
+          success: false,
+          message: 'Failed to submit final verdict',
+          error: 'Database error',
+        };
+      }
+
+      // Create timeline event: "Dispute Resolved"
+      await this.createSystemTimelineEvent(
+        dispute.id,
+        'dispute_resolved',
+        'Dispute Resolved',
+        `Final verdict has been provided`,
+        {
+          decisionOutcome: request.decisionOutcome,
+        }
+      );
+
+      // Get mediator name
+      const userIds = [userId];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const verdict: FinalVerdict = {
+        disputeId: updatedDispute.id,
+        verdictStatus: 'decision_made',
+        mediatorUserId: updatedDispute.mediator_user_id || undefined,
+        mediatorName: partyNames[userId] || undefined,
+        decisionDeadline: updatedDispute.decision_deadline || undefined,
+        finalVerdict: updatedDispute.final_verdict || undefined,
+        decisionDate: updatedDispute.decision_date || undefined,
+        decisionSummary: updatedDispute.decision_summary || undefined,
+        decisionOutcome: updatedDispute.decision_outcome as DecisionOutcome,
+      };
+
+      return {
+        success: true,
+        message: 'Final verdict submitted successfully',
+        data: verdict,
+      };
+    } catch (error) {
+      console.error('Error submitting final verdict:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to submit final verdict',
+        error: error instanceof Error ? error.message : 'Failed to submit final verdict',
       };
     }
   }

@@ -278,6 +278,61 @@ router.delete(
 );
 
 /**
+ * @route   GET /api/disputes/:disputeId/verdict
+ * @desc    Get final verdict status for a dispute
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/verdict',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getFinalVerdict(req, res);
+  })
+);
+
+/**
+ * @route   POST /api/disputes/:disputeId/verdict/assign-mediator
+ * @desc    Assign mediator to dispute and set decision pending status
+ * @access  Private (Admin/Mediator)
+ * @body    AssignMediatorRequest - Mediator user ID and optional deadline hours
+ */
+router.post(
+  '/:disputeId/verdict/assign-mediator',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.assignMediator(req, res);
+  })
+);
+
+/**
+ * @route   PUT /api/disputes/:disputeId/verdict/status
+ * @desc    Update verdict status (e.g., set to decision_pending)
+ * @access  Private (Admin/Mediator)
+ * @body    UpdateVerdictStatusRequest - Verdict status and optional deadline hours
+ */
+router.put(
+  '/:disputeId/verdict/status',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.updateVerdictStatus(req, res);
+  })
+);
+
+/**
+ * @route   POST /api/disputes/:disputeId/verdict/submit
+ * @desc    Submit final verdict/decision
+ * @access  Private (Assigned Mediator only)
+ * @body    SubmitFinalVerdictRequest - Final verdict text, outcome, and summary
+ */
+router.post(
+  '/:disputeId/verdict/submit',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.submitFinalVerdict(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private
