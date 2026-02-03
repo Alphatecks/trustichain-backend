@@ -2390,8 +2390,6 @@ export class DisputeService {
    */
   async getFinalVerdict(userId: string, disputeId: string): Promise<GetFinalVerdictResponse> {
     try {
-      const adminClient = supabaseAdmin || supabase;
-
       // Verify dispute exists and user has access
       const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
 
@@ -2465,7 +2463,7 @@ export class DisputeService {
    * POST /api/disputes/:disputeId/verdict/assign-mediator
    */
   async assignMediator(
-    userId: string,
+    _userId: string,
     disputeId: string,
     request: AssignMediatorRequest
   ): Promise<AssignMediatorResponse> {
@@ -2560,7 +2558,7 @@ export class DisputeService {
    * PUT /api/disputes/:disputeId/verdict/status
    */
   async updateVerdictStatus(
-    userId: string,
+    _userId: string,
     disputeId: string,
     request: UpdateVerdictStatusRequest
   ): Promise<UpdateVerdictStatusResponse> {
