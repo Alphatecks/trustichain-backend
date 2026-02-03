@@ -21,6 +21,17 @@ import {
   DeleteEvidenceResponse,
   TrackDisputeActivityResponse,
   GetDisputeActivityResponse,
+  DisputeAssessment,
+  AssessmentFinding,
+  CreateAssessmentRequest,
+  CreateAssessmentResponse,
+  UpdateAssessmentRequest,
+  UpdateAssessmentResponse,
+  GetAssessmentResponse,
+  GetAssessmentsResponse,
+  DeleteAssessmentResponse,
+  AssessmentType,
+  AssessmentStatus,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -1451,6 +1462,576 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get activity',
         error: error instanceof Error ? error.message : 'Failed to get activity',
+      };
+    }
+  }
+
+  /**
+   * Create a new assessment for a dispute
+   * POST /api/disputes/:disputeId/assessments
+   */
+  async createAssessment(
+    userId: string,
+    disputeId: string,
+    request: CreateAssessmentRequest
+  ): Promise<CreateAssessmentResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Validate required fields
+      if (!request.findings || request.findings.length === 0) {
+        return {
+          success: false,
+          message: 'At least one finding is required',
+          error: 'Missing required fields',
+        };
+      }
+
+      // Create assessment record
+      const assessmentData = {
+        dispute_id: dispute.id,
+        created_by_user_id: userId,
+        assessment_type: (request.assessmentType || 'preliminary') as AssessmentType,
+        title: request.title || 'Preliminary Assessment',
+        summary: request.summary || null,
+        status: 'draft' as AssessmentStatus,
+      };
+
+      const { data: assessment, error: assessmentError } = await adminClient
+        .from('dispute_assessments')
+        .insert(assessmentData)
+        .select()
+        .single();
+
+      if (assessmentError || !assessment) {
+        console.error('Error creating assessment:', assessmentError);
+        return {
+          success: false,
+          message: 'Failed to create assessment',
+          error: 'Database error',
+        };
+      }
+
+      // Create findings
+      const findingsData = request.findings.map((finding, index) => ({
+        assessment_id: assessment.id,
+        finding_text: finding.findingText,
+        finding_type: finding.findingType || null,
+        order_index: finding.orderIndex !== undefined ? finding.orderIndex : index,
+      }));
+
+      const { data: findings, error: findingsError } = await adminClient
+        .from('dispute_assessment_findings')
+        .insert(findingsData)
+        .select();
+
+      if (findingsError) {
+        console.error('Error creating findings:', findingsError);
+        // Rollback assessment if findings fail
+        await adminClient.from('dispute_assessments').delete().eq('id', assessment.id);
+        return {
+          success: false,
+          message: 'Failed to create findings',
+          error: 'Database error',
+        };
+      }
+
+      // Get creator name
+      const userIds = [userId];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const formattedAssessment: DisputeAssessment = {
+        id: assessment.id,
+        disputeId: dispute.id,
+        createdByUserId: userId,
+        createdByName: partyNames[userId] || 'Unknown',
+        assessmentType: assessment.assessment_type as AssessmentType,
+        title: assessment.title,
+        summary: assessment.summary || undefined,
+        status: assessment.status as AssessmentStatus,
+        findings: (findings || []).map((f: any) => ({
+          id: f.id,
+          findingText: f.finding_text,
+          findingType: f.finding_type as any,
+          orderIndex: f.order_index,
+          createdAt: f.created_at,
+          updatedAt: f.updated_at,
+        })),
+        createdAt: assessment.created_at,
+        updatedAt: assessment.updated_at,
+        publishedAt: assessment.published_at || undefined,
+      };
+
+      return {
+        success: true,
+        message: 'Assessment created successfully',
+        data: {
+          assessmentId: assessment.id,
+          assessment: formattedAssessment,
+        },
+      };
+    } catch (error) {
+      console.error('Error creating assessment:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create assessment',
+        error: error instanceof Error ? error.message : 'Failed to create assessment',
+      };
+    }
+  }
+
+  /**
+   * Get assessment by ID
+   * GET /api/disputes/:disputeId/assessments/:assessmentId
+   */
+  async getAssessmentById(
+    userId: string,
+    disputeId: string,
+    assessmentId: string
+  ): Promise<GetAssessmentResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get assessment
+      const { data: assessment, error: assessmentError } = await adminClient
+        .from('dispute_assessments')
+        .select('*')
+        .eq('id', assessmentId)
+        .eq('dispute_id', dispute.id)
+        .single();
+
+      if (assessmentError || !assessment) {
+        return {
+          success: false,
+          message: 'Assessment not found',
+          error: 'Assessment not found',
+        };
+      }
+
+      // Get findings
+      const { data: findings, error: findingsError } = await adminClient
+        .from('dispute_assessment_findings')
+        .select('*')
+        .eq('assessment_id', assessment.id)
+        .order('order_index', { ascending: true });
+
+      if (findingsError) {
+        console.error('Error fetching findings:', findingsError);
+      }
+
+      // Get creator name
+      const userIds = [assessment.created_by_user_id];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const formattedAssessment: DisputeAssessment = {
+        id: assessment.id,
+        disputeId: assessment.dispute_id,
+        createdByUserId: assessment.created_by_user_id,
+        createdByName: partyNames[assessment.created_by_user_id] || 'Unknown',
+        assessmentType: assessment.assessment_type as AssessmentType,
+        title: assessment.title,
+        summary: assessment.summary || undefined,
+        status: assessment.status as AssessmentStatus,
+        findings: (findings || []).map((f: any) => ({
+          id: f.id,
+          findingText: f.finding_text,
+          findingType: f.finding_type as any,
+          orderIndex: f.order_index,
+          createdAt: f.created_at,
+          updatedAt: f.updated_at,
+        })),
+        createdAt: assessment.created_at,
+        updatedAt: assessment.updated_at,
+        publishedAt: assessment.published_at || undefined,
+      };
+
+      return {
+        success: true,
+        message: 'Assessment retrieved successfully',
+        data: formattedAssessment,
+      };
+    } catch (error) {
+      console.error('Error getting assessment:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get assessment',
+        error: error instanceof Error ? error.message : 'Failed to get assessment',
+      };
+    }
+  }
+
+  /**
+   * Get all assessments for a dispute
+   * GET /api/disputes/:disputeId/assessments
+   */
+  async getAssessments(userId: string, disputeId: string): Promise<GetAssessmentsResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get all assessments (only published for regular users, all for admins)
+      const { data: assessments, error: assessmentsError } = await adminClient
+        .from('dispute_assessments')
+        .select('*')
+        .eq('dispute_id', dispute.id)
+        .order('created_at', { ascending: false });
+
+      if (assessmentsError) {
+        console.error('Error fetching assessments:', assessmentsError);
+        return {
+          success: false,
+          message: 'Failed to fetch assessments',
+          error: 'Database error',
+        };
+      }
+
+      // Get all findings for all assessments
+      const assessmentIds = (assessments || []).map((a: any) => a.id);
+      const { data: allFindings, error: findingsError } = await adminClient
+        .from('dispute_assessment_findings')
+        .select('*')
+        .in('assessment_id', assessmentIds)
+        .order('order_index', { ascending: true });
+
+      if (findingsError) {
+        console.error('Error fetching findings:', findingsError);
+      }
+
+      // Group findings by assessment
+      const findingsByAssessment = (allFindings || []).reduce((acc: any, f: any) => {
+        if (!acc[f.assessment_id]) {
+          acc[f.assessment_id] = [];
+        }
+        acc[f.assessment_id].push(f);
+        return acc;
+      }, {});
+
+      // Get creator names
+      const creatorIds = Array.from(
+        new Set((assessments || []).map((a: any) => a.created_by_user_id))
+      );
+      const partyNames = await this.getPartyNames(creatorIds);
+
+      const formattedAssessments: DisputeAssessment[] = (assessments || []).map((a: any) => ({
+        id: a.id,
+        disputeId: a.dispute_id,
+        createdByUserId: a.created_by_user_id,
+        createdByName: partyNames[a.created_by_user_id] || 'Unknown',
+        assessmentType: a.assessment_type as AssessmentType,
+        title: a.title,
+        summary: a.summary || undefined,
+        status: a.status as AssessmentStatus,
+        findings: (findingsByAssessment[a.id] || []).map((f: any) => ({
+          id: f.id,
+          findingText: f.finding_text,
+          findingType: f.finding_type as any,
+          orderIndex: f.order_index,
+          createdAt: f.created_at,
+          updatedAt: f.updated_at,
+        })),
+        createdAt: a.created_at,
+        updatedAt: a.updated_at,
+        publishedAt: a.published_at || undefined,
+      }));
+
+      return {
+        success: true,
+        message: 'Assessments retrieved successfully',
+        data: {
+          assessments: formattedAssessments,
+          total: formattedAssessments.length,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting assessments:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get assessments',
+        error: error instanceof Error ? error.message : 'Failed to get assessments',
+      };
+    }
+  }
+
+  /**
+   * Update an assessment
+   * PUT /api/disputes/:disputeId/assessments/:assessmentId
+   */
+  async updateAssessment(
+    userId: string,
+    disputeId: string,
+    assessmentId: string,
+    request: UpdateAssessmentRequest
+  ): Promise<UpdateAssessmentResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify assessment exists and belongs to dispute
+      const { data: assessment, error: assessmentError } = await adminClient
+        .from('dispute_assessments')
+        .select('*')
+        .eq('id', assessmentId)
+        .eq('dispute_id', dispute.id)
+        .single();
+
+      if (assessmentError || !assessment) {
+        return {
+          success: false,
+          message: 'Assessment not found',
+          error: 'Assessment not found',
+        };
+      }
+
+      // Verify user created the assessment (or is admin)
+      if (assessment.created_by_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You can only update assessments you created',
+          error: 'Access denied',
+        };
+      }
+
+      // Build update object
+      const updateData: any = {};
+      if (request.title !== undefined) updateData.title = request.title;
+      if (request.summary !== undefined) updateData.summary = request.summary;
+      if (request.status !== undefined) {
+        updateData.status = request.status;
+        if (request.status === 'published' && !assessment.published_at) {
+          updateData.published_at = new Date().toISOString();
+        }
+      }
+
+      // Update assessment
+      const { data: updatedAssessment, error: updateError } = await adminClient
+        .from('dispute_assessments')
+        .update(updateData)
+        .eq('id', assessmentId)
+        .select()
+        .single();
+
+      if (updateError || !updatedAssessment) {
+        console.error('Error updating assessment:', updateError);
+        return {
+          success: false,
+          message: 'Failed to update assessment',
+          error: 'Database error',
+        };
+      }
+
+      // Update findings if provided
+      if (request.findings !== undefined) {
+        // Delete existing findings
+        await adminClient
+          .from('dispute_assessment_findings')
+          .delete()
+          .eq('assessment_id', assessmentId);
+
+        // Insert new findings
+        if (request.findings.length > 0) {
+          const findingsData = request.findings.map((finding, index) => ({
+            assessment_id: assessmentId,
+            finding_text: finding.findingText,
+            finding_type: finding.findingType || null,
+            order_index: finding.orderIndex !== undefined ? finding.orderIndex : index,
+          }));
+
+          const { error: findingsError } = await adminClient
+            .from('dispute_assessment_findings')
+            .insert(findingsData);
+
+          if (findingsError) {
+            console.error('Error updating findings:', findingsError);
+            return {
+              success: false,
+              message: 'Failed to update findings',
+              error: 'Database error',
+            };
+          }
+        }
+      }
+
+      // Get updated assessment with findings
+      const { data: findings } = await adminClient
+        .from('dispute_assessment_findings')
+        .select('*')
+        .eq('assessment_id', assessmentId)
+        .order('order_index', { ascending: true });
+
+      // Get creator name
+      const userIds = [updatedAssessment.created_by_user_id];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const formattedAssessment: DisputeAssessment = {
+        id: updatedAssessment.id,
+        disputeId: updatedAssessment.dispute_id,
+        createdByUserId: updatedAssessment.created_by_user_id,
+        createdByName: partyNames[updatedAssessment.created_by_user_id] || 'Unknown',
+        assessmentType: updatedAssessment.assessment_type as AssessmentType,
+        title: updatedAssessment.title,
+        summary: updatedAssessment.summary || undefined,
+        status: updatedAssessment.status as AssessmentStatus,
+        findings: (findings || []).map((f: any) => ({
+          id: f.id,
+          findingText: f.finding_text,
+          findingType: f.finding_type as any,
+          orderIndex: f.order_index,
+          createdAt: f.created_at,
+          updatedAt: f.updated_at,
+        })),
+        createdAt: updatedAssessment.created_at,
+        updatedAt: updatedAssessment.updated_at,
+        publishedAt: updatedAssessment.published_at || undefined,
+      };
+
+      return {
+        success: true,
+        message: 'Assessment updated successfully',
+        data: formattedAssessment,
+      };
+    } catch (error) {
+      console.error('Error updating assessment:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to update assessment',
+        error: error instanceof Error ? error.message : 'Failed to update assessment',
+      };
+    }
+  }
+
+  /**
+   * Delete an assessment
+   * DELETE /api/disputes/:disputeId/assessments/:assessmentId
+   */
+  async deleteAssessment(
+    userId: string,
+    disputeId: string,
+    assessmentId: string
+  ): Promise<DeleteAssessmentResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify assessment exists and belongs to dispute
+      const { data: assessment, error: assessmentError } = await adminClient
+        .from('dispute_assessments')
+        .select('*')
+        .eq('id', assessmentId)
+        .eq('dispute_id', dispute.id)
+        .single();
+
+      if (assessmentError || !assessment) {
+        return {
+          success: false,
+          message: 'Assessment not found',
+          error: 'Assessment not found',
+        };
+      }
+
+      // Verify user created the assessment (or is admin)
+      if (assessment.created_by_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You can only delete assessments you created',
+          error: 'Access denied',
+        };
+      }
+
+      // Delete assessment (findings will be cascade deleted)
+      const { error: deleteError } = await adminClient
+        .from('dispute_assessments')
+        .delete()
+        .eq('id', assessmentId);
+
+      if (deleteError) {
+        console.error('Error deleting assessment:', deleteError);
+        return {
+          success: false,
+          message: 'Failed to delete assessment',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Assessment deleted successfully',
+      };
+    } catch (error) {
+      console.error('Error deleting assessment:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to delete assessment',
+        error: error instanceof Error ? error.message : 'Failed to delete assessment',
       };
     }
   }

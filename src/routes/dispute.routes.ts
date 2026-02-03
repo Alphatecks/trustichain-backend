@@ -171,6 +171,73 @@ router.get(
 );
 
 /**
+ * @route   POST /api/disputes/:disputeId/assessments
+ * @desc    Create a new assessment for a dispute
+ * @access  Private (Admin/Mediator)
+ * @body    CreateAssessmentRequest - Assessment details with findings
+ */
+router.post(
+  '/:disputeId/assessments',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.createAssessment(req, res);
+  })
+);
+
+/**
+ * @route   GET /api/disputes/:disputeId/assessments
+ * @desc    Get all assessments for a dispute
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/assessments',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getAssessments(req, res);
+  })
+);
+
+/**
+ * @route   GET /api/disputes/:disputeId/assessments/:assessmentId
+ * @desc    Get assessment by ID
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/assessments/:assessmentId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getAssessmentById(req, res);
+  })
+);
+
+/**
+ * @route   PUT /api/disputes/:disputeId/assessments/:assessmentId
+ * @desc    Update an assessment
+ * @access  Private (Admin/Mediator - creator only)
+ * @body    UpdateAssessmentRequest - Updated assessment details
+ */
+router.put(
+  '/:disputeId/assessments/:assessmentId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.updateAssessment(req, res);
+  })
+);
+
+/**
+ * @route   DELETE /api/disputes/:disputeId/assessments/:assessmentId
+ * @desc    Delete an assessment
+ * @access  Private (Admin/Mediator - creator only)
+ */
+router.delete(
+  '/:disputeId/assessments/:assessmentId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.deleteAssessment(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private

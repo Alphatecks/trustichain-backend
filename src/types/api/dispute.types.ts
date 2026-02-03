@@ -217,4 +217,97 @@ export interface GetDisputeActivityResponse {
   error?: string;
 }
 
+// Assessment Types
+export type AssessmentType = 'preliminary' | 'final' | 'review';
+export type AssessmentStatus = 'draft' | 'published' | 'archived';
+export type FindingType = 'positive' | 'negative' | 'neutral' | 'observation';
+
+export interface AssessmentFinding {
+  id: string;
+  findingText: string;
+  findingType?: FindingType;
+  orderIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DisputeAssessment {
+  id: string;
+  disputeId: string;
+  createdByUserId: string;
+  createdByName?: string;
+  assessmentType: AssessmentType;
+  title: string;
+  summary?: string;
+  status: AssessmentStatus;
+  findings: AssessmentFinding[];
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+}
+
+export interface CreateAssessmentRequest {
+  disputeId: string;
+  assessmentType?: AssessmentType;
+  title?: string;
+  summary?: string;
+  findings: Array<{
+    findingText: string;
+    findingType?: FindingType;
+    orderIndex?: number;
+  }>;
+}
+
+export interface CreateAssessmentResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    assessmentId: string;
+    assessment: DisputeAssessment;
+  };
+  error?: string;
+}
+
+export interface UpdateAssessmentRequest {
+  title?: string;
+  summary?: string;
+  status?: AssessmentStatus;
+  findings?: Array<{
+    id?: string; // If updating existing finding
+    findingText: string;
+    findingType?: FindingType;
+    orderIndex?: number;
+  }>;
+}
+
+export interface UpdateAssessmentResponse {
+  success: boolean;
+  message: string;
+  data?: DisputeAssessment;
+  error?: string;
+}
+
+export interface GetAssessmentResponse {
+  success: boolean;
+  message: string;
+  data?: DisputeAssessment;
+  error?: string;
+}
+
+export interface GetAssessmentsResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    assessments: DisputeAssessment[];
+    total: number;
+  };
+  error?: string;
+}
+
+export interface DeleteAssessmentResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 
