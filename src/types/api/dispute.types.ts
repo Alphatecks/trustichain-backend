@@ -435,4 +435,45 @@ export interface UpdateVerdictStatusResponse {
   error?: string;
 }
 
+// Dispute Chat Message Types
+export type SenderRole = 'initiator' | 'respondent' | 'mediator' | 'admin';
+
+export interface DisputeMessage {
+  id: string;
+  disputeId: string;
+  senderUserId: string;
+  senderName: string;
+  senderRole: SenderRole;
+  messageText: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SendMessageRequest {
+  messageText: string;
+}
+
+export interface SendMessageResponse {
+  success: boolean;
+  message: string;
+  data?: DisputeMessage;
+  error?: string;
+}
+
+export interface GetMessagesResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    messages: DisputeMessage[];
+    total: number;
+  };
+  error?: string;
+}
+
+export interface DeleteMessageResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 

@@ -47,6 +47,12 @@ import {
   UpdateVerdictStatusResponse,
   VerdictStatus,
   DecisionOutcome,
+  DisputeMessage,
+  SendMessageRequest,
+  SendMessageResponse,
+  GetMessagesResponse,
+  DeleteMessageResponse,
+  SenderRole,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -2763,6 +2769,287 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to submit final verdict',
         error: error instanceof Error ? error.message : 'Failed to submit final verdict',
+      };
+    }
+  }
+
+  /**
+   * Determine sender role based on dispute and user
+   */
+  private async determineSenderRole(
+    dispute: any,
+    userId: string
+  ): Promise<SenderRole> {
+    if (dispute.mediator_user_id === userId) {
+      return 'mediator';
+    }
+    if (dispute.initiator_user_id === userId) {
+      return 'initiator';
+    }
+    if (dispute.respondent_user_id === userId) {
+      return 'respondent';
+    }
+    // TODO: Check if user is admin
+    return 'admin';
+  }
+
+  /**
+   * Send a message in dispute chat
+   * POST /api/disputes/:disputeId/messages
+   */
+  async sendMessage(
+    userId: string,
+    disputeId: string,
+    request: SendMessageRequest
+  ): Promise<SendMessageResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute or mediator
+      const isParty = dispute.initiator_user_id === userId || dispute.respondent_user_id === userId;
+      const isMediator = dispute.mediator_user_id === userId;
+      
+      if (!isParty && !isMediator) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute chat',
+          error: 'Access denied',
+        };
+      }
+
+      // Validate message
+      if (!request.messageText || request.messageText.trim().length === 0) {
+        return {
+          success: false,
+          message: 'Message text is required',
+          error: 'Missing required fields',
+        };
+      }
+
+      // Determine sender role
+      const senderRole = await this.determineSenderRole(dispute, userId);
+
+      // Create message
+      const { data: message, error: messageError } = await adminClient
+        .from('dispute_messages')
+        .insert({
+          dispute_id: dispute.id,
+          sender_user_id: userId,
+          message_text: request.messageText.trim(),
+          sender_role: senderRole,
+        })
+        .select()
+        .single();
+
+      if (messageError || !message) {
+        console.error('Error creating message:', messageError);
+        return {
+          success: false,
+          message: 'Failed to send message',
+          error: 'Database error',
+        };
+      }
+
+      // Get sender name
+      const userIds = [userId];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const formattedMessage: DisputeMessage = {
+        id: message.id,
+        disputeId: message.dispute_id,
+        senderUserId: message.sender_user_id,
+        senderName: partyNames[userId] || 'Unknown',
+        senderRole: message.sender_role as SenderRole,
+        messageText: message.message_text,
+        createdAt: message.created_at,
+        updatedAt: message.updated_at,
+      };
+
+      return {
+        success: true,
+        message: 'Message sent successfully',
+        data: formattedMessage,
+      };
+    } catch (error) {
+      console.error('Error sending message:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to send message',
+        error: error instanceof Error ? error.message : 'Failed to send message',
+      };
+    }
+  }
+
+  /**
+   * Get all messages for a dispute
+   * GET /api/disputes/:disputeId/messages
+   */
+  async getMessages(userId: string, disputeId: string): Promise<GetMessagesResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute or mediator
+      const isParty = dispute.initiator_user_id === userId || dispute.respondent_user_id === userId;
+      const isMediator = dispute.mediator_user_id === userId;
+      
+      if (!isParty && !isMediator) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute chat',
+          error: 'Access denied',
+        };
+      }
+
+      // Get all messages, ordered by creation time (oldest first for chat display)
+      const { data: messages, error: messagesError } = await adminClient
+        .from('dispute_messages')
+        .select('*')
+        .eq('dispute_id', dispute.id)
+        .order('created_at', { ascending: true });
+
+      if (messagesError) {
+        console.error('Error fetching messages:', messagesError);
+        return {
+          success: false,
+          message: 'Failed to fetch messages',
+          error: 'Database error',
+        };
+      }
+
+      // Get all sender user IDs
+      const senderIds = Array.from(
+        new Set((messages || []).map((m: any) => m.sender_user_id))
+      );
+      const partyNames = await this.getPartyNames(senderIds);
+
+      const formattedMessages: DisputeMessage[] = (messages || []).map((m: any) => ({
+        id: m.id,
+        disputeId: m.dispute_id,
+        senderUserId: m.sender_user_id,
+        senderName: partyNames[m.sender_user_id] || 'Unknown',
+        senderRole: m.sender_role as SenderRole,
+        messageText: m.message_text,
+        createdAt: m.created_at,
+        updatedAt: m.updated_at,
+      }));
+
+      return {
+        success: true,
+        message: 'Messages retrieved successfully',
+        data: {
+          messages: formattedMessages,
+          total: formattedMessages.length,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting messages:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get messages',
+        error: error instanceof Error ? error.message : 'Failed to get messages',
+      };
+    }
+  }
+
+  /**
+   * Delete a message (only sender can delete their own message)
+   * DELETE /api/disputes/:disputeId/messages/:messageId
+   */
+  async deleteMessage(
+    userId: string,
+    disputeId: string,
+    messageId: string
+  ): Promise<DeleteMessageResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify message exists and belongs to dispute
+      const { data: message, error: messageError } = await adminClient
+        .from('dispute_messages')
+        .select('*')
+        .eq('id', messageId)
+        .eq('dispute_id', dispute.id)
+        .single();
+
+      if (messageError || !message) {
+        return {
+          success: false,
+          message: 'Message not found',
+          error: 'Message not found',
+        };
+      }
+
+      // Verify user is the sender (or admin/mediator)
+      if (message.sender_user_id !== userId) {
+        const isMediator = dispute.mediator_user_id === userId;
+        // TODO: Check if user is admin
+        if (!isMediator) {
+          return {
+            success: false,
+            message: 'You can only delete your own messages',
+            error: 'Access denied',
+          };
+        }
+      }
+
+      // Delete message
+      const { error: deleteError } = await adminClient
+        .from('dispute_messages')
+        .delete()
+        .eq('id', messageId);
+
+      if (deleteError) {
+        console.error('Error deleting message:', deleteError);
+        return {
+          success: false,
+          message: 'Failed to delete message',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Message deleted successfully',
+      };
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to delete message',
+        error: error instanceof Error ? error.message : 'Failed to delete message',
       };
     }
   }

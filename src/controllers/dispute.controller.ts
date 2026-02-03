@@ -33,6 +33,10 @@ import {
   SubmitFinalVerdictResponse,
   UpdateVerdictStatusRequest,
   UpdateVerdictStatusResponse,
+  SendMessageRequest,
+  SendMessageResponse,
+  GetMessagesResponse,
+  DeleteMessageResponse,
 } from '../types/api/dispute.types';
 import { disputeService } from '../services/dispute/dispute.service';
 import { storageService } from '../services/storage/storage.service';
@@ -820,6 +824,98 @@ export class DisputeController {
         res.status(200).json(result);
       } else {
         const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Send a message in dispute chat
+   * POST /api/disputes/:disputeId/messages
+   */
+  async sendMessage(
+    req: Request,
+    res: Response<SendMessageResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const request = req.body as SendMessageRequest;
+
+      const result = await disputeService.sendMessage(userId, disputeId, request);
+
+      if (result.success) {
+        res.status(201).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get all messages for a dispute
+   * GET /api/disputes/:disputeId/messages
+   */
+  async getMessages(
+    req: Request,
+    res: Response<GetMessagesResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+
+      const result = await disputeService.getMessages(userId, disputeId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Delete a message
+   * DELETE /api/disputes/:disputeId/messages/:messageId
+   */
+  async deleteMessage(
+    req: Request,
+    res: Response<DeleteMessageResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const messageId = req.params.messageId;
+
+      const result = await disputeService.deleteMessage(userId, disputeId, messageId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' || result.error === 'Message not found' ? 403 : 400;
         res.status(statusCode).json(result);
       }
     } catch (error) {

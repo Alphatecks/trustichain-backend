@@ -333,6 +333,46 @@ router.post(
 );
 
 /**
+ * @route   POST /api/disputes/:disputeId/messages
+ * @desc    Send a message in dispute chat
+ * @access  Private
+ * @body    SendMessageRequest - Message text
+ */
+router.post(
+  '/:disputeId/messages',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.sendMessage(req, res);
+  })
+);
+
+/**
+ * @route   GET /api/disputes/:disputeId/messages
+ * @desc    Get all messages for a dispute chat
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/messages',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getMessages(req, res);
+  })
+);
+
+/**
+ * @route   DELETE /api/disputes/:disputeId/messages/:messageId
+ * @desc    Delete a message (only sender or mediator can delete)
+ * @access  Private
+ */
+router.delete(
+  '/:disputeId/messages/:messageId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.deleteMessage(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private
