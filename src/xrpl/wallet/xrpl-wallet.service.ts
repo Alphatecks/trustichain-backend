@@ -497,7 +497,23 @@ export class XRPLWalletService {
         command: 'submit',
         tx_blob: signed.tx_blob,
       });
+      
+      // Check if transaction submission was successful
+      const engineResult = submitResult.result.engine_result;
+      const engineResultMessage = submitResult.result.engine_result_message || submitResult.result.engine_result_code;
+      
+      // tesSUCCESS means the transaction was successfully submitted and applied
+      // Other codes indicate various failure conditions
+      if (engineResult !== 'tesSUCCESS') {
+        const errorMessage = engineResultMessage || `Transaction failed with code: ${engineResult}`;
+        throw new Error(`XRPL transaction submission failed: ${errorMessage} (${engineResult})`);
+      }
+      
       const txHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
+      if (!txHash) {
+        throw new Error('Transaction submitted successfully but no transaction hash was returned');
+      }
+      
       return txHash;
     } catch (error) {
       // #region agent log

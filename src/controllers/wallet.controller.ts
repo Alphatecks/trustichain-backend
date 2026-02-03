@@ -172,7 +172,53 @@ export class WalletController {
   async withdrawWallet(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as Request & { userId?: string }).userId!;
-      const result = await walletService.withdrawWallet(userId, req.body);
+      
+      // Validate request body
+      const { amount, currency, destinationAddress } = req.body;
+      
+      if (!amount || typeof amount !== 'number' || amount <= 0) {
+        res.json({
+          success: false,
+          message: 'Invalid amount. Amount must be a positive number.',
+          error: 'Invalid amount',
+        });
+        return;
+      }
+      
+      if (!currency || (currency !== 'USD' && currency !== 'XRP')) {
+        res.json({
+          success: false,
+          message: 'Invalid currency. Currency must be either "USD" or "XRP".',
+          error: 'Invalid currency',
+        });
+        return;
+      }
+      
+      if (!destinationAddress || typeof destinationAddress !== 'string' || !destinationAddress.trim()) {
+        res.json({
+          success: false,
+          message: 'Destination address is required and must be a valid XRPL address.',
+          error: 'Invalid destination address',
+        });
+        return;
+      }
+      
+      // Validate XRPL address format
+      const trimmedAddress = destinationAddress.trim();
+      if (!trimmedAddress.startsWith('r') || trimmedAddress.length < 25 || trimmedAddress.length > 35) {
+        res.json({
+          success: false,
+          message: 'Invalid destination address format. XRPL addresses must start with "r" and be 25-35 characters long.',
+          error: 'Invalid address format',
+        });
+        return;
+      }
+      
+      const result = await walletService.withdrawWallet(userId, {
+        amount,
+        currency,
+        destinationAddress: trimmedAddress,
+      });
       res.json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
