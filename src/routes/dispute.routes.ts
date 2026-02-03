@@ -238,6 +238,46 @@ router.delete(
 );
 
 /**
+ * @route   POST /api/disputes/:disputeId/timeline
+ * @desc    Create a timeline event (manual entry)
+ * @access  Private
+ * @body    CreateTimelineEventRequest - Event details
+ */
+router.post(
+  '/:disputeId/timeline',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.createTimelineEvent(req, res);
+  })
+);
+
+/**
+ * @route   GET /api/disputes/:disputeId/timeline
+ * @desc    Get timeline events for a dispute (chronological order, most recent first)
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/timeline',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getTimelineEvents(req, res);
+  })
+);
+
+/**
+ * @route   DELETE /api/disputes/:disputeId/timeline/:eventId
+ * @desc    Delete a timeline event (manual events only)
+ * @access  Private
+ */
+router.delete(
+  '/:disputeId/timeline/:eventId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.deleteTimelineEvent(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private

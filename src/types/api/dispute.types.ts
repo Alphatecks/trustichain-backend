@@ -310,4 +310,67 @@ export interface DeleteAssessmentResponse {
   error?: string;
 }
 
+// Timeline Event Types
+export type TimelineEventType = 
+  | 'dispute_filed'
+  | 'mediator_assigned'
+  | 'evidence_submitted'
+  | 'evidence_updated'
+  | 'evidence_deleted'
+  | 'mediation_session_started'
+  | 'mediation_session_ended'
+  | 'assessment_created'
+  | 'assessment_published'
+  | 'assessment_updated'
+  | 'dispute_resolved'
+  | 'dispute_cancelled'
+  | 'status_changed'
+  | 'custom';
+
+export interface TimelineEvent {
+  id: string;
+  disputeId: string;
+  eventType: TimelineEventType;
+  title: string;
+  description?: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  isSystemEvent: boolean;
+  metadata?: Record<string, any>;
+  eventTimestamp: string; // When the event occurred
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTimelineEventRequest {
+  eventType: TimelineEventType;
+  title: string;
+  description?: string;
+  eventTimestamp?: string; // Optional: defaults to now, can be set for historical events
+  metadata?: Record<string, any>;
+}
+
+export interface CreateTimelineEventResponse {
+  success: boolean;
+  message: string;
+  data?: TimelineEvent;
+  error?: string;
+}
+
+export interface GetTimelineEventsResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    events: TimelineEvent[];
+    total: number;
+  };
+  error?: string;
+}
+
+export interface DeleteTimelineEventResponse {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
 

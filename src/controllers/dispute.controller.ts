@@ -22,6 +22,10 @@ import {
   GetAssessmentResponse,
   GetAssessmentsResponse,
   DeleteAssessmentResponse,
+  CreateTimelineEventRequest,
+  CreateTimelineEventResponse,
+  GetTimelineEventsResponse,
+  DeleteTimelineEventResponse,
 } from '../types/api/dispute.types';
 import { disputeService } from '../services/dispute/dispute.service';
 import { storageService } from '../services/storage/storage.service';
@@ -594,6 +598,98 @@ export class DisputeController {
         res.status(200).json(result);
       } else {
         const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' || result.error === 'Assessment not found' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Create a timeline event (manual entry)
+   * POST /api/disputes/:disputeId/timeline
+   */
+  async createTimelineEvent(
+    req: Request,
+    res: Response<CreateTimelineEventResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const request = req.body as CreateTimelineEventRequest;
+
+      const result = await disputeService.createTimelineEvent(userId, disputeId, request);
+
+      if (result.success) {
+        res.status(201).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get timeline events for a dispute
+   * GET /api/disputes/:disputeId/timeline
+   */
+  async getTimelineEvents(
+    req: Request,
+    res: Response<GetTimelineEventsResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+
+      const result = await disputeService.getTimelineEvents(userId, disputeId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Delete a timeline event (manual events only)
+   * DELETE /api/disputes/:disputeId/timeline/:eventId
+   */
+  async deleteTimelineEvent(
+    req: Request,
+    res: Response<DeleteTimelineEventResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+      const eventId = req.params.eventId;
+
+      const result = await disputeService.deleteTimelineEvent(userId, disputeId, eventId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' || result.error === 'Timeline event not found' || result.error === 'Cannot delete system event' ? 403 : 400;
         res.status(statusCode).json(result);
       }
     } catch (error) {
