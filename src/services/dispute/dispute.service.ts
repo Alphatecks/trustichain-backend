@@ -55,6 +55,7 @@ import {
   SenderRole,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
+import { emailService } from '../email.service';
 
 export class DisputeService {
   /**
@@ -258,6 +259,7 @@ export class DisputeService {
   /**
    * Get list of disputes for the table
    * GET /api/disputes
+   * Only returns disputes where the user is either the initiator or respondent
    */
   async getDisputes(params: {
     userId: string;
@@ -275,6 +277,7 @@ export class DisputeService {
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
+      // Only return disputes where user is a party (initiator or respondent)
       let query = adminClient
         .from('disputes')
         .select('*')
@@ -291,6 +294,7 @@ export class DisputeService {
       const { data: disputes, error: listError } = await query;
 
       // Build count query separately (no .modify in Supabase client)
+      // Only count disputes where user is a party (initiator or respondent)
       let countQuery = adminClient
         .from('disputes')
         .select('*', { count: 'exact', head: true })
@@ -372,12 +376,8 @@ export class DisputeService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      const { data: dispute, error } = await adminClient
-        .from('disputes')
-        .select('*')
-        .eq('id', disputeId)
-        .or(`initiator_user_id.eq.${userId},respondent_user_id.eq.${userId}`)
-        .single();
+      // First, lookup the dispute (supports both UUID and case_id)
+      const { data: dispute, error } = await this.lookupDispute(disputeId);
 
       if (error || !dispute) {
         return {
@@ -387,33 +387,57 @@ export class DisputeService {
         };
       }
 
-      const userIds = [dispute.initiator_user_id, dispute.respondent_user_id].filter(Boolean);
+      // Explicitly verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Get full dispute details
+      const { data: fullDispute, error: fullError } = await adminClient
+        .from('disputes')
+        .select('*')
+        .eq('id', dispute.id)
+        .single();
+
+      if (fullError || !fullDispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      const userIds = [fullDispute.initiator_user_id, fullDispute.respondent_user_id].filter(Boolean);
       const partyNames = await this.getPartyNames(userIds);
 
-      const openedAt = new Date(dispute.opened_at);
-      const endTime = dispute.resolved_at ? new Date(dispute.resolved_at) : new Date();
+      const openedAt = new Date(fullDispute.opened_at);
+      const endTime = fullDispute.resolved_at ? new Date(fullDispute.resolved_at) : new Date();
       const durationSeconds = Math.max(0, (endTime.getTime() - openedAt.getTime()) / 1000);
 
       return {
         success: true,
         message: 'Dispute retrieved successfully',
         data: {
-          id: dispute.id,
-          caseId: dispute.case_id,
-          initiatorName: partyNames[dispute.initiator_user_id] || 'Unknown',
-          respondentName: partyNames[dispute.respondent_user_id] || 'Unknown',
+          id: fullDispute.id,
+          caseId: fullDispute.case_id,
+          initiatorName: partyNames[fullDispute.initiator_user_id] || 'Unknown',
+          respondentName: partyNames[fullDispute.respondent_user_id] || 'Unknown',
           amount: {
-            xrp: parseFloat(dispute.amount_xrp),
-            usd: parseFloat(dispute.amount_usd),
+            xrp: parseFloat(fullDispute.amount_xrp),
+            usd: parseFloat(fullDispute.amount_usd),
           },
-          status: dispute.status as DisputeStatus,
-          reason: dispute.reason,
-          openedAt: dispute.opened_at,
-          resolvedAt: dispute.resolved_at || undefined,
+          status: fullDispute.status as DisputeStatus,
+          reason: fullDispute.reason,
+          openedAt: fullDispute.opened_at,
+          resolvedAt: fullDispute.resolved_at || undefined,
           durationSeconds,
-          description: dispute.description || undefined,
-          cancelReason: dispute.cancel_reason || undefined,
-          escrowId: dispute.escrow_id || undefined,
+          description: fullDispute.description || undefined,
+          cancelReason: fullDispute.cancel_reason || undefined,
+          escrowId: fullDispute.escrow_id || undefined,
         },
       };
     } catch (error) {
@@ -814,6 +838,44 @@ export class DisputeService {
           reason: request.disputeReason,
         }
       );
+
+      // Send email notification to respondent
+      try {
+        // Get respondent user details
+        const { data: respondentUser } = await adminClient
+          .from('users')
+          .select('email, full_name')
+          .eq('id', respondentUserId)
+          .single();
+
+        // Get initiator user details
+        const { data: initiatorUser } = await adminClient
+          .from('users')
+          .select('full_name')
+          .eq('id', userId)
+          .single();
+
+        if (respondentUser?.email) {
+          const respondentEmail = request.respondentEmail || respondentUser.email;
+          const respondentName = request.respondentName || respondentUser.full_name || 'User';
+          const initiatorName = request.payerName || initiatorUser?.full_name || 'User';
+
+          await emailService.sendDisputeNotificationToRespondent(
+            respondentEmail,
+            respondentName,
+            dispute.case_id,
+            initiatorName,
+            request.disputeReason,
+            amountUsd
+          ).catch((emailError) => {
+            console.error('[Dispute Create] Failed to send email to respondent:', emailError);
+            // Don't fail dispute creation if email fails
+          });
+        }
+      } catch (emailError) {
+        console.error('[Dispute Create] Error sending dispute notification email:', emailError);
+        // Don't fail dispute creation if email sending fails
+      }
 
       return {
         success: true,

@@ -409,6 +409,132 @@ export class EmailService {
       return { success: false, error: errorMessage };
     }
   }
+
+  /**
+   * Send dispute notification email to respondent
+   * @param email - Respondent email address
+   * @param respondentName - Respondent's full name
+   * @param disputeCaseId - Dispute case ID (e.g., #DSP-2025-001)
+   * @param initiatorName - Name of the person who filed the dispute
+   * @param disputeReason - Reason for the dispute
+   * @param amountUsd - Dispute amount in USD
+   */
+  async sendDisputeNotificationToRespondent(
+    email: string,
+    respondentName: string,
+    disputeCaseId: string,
+    initiatorName: string,
+    disputeReason: string,
+    amountUsd: number
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend) {
+        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const disputeLink = `${frontendUrl}/disputes/${disputeCaseId}`;
+
+      console.log(`Attempting to send dispute notification email to respondent: ${email}`);
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: `Dispute Filed Against You - ${disputeCaseId} - TrustiChain`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Dispute Filed</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: white; margin: 0;">Dispute Filed</h1>
+            </div>
+            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+              <p>Hi ${respondentName},</p>
+              <p>A dispute has been filed against you on TrustiChain. Please review the details below and take appropriate action.</p>
+              <div style="background: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 20px 0;">
+                <p style="margin: 5px 0;"><strong>Dispute Case ID:</strong> ${disputeCaseId}</p>
+                <p style="margin: 5px 0;"><strong>Filed By:</strong> ${initiatorName}</p>
+                <p style="margin: 5px 0;"><strong>Amount in Dispute:</strong> $${amountUsd.toFixed(2)} USD</p>
+                <p style="margin: 5px 0;"><strong>Reason:</strong> ${disputeReason}</p>
+              </div>
+              <p>We encourage you to respond promptly and work towards a resolution. You can view the dispute details and respond through your TrustiChain dashboard.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${disputeLink}" 
+                   style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                          color: white; 
+                          padding: 15px 30px; 
+                          text-decoration: none; 
+                          border-radius: 5px; 
+                          display: inline-block; 
+                          font-weight: bold;">
+                  View Dispute Details
+                </a>
+              </div>
+              <p style="font-size: 12px; color: #666; margin-top: 30px;">
+                Or copy and paste this link into your browser:<br>
+                <a href="${disputeLink}" style="color: #667eea; word-break: break-all;">${disputeLink}</a>
+              </p>
+              <p style="font-size: 12px; color: #666;">
+                If you believe this dispute was filed in error, please contact support immediately.
+              </p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Hi ${respondentName},
+          
+          A dispute has been filed against you on TrustiChain.
+          
+          Dispute Case ID: ${disputeCaseId}
+          Filed By: ${initiatorName}
+          Amount in Dispute: $${amountUsd.toFixed(2)} USD
+          Reason: ${disputeReason}
+          
+          We encourage you to respond promptly and work towards a resolution. You can view the dispute details and respond through your TrustiChain dashboard.
+          
+          View dispute: ${disputeLink}
+          
+          If you believe this dispute was filed in error, please contact support immediately.
+          
+          © ${new Date().getFullYear()} TrustiChain. All rights reserved.
+        `,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+
+      console.log('Dispute notification email sent successfully to respondent:', {
+        id: data?.id,
+        to: email,
+        disputeCaseId,
+      });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send dispute notification email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
 }
 
 export const emailService = new EmailService();
