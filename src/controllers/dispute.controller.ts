@@ -13,6 +13,8 @@ import {
   UpdateEvidenceRequest,
   UpdateEvidenceResponse,
   DeleteEvidenceResponse,
+  TrackDisputeActivityResponse,
+  GetDisputeActivityResponse,
 } from '../types/api/dispute.types';
 import { disputeService } from '../services/dispute/dispute.service';
 import { storageService } from '../services/storage/storage.service';
@@ -368,6 +370,66 @@ export class DisputeController {
 
       if (result.success) {
         res.status(201).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Track user activity on dispute page
+   * POST /api/disputes/:disputeId/activity
+   */
+  async trackActivity(
+    req: Request,
+    res: Response<TrackDisputeActivityResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+
+      const result = await disputeService.trackActivity(userId, disputeId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
+        res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get activity status for a dispute
+   * GET /api/disputes/:disputeId/activity
+   */
+  async getActivity(
+    req: Request,
+    res: Response<GetDisputeActivityResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const disputeId = req.params.disputeId;
+
+      const result = await disputeService.getActivity(userId, disputeId);
+
+      if (result.success) {
+        res.status(200).json(result);
       } else {
         const statusCode = result.error === 'Dispute not found or access denied' || result.error === 'Access denied' ? 403 : 400;
         res.status(statusCode).json(result);

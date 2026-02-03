@@ -144,6 +144,33 @@ router.delete(
 );
 
 /**
+ * @route   POST /api/disputes/:disputeId/activity
+ * @desc    Track user activity on dispute page (heartbeat)
+ * @access  Private
+ * @desc    Frontend should call this periodically (e.g., every 30 seconds) while user is on the page
+ */
+router.post(
+  '/:disputeId/activity',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.trackActivity(req, res);
+  })
+);
+
+/**
+ * @route   GET /api/disputes/:disputeId/activity
+ * @desc    Get activity status for a dispute (who is currently viewing)
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/activity',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getActivity(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private

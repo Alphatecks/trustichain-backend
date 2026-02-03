@@ -186,4 +186,35 @@ export interface DeleteEvidenceResponse {
   error?: string;
 }
 
+export interface TrackDisputeActivityRequest {
+  disputeId: string; // UUID or case_id
+}
+
+export interface TrackDisputeActivityResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    isActive: boolean;
+    lastViewedAt: string;
+    disputeId: string;
+  };
+  error?: string;
+}
+
+export interface GetDisputeActivityResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    activeUsers: Array<{
+      userId: string;
+      userName: string;
+      lastViewedAt: string;
+      isActive: boolean;
+    }>;
+    currentUserActive: boolean;
+    currentUserLastViewed?: string;
+  };
+  error?: string;
+}
+
 

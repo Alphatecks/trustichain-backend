@@ -19,6 +19,8 @@ import {
   UpdateEvidenceRequest,
   UpdateEvidenceResponse,
   DeleteEvidenceResponse,
+  TrackDisputeActivityResponse,
+  GetDisputeActivityResponse,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -1279,6 +1281,176 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to delete evidence',
         error: error instanceof Error ? error.message : 'Failed to delete evidence',
+      };
+    }
+  }
+
+  /**
+   * Track user activity on dispute page
+   * POST /api/disputes/:disputeId/activity
+   * This allows the backend to determine if a user is still on the dispute page
+   */
+  async trackActivity(userId: string, disputeId: string): Promise<TrackDisputeActivityResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Upsert activity record (insert or update if exists)
+      const now = new Date().toISOString();
+      const { data: activity, error: activityError } = await adminClient
+        .from('dispute_activity')
+        .upsert(
+          {
+            dispute_id: dispute.id,
+            user_id: userId,
+            last_viewed_at: now,
+            is_active: true,
+            updated_at: now,
+          },
+          {
+            onConflict: 'dispute_id,user_id',
+          }
+        )
+        .select()
+        .single();
+
+      if (activityError) {
+        console.error('Error tracking dispute activity:', activityError);
+        return {
+          success: false,
+          message: 'Failed to track activity',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Activity tracked successfully',
+        data: {
+          isActive: activity.is_active,
+          lastViewedAt: activity.last_viewed_at,
+          disputeId: dispute.id,
+        },
+      };
+    } catch (error) {
+      console.error('Error tracking dispute activity:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to track activity',
+        error: error instanceof Error ? error.message : 'Failed to track activity',
+      };
+    }
+  }
+
+  /**
+   * Get activity status for a dispute
+   * GET /api/disputes/:disputeId/activity
+   * Returns which users are currently active on the dispute page
+   */
+  async getActivity(userId: string, disputeId: string): Promise<GetDisputeActivityResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access - support both UUID and case_id
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get all activity records for this dispute
+      // Consider users active if they've viewed within the last 5 minutes
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+      const { data: activities, error: activitiesError } = await adminClient
+        .from('dispute_activity')
+        .select('user_id, last_viewed_at, is_active')
+        .eq('dispute_id', dispute.id)
+        .gte('last_viewed_at', fiveMinutesAgo)
+        .eq('is_active', true);
+
+      if (activitiesError) {
+        console.error('Error fetching dispute activity:', activitiesError);
+        return {
+          success: false,
+          message: 'Failed to fetch activity',
+          error: 'Database error',
+        };
+      }
+
+      // Get user names for active users
+      const activeUserIds = (activities || [])
+        .map((a: any) => a.user_id)
+        .filter((id: string) => id !== userId); // Exclude current user
+
+      const partyNames = await this.getPartyNames(
+        activeUserIds.length > 0 ? activeUserIds : []
+      );
+
+      // Get current user's activity
+      const { data: currentUserActivity } = await adminClient
+        .from('dispute_activity')
+        .select('last_viewed_at, is_active')
+        .eq('dispute_id', dispute.id)
+        .eq('user_id', userId)
+        .single();
+
+      const activeUsers = (activities || [])
+        .filter((a: any) => a.user_id !== userId)
+        .map((a: any) => ({
+          userId: a.user_id,
+          userName: partyNames[a.user_id] || 'Unknown',
+          lastViewedAt: a.last_viewed_at,
+          isActive: a.is_active,
+        }));
+
+      return {
+        success: true,
+        message: 'Activity retrieved successfully',
+        data: {
+          activeUsers,
+          currentUserActive: currentUserActivity?.is_active || false,
+          currentUserLastViewed: currentUserActivity?.last_viewed_at || undefined,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting dispute activity:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get activity',
+        error: error instanceof Error ? error.message : 'Failed to get activity',
       };
     }
   }
