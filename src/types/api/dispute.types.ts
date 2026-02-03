@@ -476,4 +476,25 @@ export interface DeleteMessageResponse {
   error?: string;
 }
 
+// Mediator Details Types
+export type MediatorStatus = 'active' | 'inactive' | 'pending';
+
+export interface MediatorDetails {
+  isAssigned: boolean;
+  mediatorUserId?: string;
+  mediatorName?: string;
+  mediatorEmail?: string;
+  mediatorStatus?: MediatorStatus;
+  assignedAt?: string; // ISO timestamp
+  decisionDeadline?: string; // ISO timestamp
+  verdictStatus?: VerdictStatus;
+}
+
+export interface GetMediatorDetailsResponse {
+  success: boolean;
+  message: string;
+  data?: MediatorDetails;
+  error?: string;
+}
+
 

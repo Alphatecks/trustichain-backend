@@ -53,6 +53,9 @@ import {
   GetMessagesResponse,
   DeleteMessageResponse,
   SenderRole,
+  MediatorDetails,
+  GetMediatorDetailsResponse,
+  MediatorStatus,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 import { emailService } from '../email.service';
@@ -3112,6 +3115,130 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to delete message',
         error: error instanceof Error ? error.message : 'Failed to delete message',
+      };
+    }
+  }
+
+  /**
+   * Get mediator details for a dispute
+   * GET /api/disputes/:disputeId/mediator
+   */
+  async getMediatorDetails(userId: string, disputeId: string): Promise<GetMediatorDetailsResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get full dispute details including mediator info
+      const { data: fullDispute, error: fullError } = await adminClient
+        .from('disputes')
+        .select('mediator_user_id, verdict_status, decision_deadline, updated_at')
+        .eq('id', dispute.id)
+        .single();
+
+      if (fullError || !fullDispute) {
+        return {
+          success: false,
+          message: 'Failed to fetch dispute details',
+          error: 'Database error',
+        };
+      }
+
+      const isAssigned = !!fullDispute.mediator_user_id;
+
+      if (!isAssigned) {
+        return {
+          success: true,
+          message: 'Mediator details retrieved successfully',
+          data: {
+            isAssigned: false,
+            verdictStatus: (fullDispute.verdict_status as VerdictStatus) || 'pending',
+          },
+        };
+      }
+
+      // Get mediator user details
+      const { data: mediatorUser, error: mediatorError } = await adminClient
+        .from('users')
+        .select('id, email, full_name, created_at')
+        .eq('id', fullDispute.mediator_user_id)
+        .single();
+
+      if (mediatorError || !mediatorUser) {
+        console.error('Error fetching mediator user:', mediatorError);
+        // Return partial data if mediator user not found
+        return {
+          success: true,
+          message: 'Mediator details retrieved successfully',
+          data: {
+            isAssigned: true,
+            mediatorUserId: fullDispute.mediator_user_id,
+            mediatorStatus: 'active' as MediatorStatus,
+            verdictStatus: (fullDispute.verdict_status as VerdictStatus) || 'pending',
+            decisionDeadline: fullDispute.decision_deadline || undefined,
+          },
+        };
+      }
+
+      // Determine mediator status
+      // Active if verdict_status is decision_pending or under_review
+      let mediatorStatus: MediatorStatus = 'active';
+      if (fullDispute.verdict_status === 'decision_made') {
+        mediatorStatus = 'inactive';
+      } else if (!fullDispute.verdict_status || fullDispute.verdict_status === 'pending') {
+        mediatorStatus = 'pending';
+      }
+
+      // Get assigned date from timeline events (when mediator was assigned)
+      const { data: mediatorAssignedEvent } = await adminClient
+        .from('dispute_timeline_events')
+        .select('created_at')
+        .eq('dispute_id', dispute.id)
+        .eq('event_type', 'mediator_assigned')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      const mediatorDetails: MediatorDetails = {
+        isAssigned: true,
+        mediatorUserId: mediatorUser.id,
+        mediatorName: mediatorUser.full_name || undefined,
+        mediatorEmail: mediatorUser.email || undefined,
+        mediatorStatus,
+        assignedAt: mediatorAssignedEvent?.created_at || fullDispute.updated_at || undefined,
+        decisionDeadline: fullDispute.decision_deadline || undefined,
+        verdictStatus: (fullDispute.verdict_status as VerdictStatus) || undefined,
+      };
+
+      return {
+        success: true,
+        message: 'Mediator details retrieved successfully',
+        data: mediatorDetails,
+      };
+    } catch (error) {
+      console.error('Error getting mediator details:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get mediator details',
+        error: error instanceof Error ? error.message : 'Failed to get mediator details',
       };
     }
   }

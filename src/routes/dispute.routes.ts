@@ -373,6 +373,19 @@ router.delete(
 );
 
 /**
+ * @route   GET /api/disputes/:disputeId/mediator
+ * @desc    Get mediator details for a dispute
+ * @access  Private
+ */
+router.get(
+  '/:disputeId/mediator',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await disputeController.getMediatorDetails(req, res);
+  })
+);
+
+/**
  * @route   GET /api/disputes/:id
  * @desc    Get dispute detail by ID
  * @access  Private
