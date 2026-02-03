@@ -22,7 +22,6 @@ import {
   TrackDisputeActivityResponse,
   GetDisputeActivityResponse,
   DisputeAssessment,
-  AssessmentFinding,
   CreateAssessmentRequest,
   CreateAssessmentResponse,
   UpdateAssessmentRequest,
@@ -32,6 +31,12 @@ import {
   DeleteAssessmentResponse,
   AssessmentType,
   AssessmentStatus,
+  TimelineEvent,
+  CreateTimelineEventRequest,
+  CreateTimelineEventResponse,
+  GetTimelineEventsResponse,
+  DeleteTimelineEventResponse,
+  TimelineEventType,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
 
@@ -781,6 +786,18 @@ export class DisputeService {
           // Don't fail the dispute creation if evidence fails, just log it
         }
       }
+
+      // Create initial timeline event: "Dispute Filed"
+      await this.createSystemTimelineEvent(
+        dispute.id,
+        'dispute_filed',
+        'Dispute Filed',
+        `Dispute ${dispute.case_id} has been filed`,
+        {
+          caseId: dispute.case_id,
+          reason: request.disputeReason,
+        }
+      );
 
       return {
         success: true,
@@ -2032,6 +2049,327 @@ export class DisputeService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to delete assessment',
         error: error instanceof Error ? error.message : 'Failed to delete assessment',
+      };
+    }
+  }
+
+  /**
+   * Create a timeline event (manual entry by user/admin)
+   * POST /api/disputes/:disputeId/timeline
+   */
+  async createTimelineEvent(
+    userId: string,
+    disputeId: string,
+    request: CreateTimelineEventRequest
+  ): Promise<CreateTimelineEventResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Validate required fields
+      if (!request.eventType || !request.title) {
+        return {
+          success: false,
+          message: 'Event type and title are required',
+          error: 'Missing required fields',
+        };
+      }
+
+      // Create timeline event
+      const eventData = {
+        dispute_id: dispute.id,
+        event_type: request.eventType,
+        title: request.title,
+        description: request.description || null,
+        created_by_user_id: userId,
+        is_system_event: false, // Manual entry
+        metadata: request.metadata || null,
+        event_timestamp: request.eventTimestamp 
+          ? new Date(request.eventTimestamp).toISOString()
+          : new Date().toISOString(),
+      };
+
+      const { data: event, error: eventError } = await adminClient
+        .from('dispute_timeline_events')
+        .insert(eventData)
+        .select()
+        .single();
+
+      if (eventError || !event) {
+        console.error('Error creating timeline event:', eventError);
+        return {
+          success: false,
+          message: 'Failed to create timeline event',
+          error: 'Database error',
+        };
+      }
+
+      // Get creator name
+      const userIds = [userId];
+      const partyNames = await this.getPartyNames(userIds);
+
+      const formattedEvent: TimelineEvent = {
+        id: event.id,
+        disputeId: event.dispute_id,
+        eventType: event.event_type as TimelineEventType,
+        title: event.title,
+        description: event.description || undefined,
+        createdByUserId: event.created_by_user_id || undefined,
+        createdByName: partyNames[userId] || undefined,
+        isSystemEvent: event.is_system_event,
+        metadata: event.metadata || undefined,
+        eventTimestamp: event.event_timestamp,
+        createdAt: event.created_at,
+        updatedAt: event.updated_at,
+      };
+
+      return {
+        success: true,
+        message: 'Timeline event created successfully',
+        data: formattedEvent,
+      };
+    } catch (error) {
+      console.error('Error creating timeline event:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create timeline event',
+        error: error instanceof Error ? error.message : 'Failed to create timeline event',
+      };
+    }
+  }
+
+  /**
+   * Create a system-generated timeline event (internal use)
+   * This is used by the service to automatically track events
+   */
+  async createSystemTimelineEvent(
+    disputeId: string,
+    eventType: TimelineEventType,
+    title: string,
+    description?: string,
+    metadata?: Record<string, any>,
+    eventTimestamp?: string
+  ): Promise<void> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      const eventData = {
+        dispute_id: disputeId,
+        event_type: eventType,
+        title,
+        description: description || null,
+        created_by_user_id: null, // System event
+        is_system_event: true,
+        metadata: metadata || null,
+        event_timestamp: eventTimestamp || new Date().toISOString(),
+      };
+
+      await adminClient
+        .from('dispute_timeline_events')
+        .insert(eventData);
+    } catch (error) {
+      console.error('Error creating system timeline event:', error);
+      // Don't throw - system events shouldn't break the main flow
+    }
+  }
+
+  /**
+   * Get timeline events for a dispute
+   * GET /api/disputes/:disputeId/timeline
+   */
+  async getTimelineEvents(userId: string, disputeId: string): Promise<GetTimelineEventsResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists and user has access
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Get all timeline events, ordered by timestamp (most recent first)
+      const { data: events, error: eventsError } = await adminClient
+        .from('dispute_timeline_events')
+        .select('*')
+        .eq('dispute_id', dispute.id)
+        .order('event_timestamp', { ascending: false });
+
+      if (eventsError) {
+        console.error('Error fetching timeline events:', eventsError);
+        return {
+          success: false,
+          message: 'Failed to fetch timeline events',
+          error: 'Database error',
+        };
+      }
+
+      // Get creator names for events that have creators
+      const creatorIds = Array.from(
+        new Set(
+          (events || [])
+            .filter((e: any) => e.created_by_user_id)
+            .map((e: any) => e.created_by_user_id)
+        )
+      );
+      const partyNames = await this.getPartyNames(creatorIds);
+
+      const formattedEvents: TimelineEvent[] = (events || []).map((e: any) => ({
+        id: e.id,
+        disputeId: e.dispute_id,
+        eventType: e.event_type as TimelineEventType,
+        title: e.title,
+        description: e.description || undefined,
+        createdByUserId: e.created_by_user_id || undefined,
+        createdByName: e.created_by_user_id ? (partyNames[e.created_by_user_id] || undefined) : undefined,
+        isSystemEvent: e.is_system_event,
+        metadata: e.metadata || undefined,
+        eventTimestamp: e.event_timestamp,
+        createdAt: e.created_at,
+        updatedAt: e.updated_at,
+      }));
+
+      return {
+        success: true,
+        message: 'Timeline events retrieved successfully',
+        data: {
+          events: formattedEvents,
+          total: formattedEvents.length,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting timeline events:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get timeline events',
+        error: error instanceof Error ? error.message : 'Failed to get timeline events',
+      };
+    }
+  }
+
+  /**
+   * Delete a timeline event (only manual events can be deleted)
+   * DELETE /api/disputes/:disputeId/timeline/:eventId
+   */
+  async deleteTimelineEvent(
+    userId: string,
+    disputeId: string,
+    eventId: string
+  ): Promise<DeleteTimelineEventResponse> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Verify dispute exists
+      const { data: dispute, error: disputeError } = await this.lookupDispute(disputeId);
+
+      if (disputeError || !dispute) {
+        return {
+          success: false,
+          message: 'Dispute not found or access denied',
+          error: 'Dispute not found or access denied',
+        };
+      }
+
+      // Verify user is a party to the dispute
+      if (dispute.initiator_user_id !== userId && dispute.respondent_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You do not have access to this dispute',
+          error: 'Access denied',
+        };
+      }
+
+      // Verify event exists and belongs to dispute
+      const { data: event, error: eventError } = await adminClient
+        .from('dispute_timeline_events')
+        .select('*')
+        .eq('id', eventId)
+        .eq('dispute_id', dispute.id)
+        .single();
+
+      if (eventError || !event) {
+        return {
+          success: false,
+          message: 'Timeline event not found',
+          error: 'Timeline event not found',
+        };
+      }
+
+      // Only allow deletion of manual events (not system events)
+      if (event.is_system_event) {
+        return {
+          success: false,
+          message: 'System events cannot be deleted',
+          error: 'Cannot delete system event',
+        };
+      }
+
+      // Verify user created the event (or is admin)
+      if (event.created_by_user_id !== userId) {
+        return {
+          success: false,
+          message: 'You can only delete timeline events you created',
+          error: 'Access denied',
+        };
+      }
+
+      // Delete event
+      const { error: deleteError } = await adminClient
+        .from('dispute_timeline_events')
+        .delete()
+        .eq('id', eventId);
+
+      if (deleteError) {
+        console.error('Error deleting timeline event:', deleteError);
+        return {
+          success: false,
+          message: 'Failed to delete timeline event',
+          error: 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Timeline event deleted successfully',
+      };
+    } catch (error) {
+      console.error('Error deleting timeline event:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to delete timeline event',
+        error: error instanceof Error ? error.message : 'Failed to delete timeline event',
       };
     }
   }
