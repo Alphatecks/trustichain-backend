@@ -68,6 +68,10 @@ export class WalletService {
       if (wallet.xrpl_address) {
         try {
           await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+          // Also sync incoming payments to track external deposits in transaction history
+          this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch((err) => {
+            console.warn('Failed to sync incoming payments:', err);
+          });
           
           // Fetch updated balance after sync
           const { data: updatedWallet } = await adminClient
@@ -2693,6 +2697,129 @@ export class WalletService {
   }
 
   /**
+   * Sync incoming XRP payments from XRPL and create transaction records
+   * This detects ALL incoming payments, including external deposits
+   */
+  private async syncIncomingPaymentsFromXRPL(userId: string, xrplAddress: string): Promise<void> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      // Query XRPL for account transaction history
+      const { Client, dropsToXrp } = await import('xrpl');
+      const xrplNetwork = process.env.XRPL_NETWORK || 'testnet';
+      const xrplServer = xrplNetwork === 'mainnet'
+        ? 'wss://xrplcluster.com'
+        : 'wss://s.altnet.rippletest.net:51233';
+      
+      const client: any = new Client(xrplServer);
+      await client.connect();
+
+      try {
+        // Get recent transactions (last 100 transactions)
+        const accountTxResponse = await client.request({
+          command: 'account_tx',
+          account: xrplAddress,
+          limit: 100,
+          ledger_index_min: -1,
+          ledger_index_max: -1,
+        });
+
+        const transactions = accountTxResponse.result.transactions || [];
+        
+        // Get all existing transaction hashes for this user to avoid duplicates
+        const { data: existingTransactions } = await adminClient
+          .from('transactions')
+          .select('xrpl_tx_hash')
+          .eq('user_id', userId)
+          .not('xrpl_tx_hash', 'is', null);
+        
+        const existingHashes = new Set(
+          (existingTransactions || [])
+            .map(tx => tx.xrpl_tx_hash)
+            .filter(Boolean)
+        );
+
+        // Get exchange rate for USD conversion
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        const usdRate = exchangeRates.success && exchangeRates.data
+          ? exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate || 0
+          : 0;
+
+        let newDepositsCount = 0;
+
+        // Process each transaction
+        for (const txWrapper of transactions) {
+          const tx = txWrapper.tx || txWrapper;
+          
+          // Only process Payment transactions where this address is the destination
+          if (tx.TransactionType !== 'Payment') continue;
+          if (tx.Destination !== xrplAddress) continue;
+          
+          // Skip if we already have this transaction
+          const txHash = tx.hash || txWrapper.hash;
+          if (!txHash || existingHashes.has(txHash)) continue;
+
+          // Get amount (handle both XRP and token payments)
+          let amountXrp = 0;
+          if (typeof tx.Amount === 'string') {
+            // XRP payment
+            amountXrp = parseFloat((dropsToXrp as any)(String(tx.Amount)));
+          } else if (tx.Amount && typeof tx.Amount === 'object') {
+            // Token payment - skip for now (we only track XRP deposits)
+            continue;
+          } else {
+            continue;
+          }
+
+          // Skip very small amounts (likely fees or dust)
+          if (amountXrp < 0.000001) continue;
+
+          // Calculate USD amount
+          const amountUsd = usdRate > 0 ? amountXrp * usdRate : 0;
+
+          // Convert Ripple Epoch to Unix timestamp (Ripple Epoch starts Jan 1, 2000)
+          // Ripple Epoch = Unix timestamp - 946684800
+          const rippleEpoch = txWrapper.date || tx.date;
+          const createdAt = rippleEpoch 
+            ? new Date((rippleEpoch + 946684800) * 1000).toISOString()
+            : new Date().toISOString();
+
+          // Create deposit transaction record
+          try {
+            await adminClient
+              .from('transactions')
+              .insert({
+                user_id: userId,
+                type: 'deposit',
+                amount_xrp: amountXrp,
+                amount_usd: amountUsd,
+                xrpl_tx_hash: txHash,
+                status: 'completed',
+                description: `External deposit from ${tx.Account || 'unknown'}`,
+                created_at: createdAt,
+              });
+            
+            newDepositsCount++;
+            console.log(`[Sync] Created deposit record for incoming payment: ${txHash}, amount: ${amountXrp} XRP`);
+          } catch (insertError) {
+            // Skip if insert fails (might be duplicate or constraint violation)
+            console.warn(`[Sync] Failed to create deposit record for ${txHash}:`, insertError);
+          }
+        }
+
+        if (newDepositsCount > 0) {
+          console.log(`[Sync] Synced ${newDepositsCount} new incoming payment(s) from XRPL for user ${userId}`);
+        }
+      } finally {
+        await client.disconnect();
+      }
+    } catch (error) {
+      // Don't throw - this is a background sync
+      console.warn('[Sync] Error syncing incoming payments from XRPL:', error);
+    }
+  }
+
+  /**
    * Sync pending deposit transactions by checking for completed withdrawals
    * This fixes the issue where receivers don't have transaction records for incoming payments
    */
@@ -2831,6 +2958,17 @@ export class WalletService {
       // Sync pending transactions in the background (don't wait for it)
       this.syncPendingWithdrawals(userId).catch(() => {});
       this.syncPendingDeposits(userId).catch(() => {});
+      
+      // Also sync incoming payments from XRPL if user has a wallet address
+      const { data: wallet } = await adminClient
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', userId)
+        .maybeSingle();
+      
+      if (wallet?.xrpl_address) {
+        this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch(() => {});
+      }
 
       // Get transactions
       const { data: transactions, error: txError } = await adminClient
