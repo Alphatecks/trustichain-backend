@@ -1,5 +1,7 @@
 import { Resend } from 'resend';
 import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
 
 dotenv.config();
 
@@ -9,6 +11,34 @@ const resend = process.env.RESEND_API_KEY
   : null;
 
 export class EmailService {
+  /**
+   * Get logo as base64 data URI
+   */
+  private getLogoBase64(): string {
+    try {
+      const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+      const logoBuffer = fs.readFileSync(logoPath);
+      return `data:image/png;base64,${logoBuffer.toString('base64')}`;
+    } catch (error) {
+      console.error('Error reading logo file:', error);
+      return '';
+    }
+  }
+
+  /**
+   * Get Satoshi font as base64 data URI
+   */
+  private getSatoshiFontBase64(): string {
+    try {
+      const fontPath = path.join(process.cwd(), 'assets', 'fonts', 'satoshi', 'Satoshi-Regular.otf');
+      const fontBuffer = fs.readFileSync(fontPath);
+      return `data:font/otf;base64,${fontBuffer.toString('base64')}`;
+    } catch (error) {
+      console.error('Error reading Satoshi font file:', error);
+      return '';
+    }
+  }
+
   /**
    * Send email verification link
    * @param email - User email address
@@ -210,10 +240,12 @@ export class EmailService {
    * Send escrow creation confirmation email to payer
    * @param email - Payer email address
    * @param payerName - Payer's full name
-   * @param escrowId - Escrow ID
+   * @param escrowId - Escrow ID (formatted as #ESC-YYYY-XXX)
    * @param amountXrp - Escrow amount in XRP
    * @param amountUsd - Escrow amount in USD
    * @param counterpartyName - Counterparty's name
+   * @param expectedReleaseDate - Expected release date (optional)
+   * @param description - Escrow description (optional)
    */
   async sendEscrowCreationConfirmationToPayer(
     email: string,
@@ -221,7 +253,9 @@ export class EmailService {
     escrowId: string,
     amountXrp: number,
     amountUsd: number,
-    counterpartyName?: string
+    counterpartyName?: string,
+    expectedReleaseDate?: string,
+    description?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       if (!resend) {
@@ -238,37 +272,106 @@ export class EmailService {
 
       console.log(`Attempting to send escrow creation confirmation email to payer: ${email}`);
 
+      const logoBase64 = this.getLogoBase64();
+      const fontBase64 = this.getSatoshiFontBase64();
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const dashboardLink = `${frontendUrl}/dashboard`;
+      const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
+      
+      // Format expected release date if provided
+      let formattedReleaseDate = '';
+      if (expectedReleaseDate) {
+        try {
+          const releaseDate = new Date(expectedReleaseDate);
+          formattedReleaseDate = releaseDate.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          });
+        } catch (e) {
+          formattedReleaseDate = expectedReleaseDate;
+        }
+      }
+
+      // Format amount with currency symbol
+      const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
+
       const { data, error } = await (resend as any).emails.send({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
-        subject: 'Escrow Created Successfully - TrustiChain',
+        subject: `Escrow Created Successfully – ${escrowId}`,
         html: `
           <!DOCTYPE html>
           <html>
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Escrow Created</title>
+            <title>Escrow Created Successfully</title>
+            ${fontBase64 ? `
+            <style>
+              @font-face {
+                font-family: 'Satoshi';
+                src: url('${fontBase64}') format('opentype');
+                font-weight: normal;
+                font-style: normal;
+              }
+            </style>
+            ` : ''}
           </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-              <h1 style="color: white; margin: 0;">Escrow Created Successfully!</h1>
+          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <!-- Header with Logo -->
+            <div style="padding: 20px 0;">
+              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}
             </div>
-            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-              <p>Hi ${payerName},</p>
-              <p>Your escrow has been created successfully on TrustiChain.</p>
-              <div style="background: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Escrow ID:</strong> ${escrowId}</p>
-                <p style="margin: 5px 0;"><strong>Amount:</strong> ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)</p>
-                ${counterpartyName ? `<p style="margin: 5px 0;"><strong>Counterparty:</strong> ${counterpartyName}</p>` : ''}
+            
+            <!-- Subject Line -->
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Created Successfully – ${escrowId}</h1>
+            
+            <!-- Greeting -->
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${payerName},</p>
+            
+            <!-- Main Message -->
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">We're excited to inform you that your escrow has been successfully created! 🎉</p>
+            
+            <!-- Escrow Details Box -->
+            <div style="background-color: #f0f0f0; border-radius: 8px; padding: 20px; margin: 30px 0;">
+              <p style="font-weight: bold; font-size: 16px; color: #333; margin: 0 0 15px 0;">Escrow Details:</p>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Transaction ID:</strong> ${escrowId}</li>
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Amount:</strong> ${amountDisplay}</li>
+                ${counterpartyName ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Payee:</strong> ${counterpartyName}</li>` : ''}
+                ${formattedReleaseDate ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Expected Release Date:</strong> ${formattedReleaseDate}</li>` : ''}
+                ${description ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Purpose/Description:</strong> ${description}</li>` : ''}
+              </ul>
+            </div>
+            
+            <!-- Information Paragraphs -->
+            <p style="font-size: 14px; color: #666; margin: 20px 0; line-height: 1.8;">
+              Your funds are now securely held in escrow and will be released according to the agreed terms. You can monitor the progress or make any updates by visiting your escrow dashboard: <a href="${dashboardLink}" style="color: #667eea; text-decoration: none;">${dashboardLink}</a>
+            </p>
+            
+            <p style="font-size: 14px; color: #666; margin: 20px 0; line-height: 1.8;">
+              If you have any questions or need assistance, our support team is here to help: <a href="mailto:${supportEmail}" style="color: #667eea; text-decoration: none;">${supportEmail}</a>
+            </p>
+            
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">Thank you for using TrustiChain</p>
+            
+            <!-- Closing -->
+            <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,</p>
+            <p style="font-size: 14px; color: #333; margin: 0 0 20px 0;">Team TrustiChain</p>
+            
+            <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
+            
+            <!-- Footer -->
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
+            <div style="text-align: center; margin: 20px 0;">
+              <!-- Social Media Icons (placeholder - you can add actual links) -->
+              <div style="margin: 15px 0;">
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">🐦</a>
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">f</a>
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">in</a>
               </div>
-              <p>You can track the status of this escrow in your TrustiChain dashboard.</p>
-              <p style="font-size: 12px; color: #666; margin-top: 30px;">
-                If you did not create this escrow, please contact support immediately.
-              </p>
-            </div>
-            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
-              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto; margin-top: 15px;" />` : ''}
             </div>
           </body>
           </html>

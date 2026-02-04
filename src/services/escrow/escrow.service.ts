@@ -845,13 +845,19 @@ export class EscrowService {
             const payerEmailToUse = request.payerEmail || payerUser.email;
             const payerNameToUse = request.payerName || payerUser.full_name;
             
+            // Format escrow ID
+            const year = new Date(escrow.created_at).getFullYear();
+            const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
+            
             await emailService.sendEscrowCreationConfirmationToPayer(
               payerEmailToUse,
               payerNameToUse,
-              escrow.id,
+              formattedEscrowId,
               amountXrp,
               amountUsd,
-              request.counterpartyName || counterpartyUser?.full_name
+              request.counterpartyName || counterpartyUser?.full_name,
+              escrow.expected_release_date || escrow.expected_completion_date || undefined,
+              escrow.description || undefined
             ).catch((emailError) => {
               console.error('[Escrow Create] Failed to send email to payer:', emailError);
               // Don't fail escrow creation if email fails
