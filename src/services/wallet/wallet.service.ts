@@ -42,7 +42,7 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: wallet, error } = await adminClient
         .from('wallets')
-        .select('balance_xrp, balance_usdt, balance_usdc, xrpl_address')
+        .select('id, balance_xrp, balance_usdt, balance_usdc, xrpl_address')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -63,7 +63,41 @@ export class WalletService {
         };
       }
 
-      // Always return the wallet and balance, even if xrpl_address is null
+      // CRITICAL FIX: Sync balance from XRPL before returning
+      // This ensures external deposits are reflected immediately
+      if (wallet.xrpl_address) {
+        try {
+          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+          
+          // Fetch updated balance after sync
+          const { data: updatedWallet } = await adminClient
+            .from('wallets')
+            .select('balance_xrp, balance_usdt, balance_usdc')
+            .eq('id', wallet.id)
+            .single();
+          
+          if (updatedWallet) {
+            return {
+              success: true,
+              message: 'Balance retrieved successfully',
+              data: {
+                balance: {
+                  xrp: updatedWallet.balance_xrp ?? 0,
+                  usdt: updatedWallet.balance_usdt ?? 0,
+                  usdc: updatedWallet.balance_usdc ?? 0,
+                  usd: 0, // TODO: Calculate USD equivalent if needed
+                },
+              },
+              xrpl_address: wallet.xrpl_address,
+            };
+          }
+        } catch (syncError) {
+          // If sync fails, log but still return database balance
+          console.warn('Failed to sync balance from XRPL, returning database balance:', syncError);
+        }
+      }
+
+      // Fallback: return database balance if sync fails or no xrpl_address
       return {
         success: true,
         message: 'Balance retrieved successfully',
