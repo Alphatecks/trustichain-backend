@@ -415,10 +415,12 @@ export class EmailService {
    * Send escrow creation notification email to counterparty
    * @param email - Counterparty email address
    * @param counterpartyName - Counterparty's full name
-   * @param escrowId - Escrow ID
+   * @param escrowId - Escrow ID (formatted as #ESC-YYYY-XXX)
    * @param amountXrp - Escrow amount in XRP
    * @param amountUsd - Escrow amount in USD
    * @param payerName - Payer's name
+   * @param expectedReleaseDate - Expected release date (optional)
+   * @param description - Escrow description (optional)
    */
   async sendEscrowCreationNotificationToCounterparty(
     email: string,
@@ -426,7 +428,9 @@ export class EmailService {
     escrowId: string,
     amountXrp: number,
     amountUsd: number,
-    payerName?: string
+    payerName?: string,
+    expectedReleaseDate?: string,
+    description?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       if (!resend) {
@@ -443,53 +447,132 @@ export class EmailService {
 
       console.log(`Attempting to send escrow creation notification email to counterparty: ${email}`);
 
+      const logoBase64 = this.getLogoBase64();
+      const fontBase64 = this.getSatoshiFontBase64();
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const dashboardLink = `${frontendUrl}/dashboard`;
+      const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
+      
+      // Format expected release date if provided
+      let formattedReleaseDate = '';
+      if (expectedReleaseDate) {
+        try {
+          const releaseDate = new Date(expectedReleaseDate);
+          formattedReleaseDate = releaseDate.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          });
+        } catch (e) {
+          formattedReleaseDate = expectedReleaseDate;
+        }
+      }
+
+      // Format amount with currency symbol
+      const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
+
       const { data, error } = await (resend as any).emails.send({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
-        subject: 'New Escrow Created - TrustiChain',
+        subject: `Escrow Created Successfully – ${escrowId}`,
         html: `
           <!DOCTYPE html>
           <html>
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>New Escrow Created</title>
+            <title>Escrow Created Successfully</title>
+            ${fontBase64 ? `
+            <style>
+              @font-face {
+                font-family: 'Satoshi';
+                src: url('${fontBase64}') format('opentype');
+                font-weight: normal;
+                font-style: normal;
+              }
+            </style>
+            ` : ''}
           </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-              <h1 style="color: white; margin: 0;">New Escrow Created</h1>
+          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <!-- Header with Logo -->
+            <div style="padding: 20px 0;">
+              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}
             </div>
-            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-              <p>Hi ${counterpartyName},</p>
-              <p>A new escrow has been created with you as the counterparty on TrustiChain.</p>
-              <div style="background: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Escrow ID:</strong> ${escrowId}</p>
-                <p style="margin: 5px 0;"><strong>Amount:</strong> ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)</p>
-                ${payerName ? `<p style="margin: 5px 0;"><strong>From:</strong> ${payerName}</p>` : ''}
+            
+            <!-- Subject Line -->
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Created Successfully – ${escrowId}</h1>
+            
+            <!-- Greeting -->
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${counterpartyName},</p>
+            
+            <!-- Main Message -->
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">We're excited to inform you that an escrow has been successfully created with you as the counterparty! 🎉</p>
+            
+            <!-- Escrow Details Box -->
+            <div style="background-color: #f0f0f0; border-radius: 8px; padding: 20px; margin: 30px 0;">
+              <p style="font-weight: bold; font-size: 16px; color: #333; margin: 0 0 15px 0;">Escrow Details:</p>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Transaction ID:</strong> ${escrowId}</li>
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Amount:</strong> ${amountDisplay}</li>
+                ${payerName ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Payer:</strong> ${payerName}</li>` : ''}
+                ${formattedReleaseDate ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Expected Release Date:</strong> ${formattedReleaseDate}</li>` : ''}
+                ${description ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Purpose/Description:</strong> ${description}</li>` : ''}
+              </ul>
+            </div>
+            
+            <!-- Information Paragraphs -->
+            <p style="font-size: 14px; color: #666; margin: 20px 0; line-height: 1.8;">
+              Your funds are now securely held in escrow and will be released according to the agreed terms. You can monitor the progress or make any updates by visiting your escrow dashboard: <a href="${dashboardLink}" style="color: #667eea; text-decoration: none;">${dashboardLink}</a>
+            </p>
+            
+            <p style="font-size: 14px; color: #666; margin: 20px 0; line-height: 1.8;">
+              If you have any questions or need assistance, our support team is here to help: <a href="mailto:${supportEmail}" style="color: #667eea; text-decoration: none;">${supportEmail}</a>
+            </p>
+            
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">Thank you for using TrustiChain</p>
+            
+            <!-- Closing -->
+            <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,</p>
+            <p style="font-size: 14px; color: #333; margin: 0 0 20px 0;">Team TrustiChain</p>
+            
+            <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
+            
+            <!-- Footer -->
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
+            <div style="text-align: center; margin: 20px 0;">
+              <!-- Social Media Icons (placeholder - you can add actual links) -->
+              <div style="margin: 15px 0;">
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">🐦</a>
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">f</a>
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">in</a>
               </div>
-              <p>Please log in to your TrustiChain account to view the escrow details and take necessary actions.</p>
-              <p style="font-size: 12px; color: #666; margin-top: 30px;">
-                If you were not expecting this escrow, please contact support immediately.
-              </p>
-            </div>
-            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
-              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto; margin-top: 15px;" />` : ''}
             </div>
           </body>
           </html>
         `,
         text: `
-          Hi ${counterpartyName},
+          Dear ${counterpartyName},
           
-          A new escrow has been created with you as the counterparty on TrustiChain.
+          We're excited to inform you that an escrow has been successfully created with you as the counterparty!
           
-          Escrow ID: ${escrowId}
-          Amount: ${amountXrp.toFixed(6)} XRP ($${amountUsd.toFixed(2)} USD)
-          ${payerName ? `From: ${payerName}` : ''}
+          Escrow Details:
+          Transaction ID: ${escrowId}
+          Amount: ${amountDisplay}
+          ${payerName ? `Payer: ${payerName}` : ''}
+          ${formattedReleaseDate ? `Expected Release Date: ${formattedReleaseDate}` : ''}
+          ${description ? `Purpose/Description: ${description}` : ''}
           
-          Please log in to your TrustiChain account to view the escrow details and take necessary actions.
+          Your funds are now securely held in escrow and will be released according to the agreed terms. You can monitor the progress or make any updates by visiting your escrow dashboard: ${dashboardLink}
           
-          If you were not expecting this escrow, please contact support immediately.
+          If you have any questions or need assistance, our support team is here to help: ${supportEmail}
+          
+          Thank you for using TrustiChain
+          
+          Best Regards,
+          Team TrustiChain
+          
+          This is a system generated message. Do not reply.
           
           © ${new Date().getFullYear()} TrustiChain. All rights reserved.
         `,

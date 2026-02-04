@@ -81,11 +81,11 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get active escrows (pending or active status)
+      // Get active escrows (pending or active status) where user is initiator OR counterparty
       const { data: escrows, error } = await adminClient
         .from('escrows')
         .select('amount_usd')
-        .eq('user_id', userId)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
         .in('status', ['pending', 'active']);
 
       if (error) {
@@ -131,11 +131,11 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get all escrows for user
+      // Get all escrows where user is initiator OR counterparty
       const { data: escrows, error } = await adminClient
         .from('escrows')
         .select('amount_usd')
-        .eq('user_id', userId);
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
 
       if (error) {
         return {
@@ -869,13 +869,19 @@ export class EscrowService {
             const counterpartyEmailToUse = request.counterpartyEmail || counterpartyUser.email;
             const counterpartyNameToUse = request.counterpartyName || counterpartyUser.full_name;
             
+            // Format escrow ID (same as for payer)
+            const year = new Date(escrow.created_at).getFullYear();
+            const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
+            
             await emailService.sendEscrowCreationNotificationToCounterparty(
               counterpartyEmailToUse,
               counterpartyNameToUse,
-              escrow.id,
+              formattedEscrowId,
               amountXrp,
               amountUsd,
-              request.payerName || payerUser?.full_name
+              request.payerName || payerUser?.full_name,
+              escrow.expected_release_date || escrow.expected_completion_date || undefined,
+              escrow.description || undefined
             ).catch((emailError) => {
               console.error('[Escrow Create] Failed to send email to counterparty:', emailError);
               // Don't fail escrow creation if email fails
