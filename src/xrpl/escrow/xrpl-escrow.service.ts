@@ -1401,28 +1401,96 @@ export class XRPLEscrowService {
   }
 
   /**
-   * Cancel an escrow
+   * Cancel an escrow on XRPL
+   * When cancelled, funds are automatically returned to the owner (creator)
    */
   async cancelEscrow(params: {
     ownerAddress: string;
     escrowSequence: number;
+    walletSecret?: string; // Optional - if provided, will sign and submit directly
   }): Promise<string> {
     try {
-      // In production, use xrpl.js EscrowCancel transaction
-      // const escrowCancel = {
-      //   TransactionType: 'EscrowCancel',
-      //   Account: params.ownerAddress,
-      //   Owner: params.ownerAddress,
-      //   OfferSequence: params.escrowSequence,
-      // };
+      const client = new Client(this.XRPL_SERVER);
+      await client.connect();
 
-      // Placeholder
-      const txHash = Array.from({ length: 64 }, () => 
-        Math.floor(Math.random() * 16).toString(16)
-      ).join('');
-      
-      console.log(`[XRPL] Cancelling escrow: sequence ${params.escrowSequence}`);
-      return txHash;
+      try {
+        const escrowCancel: any = {
+          TransactionType: 'EscrowCancel',
+          Account: params.ownerAddress,
+          Owner: params.ownerAddress,
+          OfferSequence: params.escrowSequence,
+        };
+
+        // If wallet secret provided, sign and submit directly
+        if (params.walletSecret) {
+          const trimmedSecret = params.walletSecret.trim();
+          const wallet = Wallet.fromSeed(trimmedSecret);
+          
+          if (wallet.classicAddress !== params.ownerAddress) {
+            throw new Error('Provided secret does not match the ownerAddress');
+          }
+
+          // Get account info for sequence and fee
+          const accountInfo = await (client as any).request({
+            command: 'account_info',
+            account: params.ownerAddress,
+            ledger_index: 'validated',
+          });
+          
+          escrowCancel.Sequence = accountInfo.result.account_data.Sequence;
+          escrowCancel.Fee = '12'; // Default fee in drops
+
+          // Sign and submit
+          const { tx_blob } = wallet.sign(escrowCancel);
+          const submitResult = await (client as any).request({
+            command: 'submit',
+            tx_blob,
+          });
+
+          const engineResult = submitResult.result.engine_result || submitResult.result.engine_result_code;
+          const txHash = submitResult.result.tx_json?.hash || submitResult.result.hash;
+
+          if (!txHash) {
+            throw new Error('Transaction submitted but no hash returned');
+          }
+
+          // Check for transaction failure
+          if (engineResult && !engineResult.startsWith('tes') && engineResult !== 'terQUEUED') {
+            throw new Error(`Escrow cancellation failed: ${engineResult}`);
+          }
+
+          // Wait for validation (similar to withdrawal)
+          let validated = false;
+          for (let i = 0; i < 20; i++) {
+            await new Promise(res => setTimeout(res, 1000));
+            try {
+              const txResponse = await (client as any).request({
+                command: 'tx',
+                transaction: txHash,
+                binary: false,
+              });
+              if (txResponse.result.validated) {
+                validated = true;
+                break;
+              }
+            } catch (txError) {
+              continue;
+            }
+          }
+
+          if (!validated) {
+            throw new Error('Transaction was submitted but not validated within 20 seconds');
+          }
+
+          console.log(`[XRPL] Escrow cancelled successfully: sequence ${params.escrowSequence}, hash: ${txHash}`);
+          return txHash;
+        } else {
+          // No wallet secret - return transaction for XUMM signing (future implementation)
+          throw new Error('Wallet secret required for direct cancellation. XUMM cancellation flow not yet implemented.');
+        }
+      } finally {
+        await client.disconnect();
+      }
     } catch (error) {
       console.error('Error cancelling XRPL escrow:', error);
       throw error;
