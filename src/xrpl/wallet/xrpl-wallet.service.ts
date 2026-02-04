@@ -514,6 +514,31 @@ export class XRPLWalletService {
         throw new Error('Transaction submitted successfully but no transaction hash was returned');
       }
       
+      // Wait for transaction validation (CRITICAL: ensures balance sync gets correct balance)
+      // XRPL transactions take 3-5 seconds to validate, so we must wait before returning
+      let validated = false;
+      for (let i = 0; i < 20; i++) { // Wait up to ~20 seconds
+        await new Promise(res => setTimeout(res, 1000)); // Wait 1 second between checks
+        try {
+          const txResponse = await (client as any).request({
+            command: 'tx',
+            transaction: txHash,
+            binary: false,
+          });
+          if (txResponse.result.validated) {
+            validated = true;
+            break;
+          }
+        } catch (txError) {
+          // Transaction not found yet, continue waiting
+          continue;
+        }
+      }
+      
+      if (!validated) {
+        throw new Error('Transaction was submitted but not validated within 20 seconds. The transaction may still be processing.');
+      }
+      
       return txHash;
     } catch (error) {
       // #region agent log
