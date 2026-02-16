@@ -509,6 +509,8 @@ export class AuthController {
       console.log('Request original URL:', req.originalUrl);
       
       const code = req.query.code as string;
+      const access_token = req.query.access_token as string;
+      const refresh_token = req.query.refresh_token as string;
       const error = req.query.error as string;
       const errorDescription = req.query.error_description as string;
       const state = req.query.state as string | undefined;
@@ -521,70 +523,53 @@ export class AuthController {
         return;
       }
 
-      // Check if code is missing
-      if (!code) {
+      // Prefer code exchange; otherwise accept tokens (forwarded from intermediary page when Supabase used hash)
+      let result;
+      if (code) {
+        console.log('Authorization code received:', code.substring(0, 20) + '...');
+        console.log('State parameter:', state || 'none');
+        result = await authService.handleGoogleOAuthCallback(code);
+      } else if (access_token && refresh_token) {
+        console.log('Tokens received (hash forwarded as query by intermediary)');
+        result = await authService.handleGoogleOAuthCallbackWithTokens(access_token, refresh_token);
+      } else {
+        // Neither code nor tokens
         console.error('=== Missing Authorization Code ===');
         console.error('Query params received:', JSON.stringify(req.query, null, 2));
         console.error('All query keys:', Object.keys(req.query));
-        console.error('State parameter:', state);
-        console.error('Error parameter:', error);
-        console.error('Full request URL:', req.url);
-        console.error('Original URL:', req.originalUrl);
-        
-        // Check if code might be in URL hash (some OAuth flows use hash fragments)
-        const fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
-        console.error('Full absolute URL:', fullUrl);
-        
-        // Get the base URL for Site URL configuration
         const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'https://trustichain-backend.onrender.com';
         const callbackUrl = `${baseUrl}/api/auth/google/callback`;
-        
-        // Configuration error message
+        const oauthCallbackUrl = baseUrl.replace(/\/$/, '') + '/auth/oauth-callback';
         const configMessage = `
           <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0;">
             <h3 style="margin-top: 0; color: #856404;">Configuration Required</h3>
             <p style="color: #856404; margin-bottom: 10px;">
-              The authorization code is missing. This usually means the <strong>Site URL</strong> or <strong>Redirect URLs</strong> are not properly configured in Supabase Dashboard.
+              The authorization code or tokens are missing. Supabase often returns the response in the URL <strong>hash</strong> (not query), which the server never receives.
             </p>
-            <p style="color: #856404; margin-bottom: 10px;"><strong>Please verify BOTH settings:</strong></p>
+            <p style="color: #856404; margin-bottom: 10px;"><strong>Fix:</strong> Use the intermediary callback so the browser can read the hash and forward it here.</p>
             <ol style="color: #856404; margin-left: 20px;">
-              <li>Go to your <a href="https://app.supabase.com" target="_blank" style="color: #667eea;">Supabase Dashboard</a></li>
-              <li>Navigate to <strong>Authentication → URL Configuration</strong></li>
-              <li><strong>Set Site URL</strong> to (base URL, no path):
-                <br><code style="background: #f8f9fa; padding: 5px; border-radius: 3px; display: inline-block; margin-top: 5px; font-weight: bold;">${baseUrl}</code>
-                <br><small style="color: #666;">This is critical - it must match your application's base URL</small>
+              <li>Go to <strong>Supabase Dashboard → Authentication → URL Configuration</strong></li>
+              <li><strong>Add to Redirect URLs</strong> (where Supabase redirects after Google sign-in):
+                <br><code style="background: #f8f9fa; padding: 5px; border-radius: 3px; display: inline-block; margin-top: 5px;">${oauthCallbackUrl}</code>
               </li>
-              <li><strong>Add to Redirect URLs</strong> (specific callback endpoint):
+              <li>Keep this backend callback in Redirect URLs if needed:
                 <br><code style="background: #f8f9fa; padding: 5px; border-radius: 3px; display: inline-block; margin-top: 5px;">${callbackUrl}</code>
               </li>
-              <li>Click <strong>Save</strong></li>
-              <li>Wait a few seconds for changes to propagate, then try again</li>
+              <li>Click <strong>Save</strong>, then try again</li>
             </ol>
-            <p style="color: #856404; margin-top: 15px; margin-bottom: 0;">
-              <strong>Important:</strong> The Site URL is the base URL of your application. The Redirect URL is the specific callback endpoint. Both must be configured correctly.
-            </p>
           </div>
         `;
-        
-        // Show more detailed error with debugging info
         const debugInfo = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'production'
-          ? `<br><br><small style="color: #666;">Debug Info:<br>URL: ${req.originalUrl}<br>Params: ${JSON.stringify(req.query, null, 2)}<br>State: ${state || 'none'}</small>`
+          ? `<br><br><small style="color: #666;">Debug: URL ${req.originalUrl}<br>Params: ${JSON.stringify(req.query, null, 2)}</small>`
           : '';
-        
         res.status(400).send(this.getErrorPage(
           'Missing Authorization Code',
           `The Google OAuth callback is missing the authorization code.${configMessage}${debugInfo}<br><br><a href="/api/auth/google" style="color: #667eea; text-decoration: none; font-weight: bold;">Try again</a>.`
         ));
         return;
       }
-      
-      console.log('Authorization code received:', code.substring(0, 20) + '...');
-      console.log('State parameter:', state || 'none');
-
-      const result = await authService.handleGoogleOAuthCallback(code);
 
       if (result.success && result.data) {
-        // Redirect to frontend with success
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         res.redirect(`${frontendUrl}/auth/callback?success=true&provider=google`);
         return;

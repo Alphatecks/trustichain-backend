@@ -530,17 +530,15 @@ export class AuthService {
    */
   async getGoogleOAuthUrl(): Promise<GoogleOAuthResponse> {
     try {
-      // Prioritize RENDER_URL for Render deployments, then BACKEND_URL, then localhost for development
-      const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'http://localhost:3000';
-      const redirectUrl = `${baseUrl}/api/auth/google/callback`;
+      // Backend base URL (where this API runs). Supabase must redirect here so our /auth/oauth-callback page can read the hash.
+      const baseUrl = (process.env.RENDER_URL || process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+      const redirectUrl = `${baseUrl}/auth/oauth-callback`;
 
       console.log('=== Generating Google OAuth URL ===');
-      console.log('Base URL (Site URL in Supabase Dashboard):', baseUrl);
-      console.log('Redirect URL (must be in Redirect URLs list):', redirectUrl);
-      console.log('Base URL from env:', { RENDER_URL: process.env.RENDER_URL, BACKEND_URL: process.env.BACKEND_URL });
+      console.log('Redirect URL (add this to Supabase Redirect URLs):', redirectUrl);
+      console.log('Env:', { RENDER_URL: process.env.RENDER_URL, BACKEND_URL: process.env.BACKEND_URL });
       console.log('=== Supabase Dashboard Configuration Required ===');
-      console.log('1. Site URL must be set to:', baseUrl);
-      console.log('2. Redirect URLs must include:', redirectUrl);
+      console.log('1. Redirect URLs must include:', redirectUrl);
       console.log('   Location: Supabase Dashboard → Authentication → URL Configuration');
 
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -640,6 +638,92 @@ export class AuthService {
       }
 
       // Get updated profile
+      const { data: profileData } = await adminClient
+        .from('users')
+        .select('id, email, full_name, country')
+        .eq('id', user.id)
+        .single();
+
+      return {
+        success: true,
+        message: 'Successfully signed in with Google',
+        data: {
+          user: {
+            id: profileData?.id || user.id,
+            email: profileData?.email || email || '',
+            fullName: profileData?.full_name || fullName,
+            country: profileData?.country || country,
+          },
+          accessToken: sessionData.session.access_token,
+          refreshToken: sessionData.session.refresh_token,
+        },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return {
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  /**
+   * Handle Google OAuth callback when Supabase returns tokens in the hash (forwarded as query by intermediary page).
+   * Uses setSession then runs the same user profile logic as handleGoogleOAuthCallback.
+   */
+  async handleGoogleOAuthCallbackWithTokens(access_token: string, refresh_token: string): Promise<GoogleOAuthCallbackResponse> {
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+        access_token,
+        refresh_token,
+      });
+
+      if (sessionError || !sessionData.session || !sessionData.user) {
+        return {
+          success: false,
+          message: sessionError?.message || 'Failed to set session from tokens',
+          error: 'OAuth callback error',
+        };
+      }
+
+      const user = sessionData.user;
+      const email = user.email;
+      const fullName = user.user_metadata?.full_name || user.user_metadata?.name || email?.split('@')[0] || 'User';
+      const country = user.user_metadata?.country || null;
+
+      const adminClient = supabaseAdmin || supabase;
+      const { data: existingProfile } = await adminClient
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (!existingProfile) {
+        const { error: profileError } = await adminClient
+          .from('users')
+          .insert({
+            id: user.id,
+            email: email?.toLowerCase() || '',
+            full_name: fullName,
+            country: country,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        if (profileError) {
+          console.error('Failed to create user profile:', profileError);
+        }
+      } else {
+        await adminClient
+          .from('users')
+          .update({
+            email: email?.toLowerCase() || existingProfile.email,
+            full_name: fullName,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+      }
+
       const { data: profileData } = await adminClient
         .from('users')
         .select('id, email, full_name, country')

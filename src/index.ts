@@ -38,6 +38,37 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// OAuth intermediary: Supabase redirects here with hash (#access_token=...). Server cannot read hash, so this page
+// runs in the browser, reads the hash, and redirects to the backend callback with params in the query string.
+app.get('/auth/oauth-callback', (req: Request, res: Response) => {
+  const backendUrl = process.env.RENDER_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+  const callbackUrl = `${backendUrl.replace(/\/$/, '')}/api/auth/google/callback`.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signing in...</title>
+</head>
+<body>
+  <p>Completing sign-in...</p>
+  <script>
+    (function() {
+      var hash = window.location.hash;
+      var url = "${callbackUrl}";
+      if (hash && hash.length > 1) {
+        window.location.replace(url + "?" + hash.slice(1));
+      } else {
+        window.location.replace(url);
+      }
+    })();
+  </script>
+</body>
+</html>`;
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
+});
+
 // Debug endpoint to test log writing (for debugging on Render)
 app.get('/debug/test-write', (_req: Request, res: Response) => {
   try {
