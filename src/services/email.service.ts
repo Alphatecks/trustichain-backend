@@ -597,6 +597,166 @@ export class EmailService {
   }
 
   /**
+   * Send escrow release notification to payer (initiator who created the escrow)
+   */
+  async sendEscrowReleaseNotificationToPayer(
+    email: string,
+    payerName: string,
+    escrowId: string,
+    amountXrp: number,
+    amountUsd: number,
+    counterpartyName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend || !process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = !resend
+          ? 'Resend API key not configured. Please set RESEND_API_KEY environment variable.'
+          : 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      console.log(`Attempting to send escrow release notification to payer: ${email}`);
+
+      const logoBase64 = this.getLogoBase64();
+      const fontBase64 = this.getSatoshiFontBase64();
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const dashboardLink = `${frontendUrl}/dashboard`;
+      const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
+      const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: `Escrow Released – ${escrowId}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Escrow Released</title>
+            ${fontBase64 ? `<style>@font-face { font-family: 'Satoshi'; src: url('${fontBase64}') format('opentype'); font-weight: normal; font-style: normal; }</style>` : ''}
+          </head>
+          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Released – ${escrowId}</h1>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${payerName},</p>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Your escrow has been successfully released. Funds have been sent according to the agreed terms.</p>
+            <div style="background-color: #f0f0f0; border-radius: 8px; padding: 20px; margin: 30px 0;">
+              <p style="font-weight: bold; font-size: 16px; color: #333; margin: 0 0 15px 0;">Escrow Details:</p>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Transaction ID:</strong> ${escrowId}</li>
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Amount Released:</strong> ${amountDisplay}</li>
+                ${counterpartyName ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Payee:</strong> ${counterpartyName}</li>` : ''}
+              </ul>
+            </div>
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">View your escrow history: <a href="${dashboardLink}" style="color: #667eea;">${dashboardLink}</a></p>
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">Questions? Contact support: <a href="mailto:${supportEmail}" style="color: #667eea;">${supportEmail}</a></p>
+            <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,<br/>Team TrustiChain</p>
+            <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
+            <div style="text-align: center; margin: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto;" />` : ''}</div>
+          </body>
+          </html>
+        `,
+        text: `Dear ${payerName},\n\nYour escrow ${escrowId} has been released. Amount: ${amountDisplay}${counterpartyName ? `\nPayee: ${counterpartyName}` : ''}\n\nView your dashboard: ${dashboardLink}\n\n© ${new Date().getFullYear()} TrustiChain.`,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+      console.log('Escrow release notification sent to payer:', { id: data?.id, to: email });
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send escrow release email to payer';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Send escrow release notification to counterparty (person who received the escrowed funds)
+   */
+  async sendEscrowReleaseNotificationToCounterparty(
+    email: string,
+    counterpartyName: string,
+    escrowId: string,
+    amountXrp: number,
+    amountUsd: number,
+    payerName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend || !process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = !resend
+          ? 'Resend API key not configured. Please set RESEND_API_KEY environment variable.'
+          : 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      console.log(`Attempting to send escrow release notification to counterparty: ${email}`);
+
+      const logoBase64 = this.getLogoBase64();
+      const fontBase64 = this.getSatoshiFontBase64();
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const dashboardLink = `${frontendUrl}/dashboard`;
+      const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
+      const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: `Escrow Released – You Received Funds – ${escrowId}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Escrow Released</title>
+            ${fontBase64 ? `<style>@font-face { font-family: 'Satoshi'; src: url('${fontBase64}') format('opentype'); font-weight: normal; font-style: normal; }</style>` : ''}
+          </head>
+          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Released – You Received Funds – ${escrowId}</h1>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${counterpartyName},</p>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">An escrow has been released and the funds have been sent to you.</p>
+            <div style="background-color: #f0f0f0; border-radius: 8px; padding: 20px; margin: 30px 0;">
+              <p style="font-weight: bold; font-size: 16px; color: #333; margin: 0 0 15px 0;">Escrow Details:</p>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Transaction ID:</strong> ${escrowId}</li>
+                <li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>Amount Received:</strong> ${amountDisplay}</li>
+                ${payerName ? `<li style="margin: 10px 0; font-size: 14px; color: #333;"><strong>From:</strong> ${payerName}</li>` : ''}
+              </ul>
+            </div>
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">View your dashboard: <a href="${dashboardLink}" style="color: #667eea;">${dashboardLink}</a></p>
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">Questions? Contact support: <a href="mailto:${supportEmail}" style="color: #667eea;">${supportEmail}</a></p>
+            <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,<br/>Team TrustiChain</p>
+            <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
+            <div style="text-align: center; margin: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto;" />` : ''}</div>
+          </body>
+          </html>
+        `,
+        text: `Dear ${counterpartyName},\n\nEscrow ${escrowId} has been released. You received: ${amountDisplay}${payerName ? `\nFrom: ${payerName}` : ''}\n\nView your dashboard: ${dashboardLink}\n\n© ${new Date().getFullYear()} TrustiChain.`,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+      console.log('Escrow release notification sent to counterparty:', { id: data?.id, to: email });
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send escrow release email to counterparty';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
    * Send dispute notification email to respondent
    * @param email - Respondent email address
    * @param respondentName - Respondent's full name

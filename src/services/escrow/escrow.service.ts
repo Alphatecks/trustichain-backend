@@ -66,6 +66,73 @@ export class EscrowService {
       completedAt: m.completed_at || undefined,
     }));
   }
+
+  /**
+   * Send release notification emails to payer (initiator) and counterparty.
+   * Used after escrow is successfully released (direct or via XUMM).
+   */
+  private async sendEscrowReleaseEmails(
+    updatedEscrow: {
+      user_id: string;
+      counterparty_id: string | null;
+      payer_email?: string | null;
+      counterparty_email?: string | null;
+      payer_name?: string | null;
+      amount_xrp: string;
+      amount_usd: string;
+    },
+    formattedEscrowId: string,
+    partyNames: Record<string, string>
+  ): Promise<void> {
+    const adminClient = supabaseAdmin || supabase;
+    const amountXrp = parseFloat(updatedEscrow.amount_xrp);
+    const amountUsd = parseFloat(updatedEscrow.amount_usd);
+    const payerName = partyNames[updatedEscrow.user_id] || updatedEscrow.payer_name || 'User';
+    const counterpartyName = updatedEscrow.counterparty_id
+      ? (partyNames[updatedEscrow.counterparty_id] || 'Counterparty')
+      : undefined;
+
+    let payerEmail = updatedEscrow.payer_email || undefined;
+    if (!payerEmail && updatedEscrow.user_id) {
+      const { data: payerUser } = await adminClient
+        .from('users')
+        .select('email')
+        .eq('id', updatedEscrow.user_id)
+        .single();
+      payerEmail = payerUser?.email;
+    }
+    if (payerEmail) {
+      await emailService.sendEscrowReleaseNotificationToPayer(
+        payerEmail,
+        payerName,
+        formattedEscrowId,
+        amountXrp,
+        amountUsd,
+        counterpartyName
+      ).catch((err) => console.error('[Escrow Release] Failed to send release email to payer:', err));
+    }
+
+    let counterpartyEmail = updatedEscrow.counterparty_email || undefined;
+    if (!counterpartyEmail && updatedEscrow.counterparty_id) {
+      const { data: counterpartyUser } = await adminClient
+        .from('users')
+        .select('email')
+        .eq('id', updatedEscrow.counterparty_id)
+        .single();
+      counterpartyEmail = counterpartyUser?.email;
+    }
+    if (counterpartyEmail) {
+      await emailService.sendEscrowReleaseNotificationToCounterparty(
+        counterpartyEmail,
+        counterpartyName || 'User',
+        formattedEscrowId,
+        amountXrp,
+        amountUsd,
+        payerName
+      ).catch((err) => console.error('[Escrow Release] Failed to send release email to counterparty:', err));
+    }
+  }
+
   /**
    * Get active escrows count and locked amount for a user
    */
@@ -2609,6 +2676,12 @@ export class EscrowService {
           console.warn('Failed to create escrow completed notifications:', notifyError);
         }
 
+        try {
+          await this.sendEscrowReleaseEmails(updatedEscrow, formattedEscrowId, partyNames);
+        } catch (emailError) {
+          console.error('[Escrow Release] Error sending escrow release emails:', emailError);
+        }
+
         return {
           success: true,
           message: 'Escrow released successfully',
@@ -2822,17 +2895,23 @@ export class EscrowService {
         const year = new Date(updatedEscrow.created_at).getFullYear();
         const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
 
+        try {
+          await this.sendEscrowReleaseEmails(updatedEscrow, formattedEscrowId, partyNames);
+        } catch (emailError) {
+          console.error('[Escrow Release XUMM] Error sending release emails:', emailError);
+        }
+
         const formattedEscrow: Escrow = {
           id: updatedEscrow.id,
-          escrowId: formattedEscrowId,
+            escrowId: formattedEscrowId,
           userId: updatedEscrow.user_id,
           counterpartyId: updatedEscrow.counterparty_id || '',
           initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
           counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
-          amount: {
+            amount: {
             usd: parseFloat(updatedEscrow.amount_usd),
             xrp: parseFloat(updatedEscrow.amount_xrp),
-          },
+            },
           status: updatedEscrow.status,
           transactionType: updatedEscrow.transaction_type as TransactionType,
           industry: updatedEscrow.industry || null,
@@ -2904,6 +2983,12 @@ export class EscrowService {
           const milestones = await this.getMilestones(updatedEscrow.id);
           const year = new Date(updatedEscrow.created_at).getFullYear();
           const formattedEscrowId = this.formatEscrowId(year, updatedEscrow.escrow_sequence || 1);
+
+          try {
+            await this.sendEscrowReleaseEmails(updatedEscrow, formattedEscrowId, partyNames);
+          } catch (emailError) {
+            console.error('[Escrow Release XUMM] Error sending release emails:', emailError);
+          }
 
           const formattedEscrow: Escrow = {
             id: updatedEscrow.id,
