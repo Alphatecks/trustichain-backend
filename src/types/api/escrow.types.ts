@@ -161,6 +161,7 @@ export interface CompletedEscrowsMonthResponse {
 export interface GetEscrowListRequest {
   transactionType?: TransactionType | 'all';
   industry?: string | 'all';
+  status?: 'all' | 'active' | 'pending' | 'completed' | 'cancelled' | 'disputed';
   month?: number; // 1-12
   year?: number;
   limit?: number;

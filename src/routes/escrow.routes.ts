@@ -6,6 +6,16 @@ import { asyncHandler } from '../utils/asyncHandler';
 const router = Router();
 
 /**
+ * @route   GET /api/escrow/active/list
+ * @desc    Get list of active escrows (pending or active status)
+ * @access  Private
+ * @query   limit?, offset?
+ */
+router.get('/active/list', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getActiveEscrowList(req, res);
+}));
+
+/**
  * @route   GET /api/escrow/active
  * @desc    Get active escrows count and locked amount
  * @access  Private

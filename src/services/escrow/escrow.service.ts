@@ -1038,6 +1038,15 @@ export class EscrowService {
         .select('*', { count: 'exact' })
         .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
 
+      // Apply status filter (active = pending or active)
+      if (filters.status && filters.status !== 'all') {
+        if (filters.status === 'active') {
+          query = query.in('status', ['pending', 'active']);
+        } else {
+          query = query.eq('status', filters.status);
+        }
+      }
+
       // Apply transaction type filter
       if (filters.transactionType && filters.transactionType !== 'all') {
         query = query.eq('transaction_type', filters.transactionType);

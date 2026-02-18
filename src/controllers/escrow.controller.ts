@@ -19,6 +19,35 @@ import { supabase, supabaseAdmin } from '../config/supabase';
 
 export class EscrowController {
   /**
+   * Get list of active escrows (pending or active status)
+   * GET /api/escrow/active/list?limit=50&offset=0
+   */
+  async getActiveEscrowList(req: Request, res: Response<EscrowListResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const filters: GetEscrowListRequest = {
+        status: 'active',
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+        offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
+      };
+      const result = await escrowService.getEscrowListWithFilters(userId, filters);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Get active escrows count and locked amount
    * GET /api/escrow/active
    */
@@ -126,6 +155,7 @@ export class EscrowController {
       const filters: GetEscrowListRequest = {
         transactionType: req.query.transactionType as TransactionType | 'all' | undefined,
         industry: req.query.industry as string | undefined,
+        status: req.query.status as GetEscrowListRequest['status'] | undefined,
         month: req.query.month ? parseInt(req.query.month as string) : undefined,
         year: req.query.year ? parseInt(req.query.year as string) : undefined,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
