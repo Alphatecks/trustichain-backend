@@ -4,10 +4,11 @@ import {
   GetNotificationsResponse,
   MarkReadResponse,
 } from '../../types/api/notification.types';
+import { sendFcmToTokens } from '../fcm.service';
 
 export class NotificationService {
   /**
-   * Create a notification for a user
+   * Create a notification for a user (in-app) and send FCM push if user has registered tokens.
    */
   async createNotification(params: {
     userId: string;
@@ -25,6 +26,76 @@ export class NotificationService {
       message: params.message,
       metadata: params.metadata || null,
     });
+
+    // Send FCM push to user's registered device tokens
+    try {
+      const { data: rows } = await adminClient
+        .from('user_fcm_tokens')
+        .select('fcm_token')
+        .eq('user_id', params.userId);
+      const tokens = (rows || []).map((r: { fcm_token: string }) => r.fcm_token).filter(Boolean);
+      if (tokens.length > 0) {
+        const data: Record<string, string> = {
+          type: params.type,
+          ...(params.metadata && Object.keys(params.metadata).length
+            ? { metadata: JSON.stringify(params.metadata) }
+            : {}),
+        };
+        await sendFcmToTokens(tokens, {
+          title: params.title,
+          body: params.message,
+          data,
+        });
+      }
+    } catch (fcmError) {
+      console.warn('FCM send failed (notification still created):', fcmError);
+    }
+  }
+
+  /**
+   * Register an FCM device token for the authenticated user (for push notifications).
+   * Upserts by (user_id, fcm_token); same token updates updated_at and optional device_id/platform.
+   */
+  async registerFcmToken(params: {
+    userId: string;
+    fcmToken: string;
+    deviceId?: string;
+    platform?: 'ios' | 'android' | 'web';
+  }): Promise<{ success: boolean; message: string; error?: string }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      if (!params.fcmToken || typeof params.fcmToken !== 'string') {
+        return { success: false, message: 'fcmToken is required', error: 'Invalid fcmToken' };
+      }
+
+      const { error } = await adminClient.from('user_fcm_tokens').upsert(
+        {
+          user_id: params.userId,
+          fcm_token: params.fcmToken.trim(),
+          device_id: params.deviceId || null,
+          platform: params.platform || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,fcm_token' }
+      );
+
+      if (error) {
+        console.error('Failed to register FCM token:', error);
+        return {
+          success: false,
+          message: 'Failed to register device',
+          error: error.message,
+        };
+      }
+      return { success: true, message: 'Device registered for push notifications' };
+    } catch (error) {
+      console.error('Error registering FCM token:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to register device',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
 
   /**

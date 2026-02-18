@@ -66,6 +66,42 @@ export class NotificationController {
   }
 
   /**
+   * Register FCM device token for push notifications
+   * POST /api/notifications/register-device
+   * Body: { fcmToken: string, deviceId?: string, platform?: 'ios' | 'android' | 'web' }
+   */
+  async registerDevice(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const { fcmToken, deviceId, platform } = req.body as {
+        fcmToken?: string;
+        deviceId?: string;
+        platform?: 'ios' | 'android' | 'web';
+      };
+
+      const result = await notificationService.registerFcmToken({
+        userId,
+        fcmToken: fcmToken ?? '',
+        deviceId,
+        platform,
+      });
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Mark all notifications as read
    * POST /api/notifications/read-all
    */

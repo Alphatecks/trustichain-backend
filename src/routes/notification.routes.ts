@@ -22,6 +22,20 @@ router.get(
 );
 
 /**
+ * @route   POST /api/notifications/register-device
+ * @desc    Register FCM token for push notifications (call from app on login/start)
+ * @access  Private
+ * @body    { fcmToken: string, deviceId?: string, platform?: 'ios' | 'android' | 'web' }
+ */
+router.post(
+  '/register-device',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await notificationController.registerDevice(req, res);
+  })
+);
+
+/**
  * @route   POST /api/notifications/:id/read
  * @desc    Mark a notification as read
  * @access  Private

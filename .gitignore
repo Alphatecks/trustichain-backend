@@ -10,6 +10,9 @@ build/
 .env.local
 .env.production
 
+# Firebase service account key (use FIREBASE_SERVICE_ACCOUNT_JSON env var instead)
+*-firebase-adminsdk-*.json
+
 # IDE
 .vscode/
 .idea/
