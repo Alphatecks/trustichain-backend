@@ -57,6 +57,8 @@ export interface UserDetailWalletItem {
   walletType: 'savings' | 'xrp';
   amountUsd: number;
   date: string;
+  /** XRPL address for xrp wallet type; undefined for savings */
+  walletAddress?: string;
 }
 
 /** KYC section for User Details */
@@ -106,12 +108,16 @@ export interface UserDetailDisputeItem {
 }
 
 export interface UserManagementDetailData {
+  /** User ID (same as userId) */
   id: string;
+  userId: string;
   name: string;
   email: string;
   profilePictureUrl?: string;
   accountType?: string;
   kycStatus: UserManagementKycStatus;
+  /** User's primary XRPL wallet address from wallets table */
+  walletAddress?: string;
   nationality?: string;
   country?: string;
   dateOfBirth?: string;

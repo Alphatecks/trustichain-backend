@@ -332,15 +332,18 @@ export class AdminUserManagementService {
 
       const { count: escrowsTotal } = await client.from('escrows').select('*', { count: 'exact', head: true }).or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
 
+      const mainWalletData = mainWallet?.data as { id: string; balance_usd?: string; balance_xrp?: string; xrpl_address?: string; created_at: string } | undefined;
+      const userPrimaryWalletAddress = mainWalletData?.xrpl_address ?? undefined;
+
       const walletItems: UserDetailWalletItem[] = [];
-      if (mainWallet?.data) {
-        const w = mainWallet.data as any;
+      if (mainWalletData) {
         walletItems.push({
-          id: w.id,
+          id: mainWalletData.id,
           walletName: 'XRP Wallet',
           walletType: 'xrp',
-          amountUsd: Math.round(parseFloat(w.balance_usd || '0') * 100) / 100,
-          date: w.created_at,
+          amountUsd: Math.round(parseFloat(mainWalletData.balance_usd || '0') * 100) / 100,
+          date: mainWalletData.created_at,
+          walletAddress: mainWalletData.xrpl_address,
         });
       }
       const savings = savingsList?.data ?? [];
@@ -353,7 +356,7 @@ export class AdminUserManagementService {
           date: s.created_at,
         });
       });
-      const walletTotal = (mainWallet?.data ? 1 : 0) + savings.length;
+      const walletTotal = (mainWalletData ? 1 : 0) + savings.length;
 
       const userKyc: UserDetailKyc = {
         status: kycStatus,
@@ -466,11 +469,13 @@ export class AdminUserManagementService {
 
       const data: UserManagementDetailData = {
         id: user.id,
+        userId: user.id,
         name: user.full_name || '—',
         email: user.email || '—',
         profilePictureUrl: (user as any).avatar_url,
         accountType: accountTypeLabel(user.account_type),
         kycStatus,
+        walletAddress: userPrimaryWalletAddress,
         country: user.country,
         nationality: user.country ? this.countryToNationality(user.country) : undefined,
         dateOfBirth: (user as any).date_of_birth,
