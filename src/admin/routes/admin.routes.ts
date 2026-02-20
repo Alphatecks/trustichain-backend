@@ -118,4 +118,51 @@ router.get('/alerts', adminAuthenticate, asyncHandler(async (req, res) => {
   await adminController.getAlerts(req, res);
 }));
 
+// --- User Management (admin only) ---
+
+/**
+ * @route   GET /api/admin/user-management/stats
+ * @desc    User management overview: total users, verified, personal suite, business suite + growth %
+ * @access  Private (admin)
+ */
+router.get('/user-management/stats', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getUserManagementStats(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/user-management/users
+ * @desc    User list with search, accountType (personal|business_suite), kycStatus, page, pageSize, sortBy, sortOrder
+ * @access  Private (admin)
+ */
+router.get('/user-management/users', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getUserManagementUsers(req, res);
+}));
+
+/**
+ * @route   PUT /api/admin/user-management/users/batch-kyc-status
+ * @desc    Batch update KYC status (body: { userIds: string[], status })
+ * @access  Private (admin) — must be before /:userId to avoid "batch-kyc-status" as userId
+ */
+router.put('/user-management/users/batch-kyc-status', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.batchUpdateUserKycStatus(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/user-management/users/:userId
+ * @desc    Single user detail
+ * @access  Private (admin)
+ */
+router.get('/user-management/users/:userId', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getUserManagementUserById(req, res);
+}));
+
+/**
+ * @route   PUT /api/admin/user-management/users/:userId/kyc-status
+ * @desc    Update one user's KYC status (body: { status: 'verified'|'pending'|'declined'|'suspended' })
+ * @access  Private (admin)
+ */
+router.put('/user-management/users/:userId/kyc-status', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateUserKycStatus(req, res);
+}));
+
 export default router;
