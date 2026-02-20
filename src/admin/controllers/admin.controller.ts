@@ -1,6 +1,19 @@
 import { Request, Response } from 'express';
 import { adminService } from '../services/admin.service';
+import { adminDashboardService } from '../services/adminDashboard.service';
 import { AdminLoginRequest, AdminLoginResponse, AdminLogoutResponse } from '../../types/api/admin.types';
+import type {
+  AdminOverviewResponse,
+  AdminEscrowInsightResponse,
+  AdminDisputeResolutionResponse,
+  AdminLiveTransactionsFeedResponse,
+  AdminUserOverviewResponse,
+  AdminKycListResponse,
+  AdminKycDetailResponse,
+  AdminKycApproveResponse,
+  AdminSearchResponse,
+  AdminAlertsResponse,
+} from '../../types/api/adminDashboard.types';
 
 export class AdminController {
   /**
@@ -62,6 +75,89 @@ export class AdminController {
         error: 'Internal server error',
       });
     }
+  }
+
+  // --- Dashboard (admin only) ---
+
+  async getOverview(_req: Request, res: Response<AdminOverviewResponse>): Promise<void> {
+    const result = await adminDashboardService.getOverview();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getEscrowInsight(req: Request, res: Response<AdminEscrowInsightResponse>): Promise<void> {
+    const period = (req.query.period as string) || 'last_month';
+    const result = await adminDashboardService.getEscrowInsight(period);
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getDisputeResolution(req: Request, res: Response<AdminDisputeResolutionResponse>): Promise<void> {
+    const period = (req.query.period as string) || 'last_6_months';
+    const result = await adminDashboardService.getDisputeResolution(period);
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getLiveTransactionsFeed(req: Request, res: Response<AdminLiveTransactionsFeedResponse>): Promise<void> {
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const result = await adminDashboardService.getLiveTransactionsFeed(limit);
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getUserOverview(req: Request, res: Response<AdminUserOverviewResponse>): Promise<void> {
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const offset = Number(req.query.offset) || 0;
+    const result = await adminDashboardService.getUserOverview(limit, offset);
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getKycList(_req: Request, res: Response<AdminKycListResponse>): Promise<void> {
+    const result = await adminDashboardService.getKycList();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getKycDetail(req: Request, res: Response<AdminKycDetailResponse>): Promise<void> {
+    const userId = req.params.userId;
+    if (!userId) {
+      res.status(400).json({ success: false, message: 'userId required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDashboardService.getKycDetail(userId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async approveKyc(req: Request, res: Response<AdminKycApproveResponse>): Promise<void> {
+    const userId = req.body?.userId as string;
+    const status = req.body?.status as 'verified' | 'declined' | 'suspended';
+    const adminId = req.admin?.id;
+    if (!userId || !status || !adminId) {
+      res.status(400).json({
+        success: false,
+        message: 'userId, status, and admin auth required',
+        error: 'Bad request',
+      });
+      return;
+    }
+    if (!['verified', 'declined', 'suspended'].includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: 'status must be verified, declined, or suspended',
+        error: 'Bad request',
+      });
+      return;
+    }
+    const result = await adminDashboardService.approveKyc(userId, status, adminId);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async search(req: Request, res: Response<AdminSearchResponse>): Promise<void> {
+    const q = (req.query.q as string) || '';
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const result = await adminDashboardService.search(q, limit);
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getAlerts(_req: Request, res: Response<AdminAlertsResponse>): Promise<void> {
+    const result = await adminDashboardService.getAlerts();
+    res.status(result.success ? 200 : 500).json(result);
   }
 }
 
