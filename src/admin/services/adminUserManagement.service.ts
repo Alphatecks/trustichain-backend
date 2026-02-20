@@ -10,6 +10,12 @@ import type {
   UserManagementListResponse,
   UserManagementListItem,
   UserManagementDetailResponse,
+  UserManagementDetailData,
+  UserDetailWalletItem,
+  UserDetailKyc,
+  UserDetailEscrowItem,
+  UserDetailTransactionItem,
+  UserDetailDisputeItem,
   UserManagementUpdateKycResponse,
   UserManagementBatchKycResponse,
   UserManagementKycStatus,
@@ -271,15 +277,31 @@ export class AdminUserManagementService {
   }
 
   /**
-   * Single user detail by id
+   * Single user detail by id – full User Details view: user info, wallet details, KYC, escrows, transactions, disputes
    */
-  async getUserById(userId: string): Promise<UserManagementDetailResponse> {
+  async getUserById(
+    userId: string,
+    opts?: {
+      walletPage?: number;
+      walletPageSize?: number;
+      escrowPage?: number;
+      escrowPageSize?: number;
+      transactionLimit?: number;
+      disputeLimit?: number;
+    }
+  ): Promise<UserManagementDetailResponse> {
     try {
       const client = this.getAdminClient();
+      const walletPage = Math.max(1, opts?.walletPage ?? 1);
+      const walletPageSize = Math.min(50, Math.max(1, opts?.walletPageSize ?? 10));
+      const escrowPage = Math.max(1, opts?.escrowPage ?? 1);
+      const escrowPageSize = Math.min(50, Math.max(1, opts?.escrowPageSize ?? 10));
+      const transactionLimit = Math.min(50, Math.max(1, opts?.transactionLimit ?? 10));
+      const disputeLimit = Math.min(50, Math.max(1, opts?.disputeLimit ?? 10));
 
       const { data: user, error: userError } = await client
         .from('users')
-        .select('id, full_name, email, account_type, country, created_at, updated_at')
+        .select('id, full_name, email, account_type, country, avatar_url, date_of_birth, created_at, updated_at')
         .eq('id', userId)
         .single();
 
@@ -291,41 +313,203 @@ export class AdminUserManagementService {
         };
       }
 
-      const [kyc, escrows, savings, volumes, lastTx] = await Promise.all([
-        client.from('user_kyc').select('status, submitted_at, reviewed_at').eq('user_id', userId).maybeSingle(),
-        client.from('escrows').select('id').eq('user_id', userId),
-        client.from('savings_wallets').select('id').eq('user_id', userId),
+      const [kyc, mainWallet, savingsList, escrowsResp, transactionsResp, disputesResp, volumes, lastTx] = await Promise.all([
+        client.from('user_kyc').select('status, submitted_at, reviewed_at, linked_id_type, card_number, wallet_address, document_live_selfie_url, document_front_url, document_back_url').eq('user_id', userId).maybeSingle(),
+        client.from('wallets').select('id, balance_usd, balance_xrp, xrpl_address, created_at').eq('user_id', userId).maybeSingle(),
+        client.from('savings_wallets').select('id, name, target_amount_usd, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+        client.from('escrows').select('id, user_id, counterparty_id, amount_usd, status, created_at').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).order('created_at', { ascending: false }).range((escrowPage - 1) * escrowPageSize, escrowPage * escrowPageSize - 1),
+        client.from('transactions').select('id, type, description, amount_usd, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(transactionLimit),
+        client.from('disputes').select('id, case_id, dispute_category, initiator_user_id, respondent_user_id, status, opened_at').or(`initiator_user_id.eq.${userId},respondent_user_id.eq.${userId}`).order('opened_at', { ascending: false }).limit(disputeLimit),
         client.from('transactions').select('amount_usd').eq('user_id', userId),
         client.from('transactions').select('created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
       ]);
 
-      const kycStatus = (kyc?.data?.status || 'pending') as UserManagementKycStatus;
+      const kycData = kyc?.data;
+      const kycStatus = (kycData?.status || 'pending') as UserManagementKycStatus;
       const totalVolume = (volumes?.data || []).reduce((sum: number, t: any) => sum + parseFloat(t.amount_usd || '0'), 0);
       const lastAt = lastTx?.data?.created_at ?? null;
       const lastDate = lastAt ? new Date(lastAt) : null;
 
-      const item: UserManagementListItem & { country?: string; updatedAt?: string; kycSubmittedAt?: string; kycReviewedAt?: string } = {
+      const { count: escrowsTotal } = await client.from('escrows').select('*', { count: 'exact', head: true }).or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
+
+      const walletItems: UserDetailWalletItem[] = [];
+      if (mainWallet?.data) {
+        const w = mainWallet.data as any;
+        walletItems.push({
+          id: w.id,
+          walletName: 'XRP Wallet',
+          walletType: 'xrp',
+          amountUsd: Math.round(parseFloat(w.balance_usd || '0') * 100) / 100,
+          date: w.created_at,
+        });
+      }
+      const savings = savingsList?.data ?? [];
+      savings.forEach((s: any) => {
+        walletItems.push({
+          id: s.id,
+          walletName: s.name || 'Savings',
+          walletType: 'savings',
+          amountUsd: Math.round(parseFloat(s.target_amount_usd || '0') * 100) / 100,
+          date: s.created_at,
+        });
+      });
+      const walletTotal = (mainWallet?.data ? 1 : 0) + savings.length;
+
+      const userKyc: UserDetailKyc = {
+        status: kycStatus,
+        linkedIdType: kycData?.linked_id_type ?? undefined,
+        cardNumber: kycData?.card_number ?? undefined,
+        walletAddress: kycData?.wallet_address ?? undefined,
+        documents: {
+          liveSelfie: (kycData as any)?.document_live_selfie_url,
+          front: (kycData as any)?.document_front_url,
+          back: (kycData as any)?.document_back_url,
+        },
+        submittedAt: kycData?.submitted_at,
+        reviewedAt: kycData?.reviewed_at,
+      };
+
+      const counterpartyIds = [...new Set((escrowsResp?.data ?? []).map((e: any) => e.counterparty_id).filter(Boolean))];
+      const userIdsForNames = [...new Set([userId, ...counterpartyIds])];
+      const { data: nameRows } = await client.from('users').select('id, full_name').in('id', userIdsForNames);
+      const nameByUserId = (nameRows || []).reduce<Record<string, string>>((acc, r: any) => {
+        acc[r.id] = r.full_name || '—';
+        return acc;
+      }, {});
+
+      const escrowItems: UserDetailEscrowItem[] = (escrowsResp?.data ?? []).map((e: any) => {
+        const parties = [nameByUserId[e.user_id], nameByUserId[e.counterparty_id]].filter(Boolean).join(', ') || '—';
+        const statusMap: Record<string, string> = {
+          pending: 'Pending',
+          active: 'In progress',
+          completed: 'Completed',
+          cancelled: 'Cancelled',
+          disputed: 'Disputed',
+        };
+        return {
+          id: e.id,
+          escrowIdNo: e.id.slice(0, 8),
+          partiesInvolved: parties,
+          amountUsd: Math.round(parseFloat(e.amount_usd || '0') * 100) / 100,
+          status: statusMap[e.status] || e.status,
+          createdAt: e.created_at,
+        };
+      });
+
+      const txTypeLabels: Record<string, string> = {
+        deposit: 'Payment Received',
+        withdrawal: 'Withdrawal',
+        escrow_create: 'Escrow Created',
+        escrow_release: 'Payment Released',
+        escrow_cancel: 'Escrow Cancelled',
+        transfer: 'Funds Transferred',
+        swap: 'Swap',
+      };
+      const transactionItems: UserDetailTransactionItem[] = (transactionsResp?.data ?? []).map((t: any) => {
+        const createdAt = new Date(t.created_at);
+        return {
+          id: t.id,
+          type: t.type,
+          typeLabel: txTypeLabels[t.type] || t.type,
+          description: t.description || `${txTypeLabels[t.type] || t.type}`,
+          amountUsd: t.amount_usd != null ? parseFloat(t.amount_usd) : undefined,
+          createdAt: t.created_at,
+          createdAtAgo: timeAgo(createdAt),
+        };
+      });
+
+      const disputeUserIds = [...new Set((disputesResp?.data ?? []).flatMap((d: any) => [d.initiator_user_id, d.respondent_user_id]))];
+      const { data: disputeNames } = await client.from('users').select('id, full_name').in('id', disputeUserIds);
+      const disputeNameMap = (disputeNames || []).reduce<Record<string, string>>((acc, r: any) => {
+        acc[r.id] = r.full_name || '—';
+        return acc;
+      }, {});
+      const categoryLabel: Record<string, string> = {
+        freelancing: 'Freelancing',
+        real_estate: 'Real Estate',
+        product_purchase: 'Product Purchase',
+        custom: 'Dispute',
+      };
+      const disputeItems: UserDetailDisputeItem[] = (disputesResp?.data ?? []).map((d: any) => {
+        const parties = [disputeNameMap[d.initiator_user_id], disputeNameMap[d.respondent_user_id]].filter(Boolean).join(', ') || '—';
+        const statusMap: Record<string, string> = {
+          pending: 'Pending',
+          active: 'In progress',
+          resolved: 'Resolved',
+          cancelled: 'Closed',
+        };
+        return {
+          id: d.id,
+          caseId: d.case_id,
+          name: categoryLabel[d.dispute_category] || 'Dispute',
+          partiesInvolved: parties,
+          status: statusMap[d.status] || d.status,
+          date: d.opened_at,
+        };
+      });
+
+      const { count: disputesTotal } = await client.from('disputes').select('*', { count: 'exact', head: true }).or(`initiator_user_id.eq.${userId},respondent_user_id.eq.${userId}`);
+      const { count: transactionsTotal } = await client.from('transactions').select('*', { count: 'exact', head: true }).eq('user_id', userId);
+
+      const accountTypeLabel = (v: string | null) => {
+        if (!v) return 'Personal';
+        const map: Record<string, string> = {
+          business_suite: 'Business suite',
+          enterprise: 'Business suite',
+          starter: 'Personal',
+          basic: 'Personal',
+          premium: 'Personal',
+          personal: 'Personal',
+        };
+        return map[v] || v;
+      };
+
+      const data: UserManagementDetailData = {
         id: user.id,
         name: user.full_name || '—',
         email: user.email || '—',
+        profilePictureUrl: (user as any).avatar_url,
+        accountType: accountTypeLabel(user.account_type),
         kycStatus,
-        totalVolume: Math.round(totalVolume * 100) / 100,
-        escrowCreatedCount: (escrows?.data?.length ?? 0),
-        savingsAccountCount: (savings?.data?.length ?? 0),
+        country: user.country,
+        nationality: user.country ? this.countryToNationality(user.country) : undefined,
+        dateOfBirth: (user as any).date_of_birth,
         accountCreatedDate: user.created_at,
+        totalVolume: Math.round(totalVolume * 100) / 100,
+        escrowCreatedCount: escrowsTotal ?? 0,
+        savingsAccountCount: savings.length,
         lastActivityTimestamp: lastAt,
         lastActivityAgo: lastDate ? timeAgo(lastDate) : undefined,
-        accountType: user.account_type || undefined,
-        country: user.country,
         updatedAt: user.updated_at,
-        kycSubmittedAt: kyc?.data?.submitted_at,
-        kycReviewedAt: kyc?.data?.reviewed_at,
+        kycSubmittedAt: kycData?.submitted_at,
+        kycReviewedAt: kycData?.reviewed_at,
+        walletDetails: {
+          total: walletTotal,
+          items: walletItems.slice((walletPage - 1) * walletPageSize, walletPage * walletPageSize),
+          page: walletPage,
+          pageSize: walletPageSize,
+        },
+        userKyc,
+        escrowDetails: {
+          total: escrowsTotal ?? 0,
+          items: escrowItems,
+          page: escrowPage,
+          pageSize: escrowPageSize,
+        },
+        transactionHistory: {
+          total: transactionsTotal ?? 0,
+          items: transactionItems,
+        },
+        disputes: {
+          total: disputesTotal ?? 0,
+          items: disputeItems,
+        },
       };
 
       return {
         success: true,
         message: 'User detail retrieved',
-        data: item,
+        data,
       };
     } catch (e) {
       console.error('Admin user-management getUserById error:', e);
@@ -335,6 +519,19 @@ export class AdminUserManagementService {
         error: e instanceof Error ? e.message : 'Unknown error',
       };
     }
+  }
+
+  private countryToNationality(countryCode: string): string {
+    const map: Record<string, string> = {
+      NG: 'Nigerian',
+      GH: 'Ghanaian',
+      KE: 'Kenyan',
+      ZA: 'South African',
+      US: 'American',
+      GB: 'British',
+      CA: 'Canadian',
+    };
+    return map[countryCode?.toUpperCase()] || countryCode;
   }
 
   /**

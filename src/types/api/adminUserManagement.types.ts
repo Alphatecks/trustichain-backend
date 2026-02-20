@@ -50,15 +50,112 @@ export interface UserManagementListResponse {
   error?: string;
 }
 
+/** Wallet row for User Details > Wallet Details */
+export interface UserDetailWalletItem {
+  id: string;
+  walletName: string;
+  walletType: 'savings' | 'xrp';
+  amountUsd: number;
+  date: string;
+}
+
+/** KYC section for User Details */
+export interface UserDetailKyc {
+  status: UserManagementKycStatus;
+  linkedIdType?: string;
+  cardNumber?: string;
+  walletAddress?: string;
+  documents?: {
+    liveSelfie?: string;
+    front?: string;
+    back?: string;
+  };
+  submittedAt?: string;
+  reviewedAt?: string;
+}
+
+/** Escrow row for User Details > Escrow Details */
+export interface UserDetailEscrowItem {
+  id: string;
+  escrowIdNo: string;
+  partiesInvolved: string;
+  amountUsd: number;
+  status: string;
+  createdAt: string;
+}
+
+/** Transaction row for User Details > Transaction type */
+export interface UserDetailTransactionItem {
+  id: string;
+  type: string;
+  typeLabel: string;
+  description: string;
+  amountUsd?: number;
+  createdAt: string;
+  createdAtAgo: string;
+}
+
+/** Dispute row for User Details > API Integrations / Disputes */
+export interface UserDetailDisputeItem {
+  id: string;
+  caseId: string;
+  name?: string;
+  partiesInvolved: string;
+  status: string;
+  date: string;
+}
+
+export interface UserManagementDetailData {
+  id: string;
+  name: string;
+  email: string;
+  profilePictureUrl?: string;
+  accountType?: string;
+  kycStatus: UserManagementKycStatus;
+  nationality?: string;
+  country?: string;
+  dateOfBirth?: string;
+  accountCreatedDate: string;
+  totalVolume: number;
+  escrowCreatedCount: number;
+  savingsAccountCount: number;
+  lastActivityTimestamp: string | null;
+  lastActivityAgo?: string;
+  updatedAt?: string;
+  kycSubmittedAt?: string;
+  kycReviewedAt?: string;
+  /** Wallet Details: main wallet + savings wallets */
+  walletDetails: {
+    total: number;
+    items: UserDetailWalletItem[];
+    page: number;
+    pageSize: number;
+  };
+  /** User KYC: linked ID, documents */
+  userKyc: UserDetailKyc;
+  /** Escrow Details */
+  escrowDetails: {
+    total: number;
+    items: UserDetailEscrowItem[];
+    page: number;
+    pageSize: number;
+  };
+  /** Transaction type list */
+  transactionHistory: {
+    total: number;
+    items: UserDetailTransactionItem[];
+  };
+  /** Disputes (API Integrations / Active Disputes) */
+  disputes: {
+    total: number;
+    items: UserDetailDisputeItem[];
+  };
+}
+
 export interface UserManagementDetailResponse {
   success: boolean;
   message: string;
-  data?: UserManagementListItem & {
-    country?: string;
-    updatedAt?: string;
-    kycSubmittedAt?: string;
-    kycReviewedAt?: string;
-  };
+  data?: UserManagementDetailData;
   error?: string;
 }
 

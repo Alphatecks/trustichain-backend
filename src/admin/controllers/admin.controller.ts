@@ -201,7 +201,20 @@ export class AdminController {
       res.status(400).json({ success: false, message: 'userId required', error: 'Bad request' });
       return;
     }
-    const result = await adminUserManagementService.getUserById(userId);
+    const walletPage = req.query.walletPage != null ? Number(req.query.walletPage) : undefined;
+    const walletPageSize = req.query.walletPageSize != null ? Number(req.query.walletPageSize) : undefined;
+    const escrowPage = req.query.escrowPage != null ? Number(req.query.escrowPage) : undefined;
+    const escrowPageSize = req.query.escrowPageSize != null ? Number(req.query.escrowPageSize) : undefined;
+    const transactionLimit = req.query.transactionLimit != null ? Number(req.query.transactionLimit) : undefined;
+    const disputeLimit = req.query.disputeLimit != null ? Number(req.query.disputeLimit) : undefined;
+    const result = await adminUserManagementService.getUserById(userId, {
+      walletPage,
+      walletPageSize,
+      escrowPage,
+      escrowPageSize,
+      transactionLimit,
+      disputeLimit,
+    });
     res.status(result.success ? 200 : 404).json(result);
   }
 
