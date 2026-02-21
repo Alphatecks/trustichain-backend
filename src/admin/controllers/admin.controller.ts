@@ -22,6 +22,13 @@ import type {
   UserManagementUpdateKycResponse,
   UserManagementBatchKycResponse,
 } from '../../types/api/adminUserManagement.types';
+import type {
+  AdminEscrowManagementStatsResponse,
+  AdminEscrowListResponse,
+  AdminEscrowDetailResponse,
+  AdminEscrowUpdateStatusResponse,
+} from '../../types/api/adminEscrowManagement.types';
+import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
 
 export class AdminController {
   /**
@@ -266,6 +273,65 @@ export class AdminController {
     }
     const result = await adminUserManagementService.batchUpdateKycStatus(userIds, status, adminId);
     res.status(result.success ? 200 : 400).json(result);
+  }
+
+  // --- Escrow Management (admin only) ---
+
+  async getEscrowManagementStats(_req: Request, res: Response<AdminEscrowManagementStatsResponse>): Promise<void> {
+    const result = await adminEscrowManagementService.getStats();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getEscrowManagementList(req: Request, res: Response<AdminEscrowListResponse>): Promise<void> {
+    const search = req.query.search as string | undefined;
+    const status = req.query.status as import('../../types/api/adminEscrowManagement.types').AdminEscrowStatus | undefined;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const sortBy = req.query.sortBy as 'created_at' | 'amount_usd' | 'status' | 'updated_at' | undefined;
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
+    const result = await adminEscrowManagementService.getEscrowList({
+      search,
+      status,
+      page,
+      pageSize,
+      sortBy,
+      sortOrder,
+    });
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getEscrowManagementDetail(req: Request, res: Response<AdminEscrowDetailResponse>): Promise<void> {
+    const idOrRef = req.params.idOrRef;
+    if (!idOrRef) {
+      res.status(400).json({ success: false, message: 'Escrow id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminEscrowManagementService.getEscrowDetail(idOrRef);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async updateEscrowManagementStatus(req: Request, res: Response<AdminEscrowUpdateStatusResponse>): Promise<void> {
+    const idOrRef = req.params.idOrRef;
+    const status = req.body?.status as import('../../types/api/adminEscrowManagement.types').AdminEscrowStatus | undefined;
+    if (!idOrRef || !status) {
+      res.status(400).json({
+        success: false,
+        message: 'Escrow id and status required',
+        error: 'Bad request',
+      });
+      return;
+    }
+    const validStatuses = ['pending', 'active', 'completed', 'cancelled', 'disputed'];
+    if (!validStatuses.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: `status must be one of: ${validStatuses.join(', ')}`,
+        error: 'Bad request',
+      });
+      return;
+    }
+    const result = await adminEscrowManagementService.updateEscrowStatus(idOrRef, status);
+    res.status(result.success ? 200 : result.error === 'Not found' ? 404 : 400).json(result);
   }
 }
 

@@ -165,4 +165,42 @@ router.put('/user-management/users/:userId/kyc-status', adminAuthenticate, async
   await adminController.updateUserKycStatus(req, res);
 }));
 
+// --- Escrow Management (admin only) ---
+
+/**
+ * @route   GET /api/admin/escrow-management/stats
+ * @desc    Escrow dashboard stats: total amount, total count, completed, disputed + change % vs last month
+ * @access  Private (admin)
+ */
+router.get('/escrow-management/stats', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getEscrowManagementStats(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/escrow-management/escrows
+ * @desc    Paginated escrow list (query: search, status, page, pageSize, sortBy, sortOrder)
+ * @access  Private (admin)
+ */
+router.get('/escrow-management/escrows', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getEscrowManagementList(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/escrow-management/escrows/:idOrRef
+ * @desc    Escrow detail by UUID or ESC-YYYY-XXX
+ * @access  Private (admin)
+ */
+router.get('/escrow-management/escrows/:idOrRef', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getEscrowManagementDetail(req, res);
+}));
+
+/**
+ * @route   PATCH /api/admin/escrow-management/escrows/:idOrRef/status
+ * @desc    Update escrow status (body: { status: 'pending'|'active'|'completed'|'cancelled'|'disputed' })
+ * @access  Private (admin)
+ */
+router.patch('/escrow-management/escrows/:idOrRef/status', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateEscrowManagementStatus(req, res);
+}));
+
 export default router;
