@@ -270,4 +270,123 @@ router.get('/dispute-resolution/disputes/:idOrCaseId', adminAuthenticate, asyncH
   await adminController.getDisputeResolutionDetail(req, res);
 }));
 
+// --- Dispute Chat Details Screen (admin only) ---
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId/detail-screen
+ * @desc    Full detail screen: dispute, parties, mediator, evidence, timeline, verdict, assessment, messages
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId/detail-screen', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeDetailScreen(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/dispute-resolution/disputes/:idOrCaseId/mediator
+ * @desc    Assign mediator (body: { mediatorUserId })
+ * @access  Private (admin)
+ */
+router.post('/dispute-resolution/disputes/:idOrCaseId/mediator', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.assignDisputeMediator(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId/evidence
+ * @desc    List evidence for dispute
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId/evidence', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeEvidence(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/dispute-resolution/disputes/:idOrCaseId/evidence
+ * @desc    Add evidence (body: title, description?, evidenceType?, fileUrl, fileName, fileType, fileSize)
+ * @access  Private (admin)
+ */
+router.post('/dispute-resolution/disputes/:idOrCaseId/evidence', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.addDisputeEvidence(req, res);
+}));
+
+/**
+ * @route   PATCH /api/admin/dispute-resolution/disputes/:idOrCaseId/evidence/:evidenceId
+ * @desc    Update evidence (body: verified?, title?, description?)
+ * @access  Private (admin)
+ */
+router.patch('/dispute-resolution/disputes/:idOrCaseId/evidence/:evidenceId', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateDisputeEvidence(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId/timeline
+ * @desc    List timeline events
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId/timeline', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeTimeline(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/dispute-resolution/disputes/:idOrCaseId/timeline
+ * @desc    Create timeline event (body: eventType, title, description?)
+ * @access  Private (admin)
+ */
+router.post('/dispute-resolution/disputes/:idOrCaseId/timeline', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.createDisputeTimelineEvent(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId/verdict
+ * @desc    Get verdict info
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId/verdict', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeVerdict(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/dispute-resolution/disputes/:idOrCaseId/verdict
+ * @desc    Submit final verdict (body: finalVerdict, decisionSummary?, decisionOutcome?)
+ * @access  Private (admin)
+ */
+router.post('/dispute-resolution/disputes/:idOrCaseId/verdict', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.submitDisputeVerdict(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId/assessments/preliminary
+ * @desc    Get preliminary assessment with findings
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId/assessments/preliminary', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputePreliminaryAssessment(req, res);
+}));
+
+/**
+ * @route   PUT /api/admin/dispute-resolution/disputes/:idOrCaseId/assessments/preliminary
+ * @desc    Create or update preliminary assessment (body: title?, summary?, findings: [{ findingText, findingType?, orderIndex? }])
+ * @access  Private (admin)
+ */
+router.put('/dispute-resolution/disputes/:idOrCaseId/assessments/preliminary', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.upsertDisputePreliminaryAssessment(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId/messages
+ * @desc    Get chat messages (query: limit?)
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId/messages', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeMessages(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/dispute-resolution/disputes/:idOrCaseId/messages
+ * @desc    Send message as admin/mediator (body: messageText, senderRole?: 'admin'|'mediator')
+ * @access  Private (admin)
+ */
+router.post('/dispute-resolution/disputes/:idOrCaseId/messages', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.sendDisputeMessage(req, res);
+}));
+
 export default router;

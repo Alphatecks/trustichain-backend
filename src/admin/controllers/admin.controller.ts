@@ -38,6 +38,13 @@ import type {
   AdminDisputeAlertsResponse,
   AdminDisputeListResponse,
   AdminDisputeDetailResponse,
+  AdminDisputeDetailScreenResponse,
+  AdminAssignMediatorResponse,
+  AdminDisputeEvidenceListResponse,
+  AdminDisputeTimelineListResponse,
+  AdminDisputeVerdictResponse,
+  AdminDisputeAssessmentResponse,
+  AdminDisputeMessagesResponse,
 } from '../../types/api/adminDisputeResolution.types';
 import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
 import { adminTransactionManagementService } from '../services/adminTransactionManagement.service';
@@ -424,6 +431,167 @@ export class AdminController {
       return;
     }
     const result = await adminDisputeResolutionService.getDisputeDetail(idOrCaseId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  // --- Dispute Chat Details Screen (admin only) ---
+
+  async getDisputeDetailScreen(req: Request, res: Response<AdminDisputeDetailScreenResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id or case id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getDisputeDetailScreen(idOrCaseId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async assignDisputeMediator(req: Request, res: Response<AdminAssignMediatorResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const mediatorUserId = req.body?.mediatorUserId as string;
+    if (!idOrCaseId || !mediatorUserId) {
+      res.status(400).json({ success: false, message: 'Dispute id and mediatorUserId required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.assignMediator(idOrCaseId, mediatorUserId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async getDisputeEvidence(req: Request, res: Response<AdminDisputeEvidenceListResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getEvidence(idOrCaseId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async addDisputeEvidence(req: Request, res: Response<AdminDisputeEvidenceListResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const body = req.body as { title?: string; description?: string; evidenceType?: string; fileUrl: string; fileName: string; fileType: string; fileSize: number };
+    if (!idOrCaseId || !body?.fileUrl || !body?.fileName || body.fileType == null || body.fileSize == null) {
+      res.status(400).json({ success: false, message: 'Dispute id and fileUrl, fileName, fileType, fileSize required', error: 'Bad request' });
+      return;
+    }
+    const adminId = req.admin?.id;
+    const result = await adminDisputeResolutionService.addEvidence(idOrCaseId, {
+      title: body.title || 'Evidence',
+      description: body.description,
+      evidenceType: body.evidenceType,
+      fileUrl: body.fileUrl,
+      fileName: body.fileName,
+      fileType: body.fileType,
+      fileSize: Number(body.fileSize),
+    }, adminId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async updateDisputeEvidence(req: Request, res: Response<AdminDisputeEvidenceListResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const evidenceId = req.params.evidenceId;
+    const body = req.body as { verified?: boolean; title?: string; description?: string };
+    if (!idOrCaseId || !evidenceId) {
+      res.status(400).json({ success: false, message: 'Dispute id and evidence id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.updateEvidence(idOrCaseId, evidenceId, body);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async getDisputeTimeline(req: Request, res: Response<AdminDisputeTimelineListResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getTimeline(idOrCaseId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async createDisputeTimelineEvent(req: Request, res: Response<AdminDisputeTimelineListResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const body = req.body as { eventType: string; title: string; description?: string };
+    if (!idOrCaseId || !body?.eventType || !body?.title) {
+      res.status(400).json({ success: false, message: 'Dispute id, eventType, and title required', error: 'Bad request' });
+      return;
+    }
+    const adminId = req.admin?.id;
+    const result = await adminDisputeResolutionService.createTimelineEvent(idOrCaseId, body, adminId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async getDisputeVerdict(req: Request, res: Response<AdminDisputeVerdictResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getVerdict(idOrCaseId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async submitDisputeVerdict(req: Request, res: Response<AdminDisputeVerdictResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const body = req.body as { finalVerdict: string; decisionSummary?: string; decisionOutcome?: string };
+    if (!idOrCaseId || !body?.finalVerdict) {
+      res.status(400).json({ success: false, message: 'Dispute id and finalVerdict required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.submitVerdict(idOrCaseId, body);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async getDisputePreliminaryAssessment(req: Request, res: Response<AdminDisputeAssessmentResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getPreliminaryAssessment(idOrCaseId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async upsertDisputePreliminaryAssessment(req: Request, res: Response<AdminDisputeAssessmentResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const body = req.body as { title?: string; summary?: string; findings: Array<{ findingText: string; findingType?: string; orderIndex?: number }> };
+    const adminId = req.admin?.id;
+    if (!idOrCaseId || !adminId) {
+      res.status(400).json({ success: false, message: 'Dispute id and admin auth required', error: 'Bad request' });
+      return;
+    }
+    if (!Array.isArray(body?.findings)) {
+      res.status(400).json({ success: false, message: 'findings array required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.upsertPreliminaryAssessment(idOrCaseId, body, adminId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async getDisputeMessages(req: Request, res: Response<AdminDisputeMessagesResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getMessages(idOrCaseId, limit);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async sendDisputeMessage(req: Request, res: Response<AdminDisputeMessagesResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    const body = req.body as { messageText: string; senderRole?: 'admin' | 'mediator' };
+    const adminId = req.admin?.id;
+    if (!idOrCaseId || !adminId) {
+      res.status(400).json({ success: false, message: 'Dispute id and admin auth required', error: 'Bad request' });
+      return;
+    }
+    if (!body?.messageText || typeof body.messageText !== 'string') {
+      res.status(400).json({ success: false, message: 'messageText required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.sendMessage(idOrCaseId, { messageText: body.messageText, senderRole: body.senderRole }, adminId);
     res.status(result.success ? 200 : 404).json(result);
   }
 }
