@@ -3,6 +3,7 @@
  * Stats, list, detail, and status update for escrows. Uses supabaseAdmin to bypass RLS.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import type {
   AdminEscrowManagementStatsResponse,
@@ -40,7 +41,6 @@ export class AdminEscrowManagementService {
       const [
         { data: allEscrows },
         { data: escrowsBeforeThisMonth },
-        { data: lastMonthEscrows },
         { data: completedEscrows },
         { data: completedThisMonth },
         { data: completedLastMonth },
@@ -50,7 +50,6 @@ export class AdminEscrowManagementService {
       ] = await Promise.all([
         client.from('escrows').select('amount_usd, status, created_at'),
         client.from('escrows').select('amount_usd, created_at').lt('created_at', thisMonthStart.toISOString()),
-        client.from('escrows').select('amount_usd, created_at').gte('created_at', lastMonthStart.toISOString()).lt('created_at', thisMonthStart.toISOString()),
         client.from('escrows').select('id').eq('status', 'completed'),
         client.from('escrows').select('id').eq('status', 'completed').gte('completed_at', thisMonthStart.toISOString()),
         client.from('escrows').select('id').eq('status', 'completed').gte('completed_at', lastMonthStart.toISOString()).lt('completed_at', thisMonthStart.toISOString()),
@@ -61,10 +60,8 @@ export class AdminEscrowManagementService {
 
       const list = allEscrows || [];
       const beforeThisMonthList = escrowsBeforeThisMonth || [];
-      const lastMonthList = lastMonthEscrows || [];
       const totalAmountUsd = list.reduce((sum: number, e: { amount_usd: number }) => sum + Number(e.amount_usd || 0), 0);
       const amountBeforeThisMonth = beforeThisMonthList.reduce((sum: number, e: { amount_usd: number }) => sum + Number(e.amount_usd || 0), 0);
-      const lastMonthTotalCount = lastMonthList.length;
       const totalCount = list.length;
 
       const completedCount = (completedEscrows || []).length;
@@ -202,7 +199,7 @@ export class AdminEscrowManagementService {
   /**
    * Resolve escrow identifier to UUID (supports UUID or ESC-YYYY-XXX)
    */
-  private async resolveEscrowId(client: ReturnType<typeof supabase>, idOrRef: string): Promise<string | null> {
+  private async resolveEscrowId(client: SupabaseClient, idOrRef: string): Promise<string | null> {
     const trimmed = (idOrRef || '').trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
     if (isUuid) {
