@@ -232,4 +232,42 @@ router.get('/transaction-management/transactions/:transactionId', adminAuthentic
   await adminController.getTransactionManagementDetail(req, res);
 }));
 
+// --- Dispute Resolution (admin only) ---
+
+/**
+ * @route   GET /api/admin/dispute-resolution/metrics
+ * @desc    Dispute metrics: total, active, resolved, average resolution time + change %
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/metrics', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeResolutionMetrics(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/alerts
+ * @desc    Recent dispute alerts (query: limit=10)
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/alerts', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeResolutionAlerts(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes
+ * @desc    Paginated dispute list (query: search, status, page, pageSize, sortBy, sortOrder)
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeResolutionList(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/dispute-resolution/disputes/:idOrCaseId
+ * @desc    Single dispute detail by UUID or case_id
+ * @access  Private (admin)
+ */
+router.get('/dispute-resolution/disputes/:idOrCaseId', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getDisputeResolutionDetail(req, res);
+}));
+
 export default router;

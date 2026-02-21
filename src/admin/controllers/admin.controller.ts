@@ -33,8 +33,15 @@ import type {
   AdminTransactionListResponse,
   AdminTransactionDetailResponse,
 } from '../../types/api/adminTransactionManagement.types';
+import type {
+  AdminDisputeMetricsResponse,
+  AdminDisputeAlertsResponse,
+  AdminDisputeListResponse,
+  AdminDisputeDetailResponse,
+} from '../../types/api/adminDisputeResolution.types';
 import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
 import { adminTransactionManagementService } from '../services/adminTransactionManagement.service';
+import { adminDisputeResolutionService } from '../services/adminDisputeResolution.service';
 
 export class AdminController {
   /**
@@ -376,6 +383,47 @@ export class AdminController {
       return;
     }
     const result = await adminTransactionManagementService.getTransactionDetail(transactionId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  // --- Dispute Resolution (admin only) ---
+
+  async getDisputeResolutionMetrics(_req: Request, res: Response<AdminDisputeMetricsResponse>): Promise<void> {
+    const result = await adminDisputeResolutionService.getMetrics();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getDisputeResolutionAlerts(req: Request, res: Response<AdminDisputeAlertsResponse>): Promise<void> {
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const result = await adminDisputeResolutionService.getAlerts(limit);
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getDisputeResolutionList(req: Request, res: Response<AdminDisputeListResponse>): Promise<void> {
+    const search = req.query.search as string | undefined;
+    const status = req.query.status as import('../../types/api/adminDisputeResolution.types').AdminDisputeStatus | undefined;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const sortBy = req.query.sortBy as 'opened_at' | 'resolved_at' | 'status' | 'amount_usd' | undefined;
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
+    const result = await adminDisputeResolutionService.getDisputeList({
+      search,
+      status,
+      page,
+      pageSize,
+      sortBy,
+      sortOrder,
+    });
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getDisputeResolutionDetail(req: Request, res: Response<AdminDisputeDetailResponse>): Promise<void> {
+    const idOrCaseId = req.params.idOrCaseId;
+    if (!idOrCaseId) {
+      res.status(400).json({ success: false, message: 'Dispute id or case id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminDisputeResolutionService.getDisputeDetail(idOrCaseId);
     res.status(result.success ? 200 : 404).json(result);
   }
 }
