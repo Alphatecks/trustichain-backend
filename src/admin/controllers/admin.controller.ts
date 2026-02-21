@@ -28,7 +28,13 @@ import type {
   AdminEscrowDetailResponse,
   AdminEscrowUpdateStatusResponse,
 } from '../../types/api/adminEscrowManagement.types';
+import type {
+  AdminTransactionOverviewResponse,
+  AdminTransactionListResponse,
+  AdminTransactionDetailResponse,
+} from '../../types/api/adminTransactionManagement.types';
 import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
+import { adminTransactionManagementService } from '../services/adminTransactionManagement.service';
 
 export class AdminController {
   /**
@@ -332,6 +338,45 @@ export class AdminController {
     }
     const result = await adminEscrowManagementService.updateEscrowStatus(idOrRef, status);
     res.status(result.success ? 200 : result.error === 'Not found' ? 404 : 400).json(result);
+  }
+
+  // --- Transaction Management (admin only) ---
+
+  async getTransactionManagementOverview(_req: Request, res: Response<AdminTransactionOverviewResponse>): Promise<void> {
+    const result = await adminTransactionManagementService.getOverview();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getTransactionManagementList(req: Request, res: Response<AdminTransactionListResponse>): Promise<void> {
+    const search = req.query.search as string | undefined;
+    const accountType = req.query.accountType as 'personal' | 'business_suite' | undefined;
+    const status = req.query.status as import('../../types/api/adminTransactionManagement.types').AdminTransactionStatus | undefined;
+    const type = req.query.type as import('../../types/api/adminTransactionManagement.types').AdminTransactionType | undefined;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const sortBy = req.query.sortBy as 'created_at' | 'amount_usd' | 'status' | 'type' | undefined;
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
+    const result = await adminTransactionManagementService.getTransactionList({
+      search,
+      accountType,
+      status,
+      type,
+      page,
+      pageSize,
+      sortBy,
+      sortOrder,
+    });
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getTransactionManagementDetail(req: Request, res: Response<AdminTransactionDetailResponse>): Promise<void> {
+    const transactionId = req.params.transactionId;
+    if (!transactionId) {
+      res.status(400).json({ success: false, message: 'Transaction id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminTransactionManagementService.getTransactionDetail(transactionId);
+    res.status(result.success ? 200 : 404).json(result);
   }
 }
 

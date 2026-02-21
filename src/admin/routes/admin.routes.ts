@@ -203,4 +203,33 @@ router.patch('/escrow-management/escrows/:idOrRef/status', adminAuthenticate, as
   await adminController.updateEscrowManagementStatus(req, res);
 }));
 
+// --- Transaction Management (admin only) ---
+
+/**
+ * @route   GET /api/admin/transaction-management/overview
+ * @desc    Transaction overview: total count, total amount, escrowed amount, payroll amount + change %
+ * @access  Private (admin)
+ */
+router.get('/transaction-management/overview', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getTransactionManagementOverview(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/transaction-management/transactions
+ * @desc    Paginated transaction list (query: search, accountType, status, type, page, pageSize, sortBy, sortOrder)
+ * @access  Private (admin)
+ */
+router.get('/transaction-management/transactions', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getTransactionManagementList(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/transaction-management/transactions/:transactionId
+ * @desc    Single transaction detail by UUID
+ * @access  Private (admin)
+ */
+router.get('/transaction-management/transactions/:transactionId', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getTransactionManagementDetail(req, res);
+}));
+
 export default router;
