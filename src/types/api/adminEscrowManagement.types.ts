@@ -14,6 +14,8 @@ export interface AdminEscrowManagementStats {
   completedCountChangePercent?: number;
   disputedCount: number;
   disputedCountChangePercent?: number;
+  /** Platform escrow fee balance (XRP) from 10% of each escrow creation; withdrawable by admin */
+  escrowFeesBalanceXrp: number;
 }
 
 export interface AdminEscrowManagementStatsResponse {
@@ -95,5 +97,24 @@ export interface AdminEscrowUpdateStatusResponse {
   success: boolean;
   message: string;
   data?: { status: AdminEscrowStatus };
+  error?: string;
+}
+
+export interface AdminEscrowFeesBalanceResponse {
+  success: boolean;
+  message: string;
+  data?: { balance_xrp: number };
+  error?: string;
+}
+
+export interface AdminEscrowFeesWithdrawRequest {
+  amountUsd: number;
+  destinationXrplAddress: string;
+}
+
+export interface AdminEscrowFeesWithdrawResponse {
+  success: boolean;
+  message: string;
+  data?: { withdrawalId: string; amountUsd: number; amountXrp: number; status: string; xrplTxHash?: string };
   error?: string;
 }

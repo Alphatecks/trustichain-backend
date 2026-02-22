@@ -775,6 +775,15 @@ export class EscrowService {
         };
       }
 
+      // Credit 10% escrow fee (XRP) to platform balance; do not fail escrow creation on error
+      const ESCROW_FEE_PERCENT = 0.10;
+      const feeXrp = amountXrp * ESCROW_FEE_PERCENT;
+      try {
+        await adminClient.rpc('credit_escrow_fee', { amount_xrp: feeXrp });
+      } catch (feeErr) {
+        console.warn('[Escrow Create] Failed to credit escrow fee (non-fatal):', feeErr instanceof Error ? feeErr.message : feeErr);
+      }
+
       // Create milestones if this is a milestone-based escrow
       if (request.releaseType === 'Milestones' && request.milestones && request.milestones.length > 0) {
         const exchangeRates = await exchangeService.getLiveExchangeRates();

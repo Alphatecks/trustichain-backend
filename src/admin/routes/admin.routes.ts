@@ -177,6 +177,24 @@ router.get('/escrow-management/stats', adminAuthenticate, asyncHandler(async (re
 }));
 
 /**
+ * @route   GET /api/admin/escrow-management/fees
+ * @desc    Platform escrow fee balance (XRP) from 10% of each escrow creation
+ * @access  Private (admin)
+ */
+router.get('/escrow-management/fees', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getEscrowFeesBalance(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/escrow-management/fees/withdraw
+ * @desc    Withdraw escrow fees to XRPL address (body: amountUsd, destinationXrplAddress)
+ * @access  Private (admin)
+ */
+router.post('/escrow-management/fees/withdraw', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.withdrawEscrowFees(req, res);
+}));
+
+/**
  * @route   GET /api/admin/escrow-management/escrows
  * @desc    Paginated escrow list (query: search, status, page, pageSize, sortBy, sortOrder)
  * @access  Private (admin)

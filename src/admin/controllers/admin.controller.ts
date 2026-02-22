@@ -27,6 +27,8 @@ import type {
   AdminEscrowListResponse,
   AdminEscrowDetailResponse,
   AdminEscrowUpdateStatusResponse,
+  AdminEscrowFeesBalanceResponse,
+  AdminEscrowFeesWithdrawResponse,
 } from '../../types/api/adminEscrowManagement.types';
 import type {
   AdminBusinessManagementOverviewResponse,
@@ -358,6 +360,28 @@ export class AdminController {
     }
     const result = await adminEscrowManagementService.updateEscrowStatus(idOrRef, status);
     res.status(result.success ? 200 : result.error === 'Not found' ? 404 : 400).json(result);
+  }
+
+  async getEscrowFeesBalance(_req: Request, res: Response<AdminEscrowFeesBalanceResponse>): Promise<void> {
+    const result = await adminEscrowManagementService.getEscrowFeesBalance();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async withdrawEscrowFees(req: Request, res: Response<AdminEscrowFeesWithdrawResponse>): Promise<void> {
+    const body = req.body as { amountUsd?: number; destinationXrplAddress?: string };
+    const amountUsd = body?.amountUsd != null ? Number(body.amountUsd) : NaN;
+    const destinationXrplAddress = typeof body?.destinationXrplAddress === 'string' ? body.destinationXrplAddress : '';
+    const adminId = req.admin?.id;
+    if (!Number.isFinite(amountUsd) || !destinationXrplAddress) {
+      res.status(400).json({
+        success: false,
+        message: 'amountUsd and destinationXrplAddress are required',
+        error: 'Bad request',
+      });
+      return;
+    }
+    const result = await adminEscrowManagementService.withdrawEscrowFees(amountUsd, destinationXrplAddress, adminId);
+    res.status(result.success ? 200 : 400).json(result);
   }
 
   // --- Business Management (admin only) ---

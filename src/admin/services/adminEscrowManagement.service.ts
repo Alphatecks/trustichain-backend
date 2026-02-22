@@ -12,7 +12,12 @@ import type {
   AdminEscrowDetailResponse,
   AdminEscrowUpdateStatusResponse,
   AdminEscrowStatus,
+  AdminEscrowFeesBalanceResponse,
+  AdminEscrowFeesWithdrawResponse,
 } from '../../types/api/adminEscrowManagement.types';
+import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
+import { Wallet } from 'xrpl/dist/npm/Wallet';
+import { exchangeService } from '../../services/exchange/exchange.service';
 
 function formatEscrowId(year: number, sequence: number): string {
   return `ESC-${year}-${sequence.toString().padStart(3, '0')}`;
@@ -47,6 +52,7 @@ export class AdminEscrowManagementService {
         { data: disputedEscrows },
         { data: disputedThisMonth },
         { data: disputedLastMonth },
+        { data: feeBalanceRow },
       ] = await Promise.all([
         client.from('escrows').select('amount_usd, status, created_at'),
         client.from('escrows').select('amount_usd, created_at').lt('created_at', thisMonthStart.toISOString()),
@@ -56,6 +62,7 @@ export class AdminEscrowManagementService {
         client.from('escrows').select('id').eq('status', 'disputed'),
         client.from('escrows').select('id').eq('status', 'disputed').gte('updated_at', thisMonthStart.toISOString()),
         client.from('escrows').select('id').eq('status', 'disputed').gte('updated_at', lastMonthStart.toISOString()).lt('updated_at', thisMonthStart.toISOString()),
+        client.from('platform_escrow_fee_balance').select('balance_xrp').eq('id', 'default').maybeSingle(),
       ]);
 
       const list = allEscrows || [];
@@ -75,6 +82,8 @@ export class AdminEscrowManagementService {
         previous === 0 ? undefined : Math.round(((current - previous) / previous) * 100);
       const countBeforeThisMonth = beforeThisMonthList.length;
 
+      const escrowFeesBalanceXrp = feeBalanceRow ? Number(feeBalanceRow.balance_xrp || 0) : 0;
+
       return {
         success: true,
         message: 'Escrow management stats retrieved',
@@ -87,6 +96,7 @@ export class AdminEscrowManagementService {
           completedCountChangePercent: percent(completedThisMonthCount, completedLastMonthCount),
           disputedCount,
           disputedCountChangePercent: percent(disputedThisMonthCount, disputedLastMonthCount),
+          escrowFeesBalanceXrp: Math.round(escrowFeesBalanceXrp * 1000000) / 1000000,
         },
       };
     } catch (e) {
@@ -355,6 +365,192 @@ export class AdminEscrowManagementService {
       return {
         success: false,
         message: e instanceof Error ? e.message : 'Failed to update status',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Get platform escrow fee balance (XRP)
+   */
+  async getEscrowFeesBalance(): Promise<AdminEscrowFeesBalanceResponse> {
+    try {
+      const client = this.getAdminClient();
+      const { data: row, error } = await client
+        .from('platform_escrow_fee_balance')
+        .select('balance_xrp')
+        .eq('id', 'default')
+        .maybeSingle();
+      if (error) {
+        return { success: false, message: error.message, error: error.message };
+      }
+      const balance_xrp = row ? Number(row.balance_xrp || 0) : 0;
+      return {
+        success: true,
+        message: 'Escrow fees balance retrieved',
+        data: { balance_xrp },
+      };
+    } catch (e) {
+      console.error('Admin escrow fees getBalance error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to get escrow fees balance',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Withdraw escrow fees to an XRPL address. Accepts amount in USD; converts to XRP using live rate.
+   * Deducts from balance and optionally sends from platform wallet.
+   */
+  async withdrawEscrowFees(
+    amountUsd: number,
+    destinationXrplAddress: string,
+    adminId?: string
+  ): Promise<AdminEscrowFeesWithdrawResponse> {
+    try {
+      if (!amountUsd || amountUsd <= 0 || !Number.isFinite(amountUsd)) {
+        return {
+          success: false,
+          message: 'amountUsd must be greater than 0',
+          error: 'Bad request',
+        };
+      }
+      const exchangeRates = await exchangeService.getLiveExchangeRates();
+      if (!exchangeRates.success || !exchangeRates.data) {
+        return {
+          success: false,
+          message: 'Failed to fetch exchange rate for USD conversion',
+          error: 'Exchange rate fetch failed',
+        };
+      }
+      const usdRate = exchangeRates.data.rates.find((r: { currency: string }) => r.currency === 'USD')?.rate;
+      if (!usdRate || usdRate <= 0) {
+        return {
+          success: false,
+          message: 'XRP/USD exchange rate not available',
+          error: 'Exchange rate not available',
+        };
+      }
+      const amountXrp = amountUsd / usdRate;
+
+      const addr = (destinationXrplAddress || '').trim();
+      if (!addr || !/^r[0-9a-zA-Z]{24,34}$/.test(addr)) {
+        return {
+          success: false,
+          message: 'Valid XRPL destination address required (starts with r, 25-35 characters)',
+          error: 'Bad request',
+        };
+      }
+
+      const client = this.getAdminClient();
+      const { data: balanceRow, error: balanceError } = await client
+        .from('platform_escrow_fee_balance')
+        .select('balance_xrp')
+        .eq('id', 'default')
+        .single();
+      if (balanceError || !balanceRow) {
+        return {
+          success: false,
+          message: balanceError?.message || 'Fee balance not found',
+          error: balanceError?.message || 'Not found',
+        };
+      }
+      const currentBalance = Number(balanceRow.balance_xrp || 0);
+      if (amountXrp > currentBalance) {
+        return {
+          success: false,
+          message: `Insufficient balance. Available: ${currentBalance.toFixed(6)} XRP`,
+          error: 'Insufficient balance',
+        };
+      }
+
+      const newBalance = currentBalance - amountXrp;
+      const { error: updateError } = await client
+        .from('platform_escrow_fee_balance')
+        .update({ balance_xrp: newBalance, updated_at: new Date().toISOString() })
+        .eq('id', 'default');
+      if (updateError) {
+        return {
+          success: false,
+          message: updateError.message,
+          error: updateError.message,
+        };
+      }
+
+      const { data: withdrawal, error: insertError } = await client
+        .from('escrow_fee_withdrawals')
+        .insert({
+          amount_xrp: amountXrp,
+          destination_xrpl_address: addr,
+          status: 'pending',
+          withdrawn_by: adminId || null,
+        })
+        .select('id, status')
+        .single();
+      if (insertError || !withdrawal) {
+        return {
+          success: false,
+          message: insertError?.message || 'Failed to record withdrawal',
+          error: insertError?.message || 'Database error',
+        };
+      }
+
+      const platformSecret = process.env.PLATFORM_ESCROW_FEE_WALLET_SECRET;
+      let xrplTxHash: string | undefined;
+      let status = withdrawal.status;
+
+      if (platformSecret && platformSecret.trim()) {
+        try {
+          const wallet = Wallet.fromSeed(platformSecret.trim());
+          const fromAddress = wallet.classicAddress;
+          xrplTxHash = await xrplWalletService.createWithdrawalTransaction(
+            fromAddress,
+            addr,
+            amountXrp,
+            platformSecret.trim()
+          );
+          status = 'completed';
+          await client
+            .from('escrow_fee_withdrawals')
+            .update({ xrpl_tx_hash: xrplTxHash, status: 'completed', updated_at: new Date().toISOString() })
+            .eq('id', withdrawal.id);
+        } catch (txErr) {
+          console.error('Escrow fee withdrawal XRPL error:', txErr);
+          status = 'failed';
+          await client
+            .from('escrow_fee_withdrawals')
+            .update({ status: 'failed', updated_at: new Date().toISOString() })
+            .eq('id', withdrawal.id);
+          await client
+            .from('platform_escrow_fee_balance')
+            .update({ balance_xrp: currentBalance, updated_at: new Date().toISOString() })
+            .eq('id', 'default');
+          return {
+            success: false,
+            message: txErr instanceof Error ? txErr.message : 'XRPL payout failed',
+            error: txErr instanceof Error ? txErr.message : 'Withdrawal failed',
+          };
+        }
+      }
+
+      return {
+        success: true,
+        message: status === 'completed' ? 'Withdrawal completed' : 'Withdrawal recorded; payout pending (no platform wallet configured)',
+        data: {
+          withdrawalId: withdrawal.id,
+          amountUsd,
+          amountXrp,
+          status,
+          xrplTxHash,
+        },
+      };
+    } catch (e) {
+      console.error('Admin escrow fees withdraw error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to withdraw escrow fees',
         error: e instanceof Error ? e.message : 'Unknown error',
       };
     }
