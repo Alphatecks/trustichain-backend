@@ -803,7 +803,7 @@ export class AdminDisputeResolutionService {
   /**
    * Send message as admin/mediator
    */
-  async sendMessage(idOrCaseId: string, body: { messageText: string; senderRole?: 'admin' | 'mediator' }, adminUserId: string): Promise<AdminDisputeMessagesResponse> {
+  async sendMessage(idOrCaseId: string, body: { messageText: string; senderRole?: 'admin' | 'mediator' }): Promise<AdminDisputeMessagesResponse> {
     try {
       const client = this.getAdminClient();
       const resolved = await this.resolveDispute(client, idOrCaseId);

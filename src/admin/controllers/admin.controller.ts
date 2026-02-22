@@ -591,7 +591,7 @@ export class AdminController {
       res.status(400).json({ success: false, message: 'messageText required', error: 'Bad request' });
       return;
     }
-    const result = await adminDisputeResolutionService.sendMessage(idOrCaseId, { messageText: body.messageText, senderRole: body.senderRole }, adminId);
+    const result = await adminDisputeResolutionService.sendMessage(idOrCaseId, { messageText: body.messageText, senderRole: body.senderRole });
     res.status(result.success ? 200 : 404).json(result);
   }
 }
