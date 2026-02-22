@@ -58,19 +58,29 @@ export class AdminBusinessManagementService {
 
   /**
    * Overview: payrolls created, suppliers, API integrated, average resolution time + change %
-   * All counts are restricted to business suite users (initiator or counterparty).
+   * All counts are restricted to escrows created by business suite users (user_id in businessIds).
    */
   async getOverview(): Promise<AdminBusinessManagementOverviewResponse> {
     try {
       const client = this.getAdminClient();
       const businessIds = await this.getBusinessSuiteUserIds(client);
+      if (businessIds.length === 0) {
+        return {
+          success: true,
+          message: 'Business management overview retrieved',
+          data: {
+            payrollsCreated: 0,
+            suppliers: 0,
+            apiIntegrated: 0,
+            averageResTimeHours: 0,
+            averageResTimeLabel: '0hr',
+          },
+        };
+      }
+
       const now = new Date();
       const thisMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
       const lastMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-
-      const businessOr = businessIds.length === 0
-        ? 'id.eq.00000000-0000-0000-0000-000000000000'
-        : businessIds.map((id) => `user_id.eq.${id}`).concat(businessIds.map((id) => `counterparty_id.eq.${id}`)).join(',');
 
       const [
         { count: totalEscrows },
@@ -80,11 +90,11 @@ export class AdminBusinessManagementService {
         { data: supplierRowsLastMonth },
         { data: resolvedDisputes },
       ] = await Promise.all([
-        client.from('escrows').select('*', { count: 'exact', head: true }).or(businessOr),
-        client.from('escrows').select('*', { count: 'exact', head: true }).or(businessOr).gte('created_at', thisMonthStart.toISOString()),
-        client.from('escrows').select('*', { count: 'exact', head: true }).or(businessOr).gte('created_at', lastMonthStart.toISOString()).lt('created_at', thisMonthStart.toISOString()),
-        client.from('escrows').select('user_id, counterparty_id').or(businessOr).not('counterparty_id', 'is', null),
-        client.from('escrows').select('user_id, counterparty_id').or(businessOr).not('counterparty_id', 'is', null).lt('created_at', thisMonthStart.toISOString()),
+        client.from('escrows').select('*', { count: 'exact', head: true }).in('user_id', businessIds),
+        client.from('escrows').select('*', { count: 'exact', head: true }).in('user_id', businessIds).gte('created_at', thisMonthStart.toISOString()),
+        client.from('escrows').select('*', { count: 'exact', head: true }).in('user_id', businessIds).gte('created_at', lastMonthStart.toISOString()).lt('created_at', thisMonthStart.toISOString()),
+        client.from('escrows').select('user_id, counterparty_id').in('user_id', businessIds).not('counterparty_id', 'is', null),
+        client.from('escrows').select('user_id, counterparty_id').in('user_id', businessIds).not('counterparty_id', 'is', null).lt('created_at', thisMonthStart.toISOString()),
         client.from('disputes').select('id, opened_at, resolved_at').eq('status', 'resolved').not('resolved_at', 'is', null),
       ]);
 
@@ -150,27 +160,32 @@ export class AdminBusinessManagementService {
 
   /**
    * Paginated list of business activities (escrows) with search and status filter.
-   * Only escrows where initiator or counterparty is a business suite user.
+   * Only escrows created by business suite users (user_id in businessIds). Personal-suite escrows are excluded.
    */
   async getActivities(params: AdminBusinessActivityListParams): Promise<AdminBusinessActivityListResponse> {
     try {
       const client = this.getAdminClient();
       const businessIds = await this.getBusinessSuiteUserIds(client);
-      const businessOr = businessIds.length === 0
-        ? 'id.eq.00000000-0000-0000-0000-000000000000'
-        : businessIds.map((id) => `user_id.eq.${id}`).concat(businessIds.map((id) => `counterparty_id.eq.${id}`)).join(',');
+      if (businessIds.length === 0) {
+        return {
+          success: true,
+          message: 'Business activities retrieved',
+          data: { items: [], total: 0, page: Math.max(1, params.page ?? 1), pageSize: Math.min(100, Math.max(1, params.pageSize ?? 10)), totalPages: 0 },
+        };
+      }
 
       const page = Math.max(1, params.page ?? 1);
       const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 10));
       const sortBy = params.sortBy ?? 'created_at';
       const sortOrder = params.sortOrder ?? 'desc';
-      const search = (params.search || '').trim().toLowerCase();
+      const search = (params.search || '').trim();
       const statusFilter = params.status;
 
+      const selectCols = 'id, user_id, counterparty_id, status, created_at, updated_at, escrow_sequence, description, payer_name, counterparty_name';
       let query = client
         .from('escrows')
-        .select('id, user_id, counterparty_id, status, created_at, updated_at, escrow_sequence, description, payer_name, counterparty_name', { count: 'exact' })
-        .or(businessOr);
+        .select(selectCols, { count: 'exact' })
+        .in('user_id', businessIds);
 
       if (statusFilter) {
         const escrowStatuses = statusFilter === 'Pending' ? ['pending', 'cancelled'] : statusFilter === 'In progress' ? ['active', 'disputed'] : ['completed'];
@@ -297,9 +312,7 @@ export class AdminBusinessManagementService {
       }
 
       const businessIds = await this.getBusinessSuiteUserIds(client);
-      const isBusinessEscrow = businessIds.length > 0 && (
-        businessIds.includes(escrow.user_id) || (escrow.counterparty_id != null && businessIds.includes(escrow.counterparty_id))
-      );
+      const isBusinessEscrow = businessIds.length > 0 && businessIds.includes(escrow.user_id);
       if (!isBusinessEscrow) {
         return {
           success: false,
