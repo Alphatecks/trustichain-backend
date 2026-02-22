@@ -3003,9 +3003,9 @@ export class DisputeService {
         };
       }
 
-      // Get all sender user IDs
+      // Get all sender user IDs (exclude null for admin/mediator messages)
       const senderIds = Array.from(
-        new Set((messages || []).map((m: any) => m.sender_user_id))
+        new Set((messages || []).map((m: any) => m.sender_user_id).filter(Boolean))
       );
       const partyNames = await this.getPartyNames(senderIds);
 
@@ -3013,7 +3013,9 @@ export class DisputeService {
         id: m.id,
         disputeId: m.dispute_id,
         senderUserId: m.sender_user_id,
-        senderName: partyNames[m.sender_user_id] || 'Unknown',
+        senderName: m.sender_user_id == null
+          ? (m.sender_role === 'mediator' ? 'Mediator' : 'Admin')
+          : (partyNames[m.sender_user_id] || 'Unknown'),
         senderRole: m.sender_role as SenderRole,
         messageText: m.message_text,
         createdAt: m.created_at,
@@ -3077,7 +3079,14 @@ export class DisputeService {
         };
       }
 
-      // Verify user is the sender (or admin/mediator)
+      // Verify user is the sender (or admin/mediator). Admin/mediator messages (null sender_user_id) cannot be deleted via this API.
+      if (message.sender_user_id == null) {
+        return {
+          success: false,
+          message: 'Admin or mediator messages cannot be deleted here',
+          error: 'Access denied',
+        };
+      }
       if (message.sender_user_id !== userId) {
         const isMediator = dispute.mediator_user_id === userId;
         // TODO: Check if user is admin

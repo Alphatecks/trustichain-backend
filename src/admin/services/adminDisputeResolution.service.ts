@@ -452,13 +452,13 @@ export class AdminDisputeResolutionService {
       }
 
       const { data: msgRows } = await client.from('dispute_messages').select('*').eq('dispute_id', disputeId).order('created_at', { ascending: true }).limit(100);
-      const msgUserIds = [...new Set((msgRows || []).map((m: any) => m.sender_user_id))];
+      const msgUserIds = [...new Set((msgRows || []).map((m: any) => m.sender_user_id).filter(Boolean))];
       const { data: msgUsers } = msgUserIds.length ? await client.from('users').select('id, full_name').in('id', msgUserIds) : { data: [] };
       const msgUserMap = (msgUsers || []).reduce<Record<string, string>>((acc, u: any) => { acc[u.id] = u.full_name || '—'; return acc; }, {});
       const messages: import('../../types/api/adminDisputeResolution.types').AdminDisputeChatMessage[] = (msgRows || []).map((m: any) => ({
         id: m.id,
         senderUserId: m.sender_user_id,
-        senderName: msgUserMap[m.sender_user_id] || '—',
+        senderName: m.sender_user_id == null ? (m.sender_role === 'mediator' ? 'Mediator' : 'Admin') : (msgUserMap[m.sender_user_id] || '—'),
         senderRole: m.sender_role || '—',
         messageText: m.message_text,
         createdAt: m.created_at,
@@ -782,13 +782,13 @@ export class AdminDisputeResolutionService {
       if (!resolved) return { success: false, message: 'Dispute not found', error: 'Not found' };
       const lim = Math.min(limit ?? 100, 200);
       const { data: rows } = await client.from('dispute_messages').select('*').eq('dispute_id', resolved.id).order('created_at', { ascending: true }).limit(lim);
-      const userIds = [...new Set((rows || []).map((m: any) => m.sender_user_id))];
+      const userIds = [...new Set((rows || []).map((m: any) => m.sender_user_id).filter(Boolean))];
       const { data: users } = userIds.length ? await client.from('users').select('id, full_name').in('id', userIds) : { data: [] };
       const userMap = (users || []).reduce<Record<string, string>>((acc, u: any) => { acc[u.id] = u.full_name || '—'; return acc; }, {});
       const messages = (rows || []).map((m: any) => ({
         id: m.id,
         senderUserId: m.sender_user_id,
-        senderName: userMap[m.sender_user_id] || '—',
+        senderName: m.sender_user_id == null ? (m.sender_role === 'mediator' ? 'Mediator' : 'Admin') : (userMap[m.sender_user_id] || '—'),
         senderRole: m.sender_role || '—',
         messageText: m.message_text,
         createdAt: m.created_at,
@@ -810,7 +810,7 @@ export class AdminDisputeResolutionService {
       if (!resolved) return { success: false, message: 'Dispute not found', error: 'Not found' };
       const { error } = await client.from('dispute_messages').insert({
         dispute_id: resolved.id,
-        sender_user_id: adminUserId,
+        sender_user_id: null,
         message_text: body.messageText,
         sender_role: body.senderRole || 'admin',
       });
