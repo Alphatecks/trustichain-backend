@@ -436,4 +436,69 @@ router.post('/dispute-resolution/disputes/:idOrCaseId/messages', adminAuthentica
   await adminController.sendDisputeMessage(req, res);
 }));
 
+// --- Admin Settings ---
+
+/**
+ * @route   GET /api/admin/settings/profile
+ * @desc    Get current admin profile (full name, email, avatar, notification prefs)
+ * @access  Private (admin)
+ */
+router.get('/settings/profile', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getSettingsProfile(req, res);
+}));
+
+/**
+ * @route   PUT /api/admin/settings/profile
+ * @desc    Update admin profile (body: fullName?, email?)
+ * @access  Private (admin)
+ */
+router.put('/settings/profile', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateSettingsProfile(req, res);
+}));
+
+/**
+ * @route   PUT /api/admin/settings/profile/photo
+ * @desc    Set profile photo URL (body: { avatarUrl }) — frontend uploads to storage first
+ * @access  Private (admin)
+ */
+router.put('/settings/profile/photo', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateSettingsProfilePhoto(req, res);
+}));
+
+/**
+ * @route   DELETE /api/admin/settings/profile/photo
+ * @desc    Remove profile photo
+ * @access  Private (admin)
+ */
+router.delete('/settings/profile/photo', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.removeSettingsProfilePhoto(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/settings/notifications
+ * @desc    Get notification preferences (email, push toggles)
+ * @access  Private (admin)
+ */
+router.get('/settings/notifications', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getSettingsNotifications(req, res);
+}));
+
+/**
+ * @route   PUT /api/admin/settings/notifications
+ * @desc    Update notification preferences (body: emailNotifications?, pushNotifications?)
+ * @access  Private (admin)
+ */
+router.put('/settings/notifications', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateSettingsNotifications(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/notifications/push
+ * @desc    Send push notification to app users (body: title, message, sendTo: 'all')
+ * @access  Private (admin)
+ */
+router.post('/notifications/push', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.sendPushNotification(req, res);
+}));
+
 export default router;

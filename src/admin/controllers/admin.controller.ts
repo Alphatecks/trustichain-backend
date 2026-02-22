@@ -53,10 +53,16 @@ import type {
   AdminDisputeAssessmentResponse,
   AdminDisputeMessagesResponse,
 } from '../../types/api/adminDisputeResolution.types';
+import type {
+  AdminSettingsProfileResponse,
+  AdminNotificationSettingsResponse,
+  AdminSendPushResponse,
+} from '../../types/api/adminSettings.types';
 import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
 import { adminBusinessManagementService } from '../services/adminBusinessManagement.service';
 import { adminTransactionManagementService } from '../services/adminTransactionManagement.service';
 import { adminDisputeResolutionService } from '../services/adminDisputeResolution.service';
+import { adminSettingsService } from '../services/adminSettings.service';
 
 export class AdminController {
   /**
@@ -658,6 +664,89 @@ export class AdminController {
     }
     const result = await adminDisputeResolutionService.sendMessage(idOrCaseId, { messageText: body.messageText, senderRole: body.senderRole });
     res.status(result.success ? 200 : 404).json(result);
+  }
+
+  // --- Admin Settings ---
+
+  async getSettingsProfile(req: Request, res: Response<AdminSettingsProfileResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const result = await adminSettingsService.getProfile(adminId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async updateSettingsProfile(req: Request, res: Response<AdminSettingsProfileResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const body = req.body as { fullName?: string; email?: string };
+    const result = await adminSettingsService.updateProfile(adminId, body);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async updateSettingsProfilePhoto(req: Request, res: Response<AdminSettingsProfileResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const body = req.body as { avatarUrl?: string };
+    if (!body?.avatarUrl || typeof body.avatarUrl !== 'string') {
+      res.status(400).json({ success: false, message: 'avatarUrl required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminSettingsService.updateProfilePhoto(adminId, body.avatarUrl);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async removeSettingsProfilePhoto(req: Request, res: Response<AdminSettingsProfileResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const result = await adminSettingsService.removeProfilePhoto(adminId);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async getSettingsNotifications(req: Request, res: Response<AdminNotificationSettingsResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const result = await adminSettingsService.getNotificationSettings(adminId);
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
+  async updateSettingsNotifications(req: Request, res: Response<AdminNotificationSettingsResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const body = req.body as { emailNotifications?: boolean; pushNotifications?: boolean };
+    const result = await adminSettingsService.updateNotificationSettings(adminId, body);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async sendPushNotification(req: Request, res: Response<AdminSendPushResponse>): Promise<void> {
+    const body = req.body as { title?: string; message?: string; sendTo?: string };
+    if (!body?.title || !body?.message) {
+      res.status(400).json({ success: false, message: 'title and message required', error: 'Bad request' });
+      return;
+    }
+    if (body.sendTo !== undefined && body.sendTo !== 'all') {
+      res.status(400).json({ success: false, message: 'sendTo must be "all"', error: 'Bad request' });
+      return;
+    }
+    const result = await adminSettingsService.sendPushNotification(body.title, body.message, 'all');
+    res.status(result.success ? 200 : 400).json(result);
   }
 }
 
