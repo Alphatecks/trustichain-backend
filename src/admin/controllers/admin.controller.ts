@@ -29,6 +29,11 @@ import type {
   AdminEscrowUpdateStatusResponse,
 } from '../../types/api/adminEscrowManagement.types';
 import type {
+  AdminBusinessManagementOverviewResponse,
+  AdminBusinessActivityListResponse,
+  AdminBusinessActivityDetailResponse,
+} from '../../types/api/adminBusinessManagement.types';
+import type {
   AdminTransactionOverviewResponse,
   AdminTransactionListResponse,
   AdminTransactionDetailResponse,
@@ -47,6 +52,7 @@ import type {
   AdminDisputeMessagesResponse,
 } from '../../types/api/adminDisputeResolution.types';
 import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
+import { adminBusinessManagementService } from '../services/adminBusinessManagement.service';
 import { adminTransactionManagementService } from '../services/adminTransactionManagement.service';
 import { adminDisputeResolutionService } from '../services/adminDisputeResolution.service';
 
@@ -352,6 +358,41 @@ export class AdminController {
     }
     const result = await adminEscrowManagementService.updateEscrowStatus(idOrRef, status);
     res.status(result.success ? 200 : result.error === 'Not found' ? 404 : 400).json(result);
+  }
+
+  // --- Business Management (admin only) ---
+
+  async getBusinessManagementOverview(_req: Request, res: Response<AdminBusinessManagementOverviewResponse>): Promise<void> {
+    const result = await adminBusinessManagementService.getOverview();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getBusinessManagementActivities(req: Request, res: Response<AdminBusinessActivityListResponse>): Promise<void> {
+    const search = req.query.search as string | undefined;
+    const status = req.query.status as import('../../types/api/adminBusinessManagement.types').AdminBusinessActivityStatus | undefined;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const sortBy = req.query.sortBy as 'created_at' | 'updated_at' | undefined;
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
+    const result = await adminBusinessManagementService.getActivities({
+      search,
+      status,
+      page,
+      pageSize,
+      sortBy,
+      sortOrder,
+    });
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getBusinessManagementActivityDetail(req: Request, res: Response<AdminBusinessActivityDetailResponse>): Promise<void> {
+    const idOrRef = req.params.idOrRef;
+    if (!idOrRef) {
+      res.status(400).json({ success: false, message: 'Activity id required', error: 'Bad request' });
+      return;
+    }
+    const result = await adminBusinessManagementService.getActivityDetail(idOrRef);
+    res.status(result.success ? 200 : 404).json(result);
   }
 
   // --- Transaction Management (admin only) ---

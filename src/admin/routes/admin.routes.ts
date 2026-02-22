@@ -203,6 +203,35 @@ router.patch('/escrow-management/escrows/:idOrRef/status', adminAuthenticate, as
   await adminController.updateEscrowManagementStatus(req, res);
 }));
 
+// --- Business Management (admin only) ---
+
+/**
+ * @route   GET /api/admin/business-management/overview
+ * @desc    Business overview: payrolls created, suppliers, API integrated, average resolution time + change %
+ * @access  Private (admin)
+ */
+router.get('/business-management/overview', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getBusinessManagementOverview(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/business-management/activities
+ * @desc    Paginated business activities list (query: search, status, page, pageSize, sortBy, sortOrder). status: 'In progress' | 'Completed' | 'Pending'
+ * @access  Private (admin)
+ */
+router.get('/business-management/activities', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getBusinessManagementActivities(req, res);
+}));
+
+/**
+ * @route   GET /api/admin/business-management/activities/:idOrRef
+ * @desc    Single activity detail by UUID or ESC-YYYY-XXX
+ * @access  Private (admin)
+ */
+router.get('/business-management/activities/:idOrRef', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getBusinessManagementActivityDetail(req, res);
+}));
+
 // --- Transaction Management (admin only) ---
 
 /**
