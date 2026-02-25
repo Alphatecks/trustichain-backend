@@ -7,16 +7,19 @@ import { supabase, supabaseAdmin } from '../../config/supabase';
 
 export class PortfolioService {
   /**
-   * Get portfolio performance data for a specific timeframe
+   * Get portfolio performance data for a specific timeframe.
+   * Optional year filters data to that year (e.g. 2024 => Jan 1 - Dec 31 of 2024).
    */
   async getPortfolioPerformance(
     userId: string,
-    timeframe: 'daily' | 'weekly' | 'monthly' | 'yearly' = 'monthly'
+    timeframe: 'daily' | 'weekly' | 'monthly' | 'yearly' = 'monthly',
+    year?: number
   ): Promise<{
     success: boolean;
     message: string;
     data?: {
       timeframe: string;
+      year?: number;
       data: Array<{
         period: string;
         value: number;
@@ -27,17 +30,33 @@ export class PortfolioService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Calculate date range based on timeframe
       const now = new Date();
-      const startDate = this.getStartDate(now, timeframe);
-      
-      // Get portfolio data from database
-      const { data: portfolioData, error } = await adminClient
+      let startDate: Date;
+      let endDate: Date | null = null;
+
+      if (year != null) {
+        startDate = new Date(year, 0, 1); // Jan 1
+        endDate = new Date(year, 11, 31); // Dec 31
+        if (endDate > now) endDate = now;
+      } else {
+        startDate = this.getStartDate(now, timeframe);
+      }
+
+      const startStr = startDate.toISOString().split('T')[0];
+      const endStr = endDate ? endDate.toISOString().split('T')[0] : null;
+
+      let query = adminClient
         .from('portfolio_performance')
         .select('period, value_usd')
         .eq('user_id', userId)
-        .gte('period', startDate.toISOString().split('T')[0])
+        .gte('period', startStr)
         .order('period', { ascending: true });
+
+      if (endStr) {
+        query = query.lte('period', endStr);
+      }
+
+      const { data: portfolioData, error } = await query;
 
       if (error) {
         return {
@@ -49,12 +68,13 @@ export class PortfolioService {
 
       // If no data exists, generate from transactions
       if (!portfolioData || portfolioData.length === 0) {
-        const generatedData = await this.generatePortfolioData(userId, timeframe, startDate);
+        const generatedData = await this.generatePortfolioData(userId, timeframe, startDate, endDate ?? undefined);
         return {
           success: true,
           message: 'Portfolio performance retrieved successfully',
           data: {
             timeframe,
+            ...(year != null && { year }),
             data: generatedData,
           },
         };
@@ -71,6 +91,7 @@ export class PortfolioService {
         message: 'Portfolio performance retrieved successfully',
         data: {
           timeframe,
+          ...(year != null && { year }),
           data: formattedData,
         },
       };
@@ -90,13 +111,14 @@ export class PortfolioService {
   private async generatePortfolioData(
     userId: string,
     timeframe: string,
-    startDate: Date
+    startDate: Date,
+    endDate?: Date
   ): Promise<Array<{ period: string; value: number }>> {
     try {
       const adminClient = supabaseAdmin || supabase;
+      const end = endDate ?? new Date();
 
-      // Get all transactions since start date
-      const { data: transactions } = await adminClient
+      let query = adminClient
         .from('transactions')
         .select('created_at, amount_usd, type')
         .eq('user_id', userId)
@@ -104,9 +126,14 @@ export class PortfolioService {
         .eq('status', 'completed')
         .order('created_at', { ascending: true });
 
+      if (endDate) {
+        query = query.lte('created_at', end.toISOString());
+      }
+
+      const { data: transactions } = await query;
+
       if (!transactions || transactions.length === 0) {
-        // Return empty data points for the timeframe
-        return this.generateEmptyDataPoints(startDate, new Date(), timeframe);
+        return this.generateEmptyDataPoints(startDate, end, timeframe);
       }
 
       // Aggregate by period
