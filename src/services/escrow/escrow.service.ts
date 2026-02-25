@@ -4,7 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
-import { CreateEscrowRequest, CreateEscrowResponse, Escrow, GetEscrowListRequest, Milestone, ReleaseType } from '../../types/api/escrow.types';
+import { CreateEscrowRequest, CreateEscrowResponse, Escrow, EscrowCounterpartyParty, EscrowPayerParty, GetEscrowListRequest, Milestone, ReleaseType } from '../../types/api/escrow.types';
 import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
@@ -1324,6 +1324,108 @@ export class EscrowService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get escrow',
         error: error instanceof Error ? error.message : 'Failed to get escrow',
+      };
+    }
+  }
+
+  /**
+   * Get payer (account holder) and counterparty details for an escrow.
+   * Returns wallet addresses, names, emails, and phone numbers.
+   */
+  async getEscrowParties(
+    userId: string,
+    escrowId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { payer: EscrowPayerParty; counterparty: EscrowCounterpartyParty };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+
+      const { data: escrow, error } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', escrowId)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+        .single();
+
+      if (error || !escrow) {
+        return {
+          success: false,
+          message: 'Escrow not found or access denied',
+          error: 'Escrow not found or access denied',
+        };
+      }
+
+      // Payer: user_id (account holder) — wallet, name, email, phone
+      const { data: payerWallet } = await adminClient
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', escrow.user_id)
+        .maybeSingle();
+
+      const { data: payerUser } = await adminClient
+        .from('users')
+        .select('full_name, email')
+        .eq('id', escrow.user_id)
+        .maybeSingle();
+
+      const payer: EscrowPayerParty = {
+        walletAddress: payerWallet?.xrpl_address ?? '',
+        name: escrow.payer_name ?? payerUser?.full_name ?? 'Unknown',
+        email: escrow.payer_email ?? payerUser?.email ?? '',
+        phoneNumber: escrow.payer_phone ?? null,
+      };
+
+      // Counterparty: counterparty_id — XRP wallet, name, email, phone
+      let counterparty: EscrowCounterpartyParty = {
+        xrpWalletAddress: null,
+        name: null,
+        email: null,
+        phoneNumber: null,
+      };
+
+      if (escrow.counterparty_id) {
+        const { data: cpWallet } = await adminClient
+          .from('wallets')
+          .select('xrpl_address')
+          .eq('user_id', escrow.counterparty_id)
+          .maybeSingle();
+
+        const { data: cpUser } = await adminClient
+          .from('users')
+          .select('full_name, email')
+          .eq('id', escrow.counterparty_id)
+          .maybeSingle();
+
+        counterparty = {
+          xrpWalletAddress: cpWallet?.xrpl_address ?? null,
+          name: escrow.counterparty_name ?? cpUser?.full_name ?? null,
+          email: escrow.counterparty_email ?? cpUser?.email ?? null,
+          phoneNumber: escrow.counterparty_phone ?? null,
+        };
+      } else {
+        counterparty = {
+          xrpWalletAddress: null,
+          name: escrow.counterparty_name ?? null,
+          email: escrow.counterparty_email ?? null,
+          phoneNumber: escrow.counterparty_phone ?? null,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Escrow parties retrieved successfully',
+        data: { payer, counterparty },
+      };
+    } catch (err) {
+      console.error('Error getting escrow parties:', err);
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : 'Failed to get escrow parties',
+        error: err instanceof Error ? err.message : 'Failed to get escrow parties',
       };
     }
   }

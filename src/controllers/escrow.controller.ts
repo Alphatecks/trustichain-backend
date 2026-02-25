@@ -6,6 +6,7 @@ import {
   TotalEscrowedResponse,
   CompletedEscrowsMonthResponse,
   EscrowDetailResponse,
+  EscrowPartiesResponse,
   ReleaseEscrowRequest,
   ReleaseEscrowResponse,
   CancelEscrowRequest,
@@ -189,6 +190,32 @@ export class EscrowController {
       const escrowId = req.params.id as string;
 
       const result = await escrowService.getEscrowById(userId, escrowId);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(404).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get payer and counterparty details for an escrow
+   * GET /api/escrow/:id/parties
+   */
+  async getEscrowParties(req: Request, res: Response<EscrowPartiesResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const escrowId = req.params.id as string;
+
+      const result = await escrowService.getEscrowParties(userId, escrowId);
 
       if (result.success) {
         res.status(200).json(result);

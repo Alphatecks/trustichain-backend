@@ -204,6 +204,33 @@ export interface GetIndustriesResponse {
   error?: string;
 }
 
+/** Payer (account holder) details for an escrow */
+export interface EscrowPayerParty {
+  walletAddress: string;
+  name: string;
+  email: string;
+  phoneNumber: string | null;
+}
+
+/** Counterparty details for an escrow */
+export interface EscrowCounterpartyParty {
+  xrpWalletAddress: string | null;
+  name: string | null;
+  email: string | null;
+  phoneNumber: string | null;
+}
+
+/** Response for GET /api/escrow/:id/parties */
+export interface EscrowPartiesResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    payer: EscrowPayerParty;
+    counterparty: EscrowCounterpartyParty;
+  };
+  error?: string;
+}
+
 
 
 

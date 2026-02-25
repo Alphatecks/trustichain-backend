@@ -73,6 +73,15 @@ router.get('/industries', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/escrow/:id/parties
+ * @desc    Get payer (account holder) and counterparty details for an escrow
+ * @access  Private
+ */
+router.get('/:id/parties', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowParties(req, res);
+}));
+
+/**
  * @route   GET /api/escrow/:id
  * @desc    Get escrow by ID
  * @access  Private
