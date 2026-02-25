@@ -22,6 +22,50 @@ export class EscrowService {
     return `#ESC-${year}-${sequence.toString().padStart(3, '0')}`;
   }
 
+  /** UUID v4 pattern for escrow id */
+  private static readonly UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  /**
+   * Resolve escrow row by UUID or formatted id (e.g. ESC-2026-011 or #ESC-2026-011).
+   * Returns the escrow row if found and user has access, else null.
+   */
+  private async getEscrowRowByIdentifier(
+    userId: string,
+    escrowId: string
+  ): Promise<{ id: string; user_id: string; counterparty_id: string | null; [key: string]: any } | null> {
+    const adminClient = supabaseAdmin || supabase;
+    const trimmed = escrowId.trim().replace(/^#/, '');
+
+    if (EscrowService.UUID_REGEX.test(trimmed)) {
+      const { data, error } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', trimmed)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+        .maybeSingle();
+      return error ? null : data ?? null;
+    }
+
+    const match = /^ESC-(\d{4})-(\d+)$/i.exec(trimmed);
+    if (!match) return null;
+    const [, yearStr, seqStr] = match;
+    const year = parseInt(yearStr!, 10);
+    const sequence = parseInt(seqStr!, 10);
+    const start = `${year}-01-01T00:00:00.000Z`;
+    const end = `${year + 1}-01-01T00:00:00.000Z`;
+
+    const { data, error } = await adminClient
+      .from('escrows')
+      .select('*')
+      .eq('escrow_sequence', sequence)
+      .gte('created_at', start)
+      .lt('created_at', end)
+      .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
+      .maybeSingle();
+
+    return error ? null : data ?? null;
+  }
+
   /**
    * Get party names (initiator and counterparty) for escrows
    */
@@ -1344,14 +1388,8 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      const { data: escrow, error } = await adminClient
-        .from('escrows')
-        .select('*')
-        .eq('id', escrowId)
-        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
-        .single();
-
-      if (error || !escrow) {
+      const escrow = await this.getEscrowRowByIdentifier(userId, escrowId);
+      if (!escrow) {
         return {
           success: false,
           message: 'Escrow not found or access denied',
