@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { cardyfieService } from '../services/cardyfie/cardyfie.service';
+import { storageService } from '../services/storage/storage.service';
 
 const REQUIRED_CUSTOMER_FIELDS = [
   'first_name',
@@ -8,8 +9,6 @@ const REQUIRED_CUSTOMER_FIELDS = [
   'date_of_birth',
   'id_type',
   'id_number',
-  'id_front_image',
-  'user_image',
   'house_number',
   'address_line_1',
   'city',
@@ -19,12 +18,17 @@ const REQUIRED_CUSTOMER_FIELDS = [
 
 export class CardyfieController {
   /**
-   * Create a Cardyfie customer (full KYC body)
+   * Create a Cardyfie customer (full KYC).
+   * Accepts multipart/form-data: text fields in body, images as files (id_front_image, user_image, id_back_image?).
+   * Files are uploaded to storage and signed URLs are sent to Cardyfie.
    * POST /api/cardyfie/customer
    */
   async createCustomer(req: Request, res: Response): Promise<void> {
     try {
+      const userId = req.userId!;
       const body = req.body as Record<string, unknown>;
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
       const missing = REQUIRED_CUSTOMER_FIELDS.filter((f) => !body[f]);
       if (missing.length) {
         res.status(400).json({
@@ -33,6 +37,7 @@ export class CardyfieController {
         });
         return;
       }
+
       const idType = body.id_type as string;
       if (!['passport', 'nid', 'bvn'].includes(idType)) {
         res.status(400).json({
@@ -41,6 +46,59 @@ export class CardyfieController {
         });
         return;
       }
+
+      let idFrontImageUrl: string;
+      if (files?.id_front_image?.[0]) {
+        const uploadResult = await storageService.uploadFileAndGetSignedUrl(userId, files.id_front_image[0]);
+        if (!uploadResult.success || !uploadResult.data?.signedUrl) {
+          res.status(400).json({
+            success: false,
+            message: uploadResult.message || 'Failed to upload ID front image',
+          });
+          return;
+        }
+        idFrontImageUrl = uploadResult.data.signedUrl;
+      } else if (typeof body.id_front_image === 'string' && body.id_front_image) {
+        idFrontImageUrl = body.id_front_image;
+      } else {
+        res.status(400).json({
+          success: false,
+          message: 'id_front_image is required (file or URL)',
+        });
+        return;
+      }
+
+      let userImageUrl: string;
+      if (files?.user_image?.[0]) {
+        const uploadResult = await storageService.uploadFileAndGetSignedUrl(userId, files.user_image[0]);
+        if (!uploadResult.success || !uploadResult.data?.signedUrl) {
+          res.status(400).json({
+            success: false,
+            message: uploadResult.message || 'Failed to upload user image',
+          });
+          return;
+        }
+        userImageUrl = uploadResult.data.signedUrl;
+      } else if (typeof body.user_image === 'string' && body.user_image) {
+        userImageUrl = body.user_image;
+      } else {
+        res.status(400).json({
+          success: false,
+          message: 'user_image is required (file or URL)',
+        });
+        return;
+      }
+
+      let idBackImageUrl: string | undefined;
+      if (files?.id_back_image?.[0]) {
+        const uploadResult = await storageService.uploadFileAndGetSignedUrl(userId, files.id_back_image[0]);
+        if (uploadResult.success && uploadResult.data?.signedUrl) {
+          idBackImageUrl = uploadResult.data.signedUrl;
+        }
+      } else if (typeof body.id_back_image === 'string' && body.id_back_image) {
+        idBackImageUrl = body.id_back_image;
+      }
+
       const result = await cardyfieService.createCustomer({
         first_name: body.first_name as string,
         last_name: body.last_name as string,
@@ -48,15 +106,15 @@ export class CardyfieController {
         date_of_birth: body.date_of_birth as string,
         id_type: idType as 'passport' | 'nid' | 'bvn',
         id_number: body.id_number as string,
-        id_front_image: body.id_front_image as string,
-        user_image: body.user_image as string,
+        id_front_image: idFrontImageUrl,
+        user_image: userImageUrl,
         house_number: body.house_number as string,
         address_line_1: body.address_line_1 as string,
         city: body.city as string,
         zip_code: body.zip_code as string,
         country: body.country as string,
         state: body.state as string | undefined,
-        id_back_image: body.id_back_image as string | undefined,
+        id_back_image: idBackImageUrl,
         reference_id: body.reference_id as string | undefined,
         meta: body.meta as { user_id?: string } | undefined,
       });

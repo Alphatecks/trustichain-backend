@@ -1,19 +1,34 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { cardyfieController } from '../controllers/cardyfie.controller';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file for KYC images
+});
+
 /**
  * @route   POST /api/cardyfie/customer
  * @desc    Create a Cardyfie customer (full KYC; required before issuing cards)
  * @access  Private
- * @body    first_name, last_name, email, date_of_birth, id_type, id_number, id_front_image, user_image, house_number, address_line_1, city, zip_code, country, state?, id_back_image?, reference_id?, meta?
+ * @body    multipart/form-data: first_name, last_name, email, date_of_birth, id_type, id_number, house_number, address_line_1, city, zip_code, country, state?, reference_id?; files: id_front_image (required), user_image (required), id_back_image? (optional)
  */
-router.post('/customer', authenticate, asyncHandler(async (req, res) => {
-  await cardyfieController.createCustomer(req, res);
-}));
+router.post(
+  '/customer',
+  authenticate,
+  upload.fields([
+    { name: 'id_front_image', maxCount: 1 },
+    { name: 'user_image', maxCount: 1 },
+    { name: 'id_back_image', maxCount: 1 },
+  ]),
+  asyncHandler(async (req, res) => {
+    await cardyfieController.createCustomer(req, res);
+  })
+);
 
 /**
  * @route   GET /api/cardyfie/card/currencies

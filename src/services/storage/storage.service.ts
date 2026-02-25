@@ -32,9 +32,11 @@ export interface UploadFileResult {
   message: string;
   data?: {
     fileUrl: string;
+    filePath?: string;
     fileName: string;
     fileSize: number;
     fileType: string;
+    signedUrl?: string;
   };
   error?: string;
 }
@@ -179,6 +181,7 @@ export class StorageService {
         message: 'File uploaded successfully',
         data: {
           fileUrl,
+          filePath: data.path,
           fileName: file.originalname,
           fileSize: file.size,
           fileType: file.mimetype,
@@ -192,6 +195,36 @@ export class StorageService {
         error: error instanceof Error ? error.message : 'Failed to upload file',
       };
     }
+  }
+
+  /**
+   * Upload file and return a signed URL (e.g. for KYC providers that need to fetch the image by URL).
+   * Default expiry 7 days.
+   */
+  async uploadFileAndGetSignedUrl(
+    userId: string,
+    file: Express.Multer.File,
+    expiresInSeconds: number = 7 * 24 * 3600
+  ): Promise<UploadFileResult> {
+    const result = await this.uploadFile(userId, file);
+    if (!result.success || !result.data?.filePath) {
+      return result;
+    }
+    const signedUrl = await this.getSignedUrl(result.data.filePath, expiresInSeconds);
+    if (!signedUrl) {
+      return {
+        success: false,
+        message: 'Failed to generate signed URL',
+        error: 'Failed to generate signed URL',
+      };
+    }
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        signedUrl,
+      },
+    };
   }
 
   /**
