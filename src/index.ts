@@ -18,6 +18,7 @@ import disputeRoutes from './routes/dispute.routes';
 import savingsRoutes from './routes/savings.routes';
 import notificationRoutes from './routes/notification.routes';
 import cardyfieRoutes from './routes/cardyfie.routes';
+import businessSuiteRoutes from './routes/businessSuite.routes';
 import adminRoutes from './admin/routes/admin.routes';
 
 dotenv.config();
@@ -222,6 +223,7 @@ app.use('/api/disputes', disputeRoutes);
 app.use('/api/savings', savingsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/cardyfie', cardyfieRoutes);
+app.use('/api/business-suite', businessSuiteRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

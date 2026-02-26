@@ -1,0 +1,62 @@
+import { Request, Response } from 'express';
+import { businessSuiteService } from '../services/businessSuite/businessSuite.service';
+
+export class BusinessSuiteController {
+  /**
+   * Verify 6-digit business suite PIN (when switching from personal to business).
+   * POST /api/business-suite/verify-pin
+   */
+  async verifyPin(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pin = req.body?.pin;
+    if (typeof pin !== 'string') {
+      res.status(400).json({ success: false, message: 'PIN is required (string)' });
+      return;
+    }
+    const result = await businessSuiteService.verifyPin(userId, pin.trim());
+    if (result.success) {
+      res.status(200).json(result);
+    } else if (result.error === 'PIN not set') {
+      res.status(400).json(result);
+    } else if (result.error === 'Invalid PIN' || result.error === 'Invalid format') {
+      res.status(401).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
+   * Set or update 6-digit business suite PIN.
+   * POST /api/business-suite/set-pin
+   */
+  async setPin(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pin = req.body?.pin;
+    if (typeof pin !== 'string') {
+      res.status(400).json({ success: false, message: 'PIN is required (string)' });
+      return;
+    }
+    const result = await businessSuiteService.setPin(userId, pin.trim());
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  }
+
+  /**
+   * Get PIN status: isBusinessSuite and pinSet (for UI to show set vs verify).
+   * GET /api/business-suite/pin-status
+   */
+  async getPinStatus(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteService.getPinStatus(userId);
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  }
+}
+
+export const businessSuiteController = new BusinessSuiteController();
