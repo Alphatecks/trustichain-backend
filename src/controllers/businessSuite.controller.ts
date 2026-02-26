@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { businessSuiteService } from '../services/businessSuite/businessSuite.service';
 import { businessSuiteDashboardService } from '../services/businessSuite/businessSuiteDashboard.service';
-import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus } from '../types/api/businessSuiteDashboard.types';
+import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 
 export class BusinessSuiteController {
   /**
@@ -87,6 +87,24 @@ export class BusinessSuiteController {
     const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
     const params: BusinessSuiteActivityListParams = { status, page, pageSize, sortBy, sortOrder };
     const result = await businessSuiteDashboardService.getActivityList(userId, params);
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
+   * Portfolio chart: Subscription and Payroll by period (monthly, weekly, quarterly, yearly).
+   * GET /api/business-suite/dashboard/portfolio
+   */
+  async getPortfolioChart(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const period = (req.query.period as BusinessSuitePortfolioPeriod) || 'monthly';
+    const validPeriods: BusinessSuitePortfolioPeriod[] = ['weekly', 'monthly', 'quarterly', 'yearly'];
+    const periodParam = validPeriods.includes(period) ? period : 'monthly';
+    const year = req.query.year != null ? Number(req.query.year) : undefined;
+    const result = await businessSuiteDashboardService.getPortfolioChart(userId, periodParam, year);
     if (result.success) {
       res.status(200).json(result);
     } else {

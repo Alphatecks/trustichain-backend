@@ -50,4 +50,13 @@ router.get('/dashboard/activity', authenticate, asyncHandler(async (req, res) =>
   await businessSuiteController.getActivityList(req, res);
 }));
 
+/**
+ * @route   GET /api/business-suite/dashboard/portfolio
+ * @desc    Portfolio chart: Subscription and Payroll amounts and percentages by period. Query: period (weekly|monthly|quarterly|yearly), year (optional)
+ * @access  Private (business suite only)
+ */
+router.get('/dashboard/portfolio', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getPortfolioChart(req, res);
+}));
+
 export default router;

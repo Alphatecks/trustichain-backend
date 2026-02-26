@@ -12,6 +12,8 @@ import type {
   BusinessSuiteActivityListParams,
   BusinessSuiteActivityListItem,
   BusinessSuiteActivityStatus,
+  BusinessSuitePortfolioPeriod,
+  BusinessSuitePortfolioDataPoint,
 } from '../../types/api/businessSuiteDashboard.types';
 
 const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
@@ -201,6 +203,123 @@ export class BusinessSuiteDashboardService {
         totalPages: Math.ceil(total / pageSize) || 1,
       },
     };
+  }
+
+  /**
+   * Portfolio chart: Subscription and Payroll amounts and percentages by period (business escrows only).
+   * Uses escrow created_at and transaction_type ('subscription' | 'payroll'); other types excluded from chart.
+   */
+  async getPortfolioChart(
+    userId: string,
+    period: BusinessSuitePortfolioPeriod = 'monthly',
+    year?: number
+  ): Promise<{ success: boolean; message: string; data?: { period: BusinessSuitePortfolioPeriod; year?: number; data: BusinessSuitePortfolioDataPoint[] }; error?: string }> {
+    const check = await this.ensureBusinessSuite(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const client = supabaseAdmin!;
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date;
+    if (year != null) {
+      startDate = new Date(Date.UTC(year, 0, 1));
+      endDate = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+      if (endDate > now) endDate = now;
+    } else {
+      endDate = new Date(now);
+      startDate = new Date(now);
+      if (period === 'monthly') startDate.setUTCMonth(startDate.getUTCMonth() - 11);
+      else if (period === 'quarterly') startDate.setUTCMonth(startDate.getUTCMonth() - 11);
+      else if (period === 'weekly') startDate.setUTCDate(startDate.getUTCDate() - 84);
+      else startDate.setUTCFullYear(startDate.getUTCFullYear() - 2);
+    }
+
+    const { data: escrows, error } = await client
+      .from('escrows')
+      .select('created_at, amount_usd, transaction_type')
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .gte('created_at', startDate.toISOString())
+      .lte('created_at', endDate.toISOString());
+
+    if (error) return { success: false, message: error.message, error: error.message };
+
+    const periodKey = (d: Date): string => {
+      if (period === 'yearly') return `${d.getUTCFullYear()}`;
+      if (period === 'monthly') return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      if (period === 'quarterly') return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+      const w = this.getWeekNumber(d);
+      return `${d.getUTCFullYear()}-W${String(w).padStart(2, '0')}`;
+    };
+    const formatLabel = (key: string): string => {
+      if (period === 'yearly') return key;
+      if (period === 'monthly') {
+        const [y, m] = key.split('-');
+        return new Date(parseInt(y), parseInt(m) - 1).toLocaleDateString('en-US', { month: 'short' });
+      }
+      if (period === 'quarterly') return key;
+      return key.replace('W', ' Week ');
+    };
+
+    const byPeriod = new Map<string, { subscription: number; payroll: number }>();
+    (escrows || []).forEach((e: { created_at: string; amount_usd: string | number; transaction_type: string | null }) => {
+      const key = periodKey(new Date(e.created_at));
+      if (!byPeriod.has(key)) byPeriod.set(key, { subscription: 0, payroll: 0 });
+      const val = byPeriod.get(key)!;
+      const amount = parseFloat(String(e.amount_usd)) || 0;
+      const type = (e.transaction_type || '').toLowerCase();
+      if (type === 'subscription') val.subscription += amount;
+      else if (type === 'payroll') val.payroll += amount;
+    });
+
+    const allPeriodKeys = this.generatePeriodKeys(period, startDate, endDate);
+    const data: BusinessSuitePortfolioDataPoint[] = allPeriodKeys.map(key => {
+      const val = byPeriod.get(key) ?? { subscription: 0, payroll: 0 };
+      const total = val.subscription + val.payroll;
+      const subscriptionPercent = total > 0 ? Math.round((val.subscription / total) * 100) : 0;
+      const payrollPercent = total > 0 ? Math.round((val.payroll / total) * 100) : 0;
+      return {
+        period: formatLabel(key),
+        subscriptionUsd: parseFloat(val.subscription.toFixed(2)),
+        payrollUsd: parseFloat(val.payroll.toFixed(2)),
+        subscriptionPercent,
+        payrollPercent,
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Business suite portfolio chart retrieved',
+      data: { period, ...(year != null && { year }), data },
+    };
+  }
+
+  private getWeekNumber(d: Date): number {
+    const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const dayNum = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  }
+
+  private generatePeriodKeys(period: BusinessSuitePortfolioPeriod, start: Date, end: Date): string[] {
+    const keys: string[] = [];
+    const cur = new Date(start);
+    const key = (d: Date): string => {
+      if (period === 'yearly') return `${d.getUTCFullYear()}`;
+      if (period === 'monthly') return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      if (period === 'quarterly') return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+      return `${d.getUTCFullYear()}-W${String(this.getWeekNumber(d)).padStart(2, '0')}`;
+    };
+    while (cur <= end) {
+      keys.push(key(cur));
+      if (period === 'yearly') cur.setUTCFullYear(cur.getUTCFullYear() + 1);
+      else if (period === 'monthly' || period === 'quarterly') cur.setUTCMonth(cur.getUTCMonth() + 1);
+      else cur.setUTCDate(cur.getUTCDate() + 7);
+    }
+    return keys;
   }
 }
 

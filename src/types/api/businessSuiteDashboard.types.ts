@@ -65,3 +65,25 @@ export interface BusinessSuiteActivityListResponse {
   };
   error?: string;
 }
+
+/** Portfolio chart: Subscription and Payroll by period (monthly/weekly/quarterly/yearly) */
+export type BusinessSuitePortfolioPeriod = 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+
+export interface BusinessSuitePortfolioDataPoint {
+  period: string;
+  subscriptionUsd: number;
+  payrollUsd: number;
+  subscriptionPercent: number;
+  payrollPercent: number;
+}
+
+export interface BusinessSuitePortfolioChartResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    period: BusinessSuitePortfolioPeriod;
+    year?: number;
+    data: BusinessSuitePortfolioDataPoint[];
+  };
+  error?: string;
+}
