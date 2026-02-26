@@ -50,6 +50,9 @@ export interface CreateEscrowRequest {
   totalAmount?: number; // If provided, will override amount field - Required for both "Time based" and "Milestones" release types
   releaseConditions?: string; // Detailed release conditions text
   milestones?: Milestone[]; // Array of milestones - Required for "Milestones" release type
+
+  // Suite context: set to 'business' when creating from Business Suite so business dashboard shows only these escrows
+  suiteContext?: 'personal' | 'business';
 }
 
 export interface CreateEscrowResponse {

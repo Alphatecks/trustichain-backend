@@ -381,6 +381,27 @@ export class EscrowService {
         };
       }
 
+      // Suite context: only business_suite/enterprise users can create escrows with suiteContext 'business'
+      const allowedSuiteContext: 'business' | null = (() => {
+        if (request.suiteContext !== 'business') return null;
+        return 'business';
+      })();
+      if (request.suiteContext === 'business') {
+        const { data: userRow } = await adminClient
+          .from('users')
+          .select('account_type')
+          .eq('id', userId)
+          .single();
+        const at = userRow?.account_type;
+        if (at !== 'business_suite' && at !== 'enterprise') {
+          return {
+            success: false,
+            message: 'Business suite is not enabled for this account. Remove suiteContext or upgrade to Business Suite.',
+            error: 'Not business suite',
+          };
+        }
+      }
+
       // Validate emails if provided
       if (request.payerEmail || request.counterpartyEmail) {
         // Get authenticated user's email from database
@@ -807,6 +828,8 @@ export class EscrowService {
           expected_release_date: request.expectedReleaseDate ? new Date(request.expectedReleaseDate).toISOString() : null,
           dispute_resolution_period: request.disputeResolutionPeriod || null,
           release_conditions: request.releaseConditions || null,
+          // Suite context: 'business' only when user has Business Suite and sent suiteContext: 'business'
+          suite_context: allowedSuiteContext,
         })
         .select()
         .single();

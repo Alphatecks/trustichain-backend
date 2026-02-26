@@ -5,7 +5,6 @@
 
 import { supabaseAdmin } from '../../config/supabase';
 import { walletService } from '../wallet/wallet.service';
-import { escrowService } from '../escrow/escrow.service';
 import { trustiscoreService } from '../trustiscore/trustiscore.service';
 import type {
   BusinessSuiteDashboardSummaryResponse,
@@ -59,7 +58,8 @@ export class BusinessSuiteDashboardService {
   }
 
   /**
-   * Dashboard summary for business suite: balance, escrows, trustiscore, payrolls created, suppliers, completed this month.
+   * Dashboard summary for business suite: only escrows with suite_context = 'business'.
+   * Balance and trustiscore remain user-level; all escrow-derived stats are business-only.
    */
   async getDashboardSummary(userId: string): Promise<BusinessSuiteDashboardSummaryResponse> {
     const check = await this.ensureBusinessSuite(userId);
@@ -73,34 +73,32 @@ export class BusinessSuiteDashboardService {
 
     const [
       balanceResult,
-      activeEscrowsResult,
-      totalEscrowedResult,
       trustiscoreResult,
+      { data: activeEscrowRows },
+      { data: allBusinessEscrowRows },
       { count: payrollsCreated },
       { data: supplierRows },
       { count: completedThisMonth },
     ] = await Promise.all([
       walletService.getBalance(userId),
-      escrowService.getActiveEscrows(userId),
-      escrowService.getTotalEscrowed(userId),
       trustiscoreService.getTrustiscore(userId),
-      client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId),
-      client.from('escrows').select('counterparty_id').eq('user_id', userId).not('counterparty_id', 'is', null),
-      client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'completed').gte('updated_at', thisMonthStart.toISOString()),
+      client.from('escrows').select('amount_usd').eq('suite_context', 'business').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).in('status', ['pending', 'active']),
+      client.from('escrows').select('amount_usd').eq('suite_context', 'business').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`),
+      client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('suite_context', 'business'),
+      client.from('escrows').select('counterparty_id').eq('user_id', userId).eq('suite_context', 'business').not('counterparty_id', 'is', null),
+      client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('suite_context', 'business').eq('status', 'completed').gte('updated_at', thisMonthStart.toISOString()),
     ]);
 
     if (!balanceResult.success || !balanceResult.data) {
       return { success: false, message: 'Failed to fetch balance', error: balanceResult.error };
     }
-    if (!activeEscrowsResult.success || !activeEscrowsResult.data) {
-      return { success: false, message: 'Failed to fetch active escrows', error: activeEscrowsResult.error };
-    }
-    if (!totalEscrowedResult.success || totalEscrowedResult.data === undefined) {
-      return { success: false, message: 'Failed to fetch total escrowed', error: totalEscrowedResult.error };
-    }
     if (!trustiscoreResult.success || !trustiscoreResult.data) {
       return { success: false, message: 'Failed to fetch trustiscore', error: trustiscoreResult.error };
     }
+
+    const activeCount = activeEscrowRows?.length ?? 0;
+    const lockedAmount = activeEscrowRows?.reduce((sum: number, r: { amount_usd: string | number }) => sum + parseFloat(String(r.amount_usd)), 0) ?? 0;
+    const totalEscrowed = allBusinessEscrowRows?.reduce((sum: number, r: { amount_usd: string | number }) => sum + parseFloat(String(r.amount_usd)), 0) ?? 0;
 
     const supplierIds = new Set<string>();
     (supplierRows || []).forEach((r: { counterparty_id: string | null }) => {
@@ -112,15 +110,9 @@ export class BusinessSuiteDashboardService {
       message: 'Business suite dashboard summary retrieved',
       data: {
         balance: balanceResult.data.balance,
-        activeEscrows: {
-          count: activeEscrowsResult.data.count,
-          lockedAmount: activeEscrowsResult.data.lockedAmount,
-        },
-        trustiscore: {
-          score: trustiscoreResult.data.score,
-          level: trustiscoreResult.data.level,
-        },
-        totalEscrowed: totalEscrowedResult.data.totalEscrowed,
+        activeEscrows: { count: activeCount, lockedAmount: parseFloat(lockedAmount.toFixed(2)) },
+        trustiscore: { score: trustiscoreResult.data.score, level: trustiscoreResult.data.level },
+        totalEscrowed: parseFloat(totalEscrowed.toFixed(2)),
         payrollsCreated: payrollsCreated ?? 0,
         suppliers: supplierIds.size,
         completedThisMonth: completedThisMonth ?? 0,
@@ -148,7 +140,8 @@ export class BusinessSuiteDashboardService {
     let query = client
       .from('escrows')
       .select(selectCols, { count: 'exact' })
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .eq('suite_context', 'business');
 
     if (statusFilter) {
       const escrowStatuses = statusFilter === 'Pending' ? ['pending', 'cancelled'] : statusFilter === 'In progress' ? ['active', 'disputed'] : ['completed'];
