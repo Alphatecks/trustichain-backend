@@ -7,7 +7,6 @@ import * as crypto from 'crypto';
 import { supabaseAdmin } from '../../config/supabase';
 
 const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
-const PIN_LENGTH = 6;
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_COST = 16384;
 
