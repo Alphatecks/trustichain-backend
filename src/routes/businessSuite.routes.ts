@@ -32,4 +32,22 @@ router.post('/set-pin', authenticate, asyncHandler(async (req, res) => {
   await businessSuiteController.setPin(req, res);
 }));
 
+/**
+ * @route   GET /api/business-suite/dashboard/summary
+ * @desc    Business suite dashboard summary (balance, escrows, trustiscore, payrolls, suppliers, completed this month)
+ * @access  Private (business suite only)
+ */
+router.get('/dashboard/summary', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getDashboardSummary(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/dashboard/activity
+ * @desc    Paginated activity list (escrows created by this business user). Query: status, page, pageSize, sortBy, sortOrder
+ * @access  Private (business suite only)
+ */
+router.get('/dashboard/activity', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getActivityList(req, res);
+}));
+
 export default router;

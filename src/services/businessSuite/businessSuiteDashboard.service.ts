@@ -1,0 +1,214 @@
+/**
+ * Business Suite Dashboard Service
+ * Summary and activity list for the business suite dashboard (requires business_suite/enterprise account).
+ */
+
+import { supabaseAdmin } from '../../config/supabase';
+import { walletService } from '../wallet/wallet.service';
+import { escrowService } from '../escrow/escrow.service';
+import { trustiscoreService } from '../trustiscore/trustiscore.service';
+import type {
+  BusinessSuiteDashboardSummaryResponse,
+  BusinessSuiteActivityListResponse,
+  BusinessSuiteActivityListParams,
+  BusinessSuiteActivityListItem,
+  BusinessSuiteActivityStatus,
+} from '../../types/api/businessSuiteDashboard.types';
+
+const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
+
+const ESCROW_STATUS_TO_ACTIVITY: Record<string, BusinessSuiteActivityStatus> = {
+  pending: 'Pending',
+  active: 'In progress',
+  completed: 'Completed',
+  cancelled: 'Pending',
+  disputed: 'In progress',
+};
+
+function isBusinessSuite(accountType: string | null): boolean {
+  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
+}
+
+function formatEscrowId(year: number, sequence: number): string {
+  return `ESC-${year}-${sequence.toString().padStart(3, '0')}`;
+}
+
+function formatActivityDate(iso: string): string {
+  const d = new Date(iso);
+  const day = d.getUTCDate();
+  const suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  const year = String(d.getUTCFullYear()).slice(-2);
+  const h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')} ${day}${suffix} ${month} ${year}`;
+}
+
+export class BusinessSuiteDashboardService {
+  private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
+    const client = supabaseAdmin;
+    if (!client) return { allowed: false, error: 'No admin client' };
+    const { data: user, error } = await client
+      .from('users')
+      .select('account_type')
+      .eq('id', userId)
+      .single();
+    if (error || !user) return { allowed: false, error: 'User not found' };
+    if (!isBusinessSuite(user.account_type)) return { allowed: false, error: 'Not business suite' };
+    return { allowed: true };
+  }
+
+  /**
+   * Dashboard summary for business suite: balance, escrows, trustiscore, payrolls created, suppliers, completed this month.
+   */
+  async getDashboardSummary(userId: string): Promise<BusinessSuiteDashboardSummaryResponse> {
+    const check = await this.ensureBusinessSuite(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const client = supabaseAdmin!;
+    const now = new Date();
+    const thisMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+    const [
+      balanceResult,
+      activeEscrowsResult,
+      totalEscrowedResult,
+      trustiscoreResult,
+      { count: payrollsCreated },
+      { data: supplierRows },
+      { count: completedThisMonth },
+    ] = await Promise.all([
+      walletService.getBalance(userId),
+      escrowService.getActiveEscrows(userId),
+      escrowService.getTotalEscrowed(userId),
+      trustiscoreService.getTrustiscore(userId),
+      client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId),
+      client.from('escrows').select('counterparty_id').eq('user_id', userId).not('counterparty_id', 'is', null),
+      client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'completed').gte('updated_at', thisMonthStart.toISOString()),
+    ]);
+
+    if (!balanceResult.success || !balanceResult.data) {
+      return { success: false, message: 'Failed to fetch balance', error: balanceResult.error };
+    }
+    if (!activeEscrowsResult.success || !activeEscrowsResult.data) {
+      return { success: false, message: 'Failed to fetch active escrows', error: activeEscrowsResult.error };
+    }
+    if (!totalEscrowedResult.success || totalEscrowedResult.data === undefined) {
+      return { success: false, message: 'Failed to fetch total escrowed', error: totalEscrowedResult.error };
+    }
+    if (!trustiscoreResult.success || !trustiscoreResult.data) {
+      return { success: false, message: 'Failed to fetch trustiscore', error: trustiscoreResult.error };
+    }
+
+    const supplierIds = new Set<string>();
+    (supplierRows || []).forEach((r: { counterparty_id: string | null }) => {
+      if (r.counterparty_id) supplierIds.add(r.counterparty_id);
+    });
+
+    return {
+      success: true,
+      message: 'Business suite dashboard summary retrieved',
+      data: {
+        balance: balanceResult.data.balance,
+        activeEscrows: {
+          count: activeEscrowsResult.data.count,
+          lockedAmount: activeEscrowsResult.data.lockedAmount,
+        },
+        trustiscore: {
+          score: trustiscoreResult.data.score,
+          level: trustiscoreResult.data.level,
+        },
+        totalEscrowed: totalEscrowedResult.data.totalEscrowed,
+        payrollsCreated: payrollsCreated ?? 0,
+        suppliers: supplierIds.size,
+        completedThisMonth: completedThisMonth ?? 0,
+      },
+    };
+  }
+
+  /**
+   * Paginated activity list (escrows created by this business user).
+   */
+  async getActivityList(userId: string, params: BusinessSuiteActivityListParams): Promise<BusinessSuiteActivityListResponse> {
+    const check = await this.ensureBusinessSuite(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const client = supabaseAdmin!;
+    const page = Math.max(1, params.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 10));
+    const sortBy = params.sortBy ?? 'created_at';
+    const sortOrder = params.sortOrder ?? 'desc';
+    const statusFilter = params.status;
+
+    const selectCols = 'id, user_id, counterparty_id, status, created_at, updated_at, escrow_sequence, description, payer_name, counterparty_name, amount_usd';
+    let query = client
+      .from('escrows')
+      .select(selectCols, { count: 'exact' })
+      .eq('user_id', userId);
+
+    if (statusFilter) {
+      const escrowStatuses = statusFilter === 'Pending' ? ['pending', 'cancelled'] : statusFilter === 'In progress' ? ['active', 'disputed'] : ['completed'];
+      query = query.in('status', escrowStatuses);
+    }
+
+    query = query.order(sortBy, { ascending: sortOrder === 'asc' });
+    const from = (page - 1) * pageSize;
+    const { data: rows, error, count } = await query.range(from, from + pageSize - 1);
+
+    if (error) {
+      return { success: false, message: error.message, error: error.message };
+    }
+
+    const list = rows || [];
+    const counterpartyIds = list
+      .map((e: { counterparty_id: string | null }) => e.counterparty_id)
+      .filter(Boolean) as string[];
+    const { data: users } = counterpartyIds.length > 0
+      ? await client.from('users').select('id, full_name').in('id', counterpartyIds)
+      : { data: [] };
+    const nameByUserId = (users || []).reduce<Record<string, string>>((acc, u: { id: string; full_name: string | null }) => {
+      acc[u.id] = u.full_name || '—';
+      return acc;
+    }, {});
+
+    const total = count ?? 0;
+    const items: BusinessSuiteActivityListItem[] = list.map((e: any) => {
+      const year = e.created_at ? new Date(e.created_at).getUTCFullYear() : new Date().getFullYear();
+      const seq = e.escrow_sequence ?? 0;
+      const activityId = formatEscrowId(year, seq);
+      const party1Name = e.payer_name || '—';
+      const party2Name = e.counterparty_name || (e.counterparty_id ? nameByUserId[e.counterparty_id] : null) || '—';
+      const name = `${party1Name}, ${party2Name}`.trim();
+      const address = (e.description || '').trim() || '—';
+      const status = ESCROW_STATUS_TO_ACTIVITY[e.status] ?? 'Pending';
+      const amountUsd = e.amount_usd != null ? parseFloat(String(e.amount_usd)) : undefined;
+      return {
+        id: e.id,
+        activityId,
+        description: { name, address },
+        status,
+        date: formatActivityDate(e.updated_at || e.created_at),
+        createdAt: e.created_at,
+        amountUsd,
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Business suite activity list retrieved',
+      data: {
+        items,
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize) || 1,
+      },
+    };
+  }
+}
+
+export const businessSuiteDashboardService = new BusinessSuiteDashboardService();

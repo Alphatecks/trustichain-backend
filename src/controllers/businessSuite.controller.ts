@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { businessSuiteService } from '../services/businessSuite/businessSuite.service';
+import { businessSuiteDashboardService } from '../services/businessSuite/businessSuiteDashboard.service';
+import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus } from '../types/api/businessSuiteDashboard.types';
 
 export class BusinessSuiteController {
   /**
@@ -55,6 +57,40 @@ export class BusinessSuiteController {
       res.status(200).json(result);
     } else {
       res.status(400).json(result);
+    }
+  }
+
+  /**
+   * Business suite dashboard summary (balance, escrows, trustiscore, payrolls, suppliers, completed this month).
+   * GET /api/business-suite/dashboard/summary
+   */
+  async getDashboardSummary(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteDashboardService.getDashboardSummary(userId);
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
+   * Business suite activity list (paginated escrows created by this user).
+   * GET /api/business-suite/dashboard/activity
+   */
+  async getActivityList(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const status = req.query.status as BusinessSuiteActivityStatus | undefined;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const sortBy = req.query.sortBy as 'created_at' | 'updated_at' | undefined;
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
+    const params: BusinessSuiteActivityListParams = { status, page, pageSize, sortBy, sortOrder };
+    const result = await businessSuiteDashboardService.getActivityList(userId, params);
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(403).json(result);
     }
   }
 }
