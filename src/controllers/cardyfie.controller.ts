@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { cardyfieService } from '../services/cardyfie/cardyfie.service';
+import { emailService } from '../services/email.service';
 import { storageService } from '../services/storage/storage.service';
 
 const REQUIRED_CUSTOMER_FIELDS = [
@@ -119,6 +120,13 @@ export class CardyfieController {
         meta: body.meta as { user_id?: string } | undefined,
       });
       if (result.success) {
+        const email = (body.email as string)?.trim();
+        const userName = [body.first_name, body.last_name].filter(Boolean).join(' ').trim() || 'there';
+        if (email) {
+          emailService.sendCustomerEligibleForCardEmail(email, userName).catch((err) => {
+            console.error('[Cardyfie Create Customer] Failed to send eligible-for-card email:', err);
+          });
+        }
         res.status(201).json(result);
       } else {
         res.status(400).json(result);

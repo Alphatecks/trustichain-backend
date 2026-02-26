@@ -412,6 +412,150 @@ export class EmailService {
   }
 
   /**
+   * Send email to user when they are eligible to create a card (Cardyfie customer created successfully).
+   * Uses the same design pattern as escrow creation emails.
+   */
+  async sendCustomerEligibleForCardEmail(
+    email: string,
+    userName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend) {
+        const errorMsg = 'Resend API key not configured. Please set RESEND_API_KEY environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      console.log(`Attempting to send customer eligible for card email to: ${email}`);
+
+      const logoBase64 = this.getLogoBase64();
+      const fontBase64 = this.getSatoshiFontBase64();
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const dashboardLink = `${frontendUrl}/dashboard`;
+      const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: 'You\'re Eligible to Create a Card – TrustiChain',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Eligible to Create a Card</title>
+            ${fontBase64 ? `
+            <style>
+              @font-face {
+                font-family: 'Satoshi';
+                src: url('${fontBase64}') format('opentype');
+                font-weight: normal;
+                font-style: normal;
+              }
+            </style>
+            ` : ''}
+          </head>
+          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <!-- Header with Logo -->
+            <div style="padding: 20px 0;">
+              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}
+            </div>
+            
+            <!-- Subject Line -->
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">You're Eligible to Create a Card</h1>
+            
+            <!-- Greeting -->
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${userName},</p>
+            
+            <!-- Main Message -->
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Great news! Your identity has been verified and you're now eligible to create a virtual card. 🎉</p>
+            
+            <!-- Details Box -->
+            <div style="background-color: #f0f0f0; border-radius: 8px; padding: 20px; margin: 30px 0;">
+              <p style="font-weight: bold; font-size: 16px; color: #333; margin: 0 0 15px 0;">Next steps:</p>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="margin: 10px 0; font-size: 14px; color: #333;">Log in to your TrustiChain dashboard</li>
+                <li style="margin: 10px 0; font-size: 14px; color: #333;">Go to the Cards section and create your virtual card</li>
+                <li style="margin: 10px 0; font-size: 14px; color: #333;">Start using your card for secure payments</li>
+              </ul>
+            </div>
+            
+            <!-- Information Paragraphs -->
+            <p style="font-size: 14px; color: #666; margin: 20px 0; line-height: 1.8;">
+              You can create your card from your dashboard: <a href="${dashboardLink}" style="color: #667eea; text-decoration: none;">${dashboardLink}</a>
+            </p>
+            
+            <p style="font-size: 14px; color: #666; margin: 20px 0; line-height: 1.8;">
+              If you have any questions or need assistance, our support team is here to help: <a href="mailto:${supportEmail}" style="color: #667eea; text-decoration: none;">${supportEmail}</a>
+            </p>
+            
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">Thank you for using TrustiChain</p>
+            
+            <!-- Closing -->
+            <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,</p>
+            <p style="font-size: 14px; color: #333; margin: 0 0 20px 0;">Team TrustiChain</p>
+            
+            <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
+            
+            <!-- Footer -->
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
+            <div style="text-align: center; margin: 20px 0;">
+              <div style="margin: 15px 0;">
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">🐦</a>
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">f</a>
+                <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">in</a>
+              </div>
+              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto; margin-top: 15px;" />` : ''}
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Hi ${userName},
+
+          Great news! Your identity has been verified and you're now eligible to create a virtual card on TrustiChain.
+
+          Next steps:
+          - Log in to your TrustiChain dashboard
+          - Go to the Cards section and create your virtual card
+          - Start using your card for secure payments
+
+          Dashboard: ${dashboardLink}
+
+          If you have any questions, contact support: ${supportEmail}
+
+          Thank you for using TrustiChain.
+
+          © ${new Date().getFullYear()} TrustiChain. All rights reserved.
+        `,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+
+      console.log('Customer eligible for card email sent successfully:', {
+        id: data?.id,
+        to: email,
+      });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send customer eligible for card email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
    * Send escrow creation notification email to counterparty
    * @param email - Counterparty email address
    * @param counterpartyName - Counterparty's full name
