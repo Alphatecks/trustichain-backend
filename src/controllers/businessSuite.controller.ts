@@ -2,7 +2,9 @@ import { Request, Response } from 'express';
 import { businessSuiteService } from '../services/businessSuite/businessSuite.service';
 import { businessSuiteDashboardService } from '../services/businessSuite/businessSuiteDashboard.service';
 import { businessSuiteTeamsService } from '../services/businessSuite/businessSuiteTeams.service';
+import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
+import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
 
 export class BusinessSuiteController {
   /**
@@ -170,6 +172,87 @@ export class BusinessSuiteController {
     const result = await businessSuiteDashboardService.getSubscriptionList(userId, page, pageSize);
     if (result.success) res.status(200).json(result);
     else res.status(403).json(result);
+  }
+
+  /** Create payroll. POST /api/business-suite/payrolls */
+  async createPayroll(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuitePayrollsService.createPayroll(userId, req.body as CreatePayrollRequest);
+    if (result.success) res.status(201).json(result);
+    else res.status(400).json(result);
+  }
+
+  /** List payrolls. GET /api/business-suite/payrolls */
+  async listPayrolls(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const page = Math.max(1, req.query.page != null ? Number(req.query.page) : 1);
+    const pageSize = Math.min(100, Math.max(1, req.query.pageSize != null ? Number(req.query.pageSize) : 20));
+    const result = await businessSuitePayrollsService.listPayrolls(userId, page, pageSize);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Payroll summary (total payroll, team members, escrowed). GET /api/business-suite/payrolls/summary */
+  async getPayrollSummary(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuitePayrollsService.getSummary(userId);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Transaction history. GET /api/business-suite/payrolls/transactions */
+  async getPayrollTransactions(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const page = Math.max(1, req.query.page != null ? Number(req.query.page) : 1);
+    const pageSize = Math.min(100, Math.max(1, req.query.pageSize != null ? Number(req.query.pageSize) : 20));
+    const month = req.query.month as string | undefined;
+    const result = await businessSuitePayrollsService.getTransactions(userId, page, pageSize, month);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Single transaction detail. GET /api/business-suite/payrolls/transactions/:id */
+  async getPayrollTransactionDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const itemId = req.params.id;
+    if (!itemId) { res.status(400).json({ success: false, message: 'Transaction ID required' }); return; }
+    const result = await businessSuitePayrollsService.getTransactionDetail(userId, itemId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Payroll detail (View). GET /api/business-suite/payrolls/:id */
+  async getPayrollDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const payrollId = req.params.id;
+    if (!payrollId) { res.status(400).json({ success: false, message: 'Payroll ID required' }); return; }
+    const result = await businessSuitePayrollsService.getPayrollDetail(userId, payrollId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Update payroll (freeze auto-release, name, release date). PATCH /api/business-suite/payrolls/:id */
+  async updatePayroll(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const payrollId = req.params.id;
+    if (!payrollId) { res.status(400).json({ success: false, message: 'Payroll ID required' }); return; }
+    const result = await businessSuitePayrollsService.updatePayroll(userId, payrollId, req.body as UpdatePayrollRequest);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(400).json(result);
+  }
+
+  /** Release payroll now. POST /api/business-suite/payrolls/:id/release */
+  async releasePayroll(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const payrollId = req.params.id;
+    if (!payrollId) { res.status(400).json({ success: false, message: 'Payroll ID required' }); return; }
+    const result = await businessSuitePayrollsService.releasePayroll(userId, payrollId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(400).json(result);
   }
 }
 

@@ -95,4 +95,76 @@ router.get('/teams/:id', authenticate, asyncHandler(async (req, res) => {
   await businessSuiteController.getTeamDetail(req, res);
 }));
 
+/**
+ * @route   POST /api/business-suite/payrolls
+ * @desc    Create payroll (+ Add Payroll)
+ * @access  Private (business suite only)
+ */
+router.post('/payrolls', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createPayroll(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/payrolls
+ * @desc    List payrolls (left pane cards)
+ * @access  Private (business suite only)
+ */
+router.get('/payrolls', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.listPayrolls(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/payrolls/summary
+ * @desc    Payroll dashboard summary (total payroll, team members, escrowed)
+ * @access  Private (business suite only)
+ */
+router.get('/payrolls/summary', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getPayrollSummary(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/payrolls/transactions
+ * @desc    Transaction history. Query: page, pageSize, month (YYYY-MM)
+ * @access  Private (business suite only)
+ */
+router.get('/payrolls/transactions', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getPayrollTransactions(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/payrolls/transactions/:id
+ * @desc    Single transaction (payroll item) detail
+ * @access  Private (business suite only)
+ */
+router.get('/payrolls/transactions/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getPayrollTransactionDetail(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/payrolls/:id
+ * @desc    Payroll detail (View)
+ * @access  Private (business suite only)
+ */
+router.get('/payrolls/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getPayrollDetail(req, res);
+}));
+
+/**
+ * @route   PATCH /api/business-suite/payrolls/:id
+ * @desc    Update payroll (Freeze Auto release, name, release date)
+ * @access  Private (business suite only)
+ */
+router.patch('/payrolls/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.updatePayroll(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/payrolls/:id/release
+ * @desc    Release payroll now
+ * @access  Private (business suite only)
+ */
+router.post('/payrolls/:id/release', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.releasePayroll(req, res);
+}));
+
 export default router;
