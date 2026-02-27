@@ -60,6 +60,24 @@ router.get('/dashboard/portfolio', authenticate, asyncHandler(async (req, res) =
 }));
 
 /**
+ * @route   GET /api/business-suite/dashboard/upcoming-supply
+ * @desc    Upcoming Supply list (name, email, amount, due date). Query: page, pageSize
+ * @access  Private (business suite only)
+ */
+router.get('/dashboard/upcoming-supply', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getUpcomingSupply(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/dashboard/subscription
+ * @desc    Subscription list (name, email, amount, next payment date). Query: page, pageSize
+ * @access  Private (business suite only)
+ */
+router.get('/dashboard/subscription', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSubscriptionList(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/teams
  * @desc    My Teams list (paginated). Query: page, pageSize
  * @access  Private (business suite only)

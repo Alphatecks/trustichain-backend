@@ -147,6 +147,30 @@ export class BusinessSuiteController {
       res.status(403).json(result);
     }
   }
+
+  /**
+   * Upcoming Supply list (business escrows pending/active with due date). GET /api/business-suite/dashboard/upcoming-supply
+   */
+  async getUpcomingSupply(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const page = Math.max(1, req.query.page != null ? Number(req.query.page) : 1);
+    const pageSize = Math.min(100, Math.max(1, req.query.pageSize != null ? Number(req.query.pageSize) : 10));
+    const result = await businessSuiteDashboardService.getUpcomingSupply(userId, page, pageSize);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Subscription list (business escrows type=subscription, next payment date). GET /api/business-suite/dashboard/subscription
+   */
+  async getSubscriptionList(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const page = Math.max(1, req.query.page != null ? Number(req.query.page) : 1);
+    const pageSize = Math.min(100, Math.max(1, req.query.pageSize != null ? Number(req.query.pageSize) : 10));
+    const result = await businessSuiteDashboardService.getSubscriptionList(userId, page, pageSize);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
 }
 
 export const businessSuiteController = new BusinessSuiteController();

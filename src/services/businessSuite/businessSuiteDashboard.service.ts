@@ -14,6 +14,9 @@ import type {
   BusinessSuiteActivityStatus,
   BusinessSuitePortfolioPeriod,
   BusinessSuitePortfolioDataPoint,
+  BusinessSuiteSupplyOrSubscriptionItem,
+  BusinessSuiteUpcomingSupplyResponse,
+  BusinessSuiteSubscriptionListResponse,
 } from '../../types/api/businessSuiteDashboard.types';
 
 const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
@@ -43,6 +46,15 @@ function formatActivityDate(iso: string): string {
   const h = d.getUTCHours();
   const m = d.getUTCMinutes();
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')} ${day}${suffix} ${month} ${year}`;
+}
+
+function formatDateShort(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const day = d.getUTCDate();
+  const suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  return `${day}${suffix} ${month}`;
 }
 
 export class BusinessSuiteDashboardService {
@@ -320,6 +332,108 @@ export class BusinessSuiteDashboardService {
       else cur.setUTCDate(cur.getUTCDate() + 7);
     }
     return keys;
+  }
+
+  /**
+   * Upcoming Supply: business escrows (pending/active) with counterparty name, email, amount, due date.
+   */
+  async getUpcomingSupply(
+    userId: string,
+    page: number = 1,
+    pageSize: number = 10
+  ): Promise<BusinessSuiteUpcomingSupplyResponse> {
+    const check = await this.ensureBusinessSuite(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const from = (page - 1) * pageSize;
+    const orderCol = 'expected_release_date';
+    const { data: rows, error, count } = await client
+      .from('escrows')
+      .select('id, counterparty_id, counterparty_name, counterparty_email, amount_usd, expected_release_date, expected_completion_date', { count: 'exact' })
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .in('status', ['pending', 'active'])
+      .order(orderCol, { ascending: true, nullsFirst: false })
+      .range(from, from + pageSize - 1);
+    if (error) return { success: false, message: error.message, error: error.message };
+    const list = rows || [];
+    const counterpartyIds = list.map((r: { counterparty_id: string | null }) => r.counterparty_id).filter(Boolean) as string[];
+    const { data: users } = counterpartyIds.length > 0 ? await client.from('users').select('id, full_name, email').in('id', counterpartyIds) : { data: [] };
+    const userMap = (users || []).reduce<Record<string, { full_name: string; email: string }>>((acc, u: { id: string; full_name: string | null; email: string }) => {
+      acc[u.id] = { full_name: u.full_name || '—', email: u.email || '' };
+      return acc;
+    }, {});
+    const items: BusinessSuiteSupplyOrSubscriptionItem[] = list.map((r: any) => {
+      const dateRaw = r.expected_release_date || r.expected_completion_date;
+      const name = r.counterparty_name || (r.counterparty_id ? userMap[r.counterparty_id]?.full_name : null) || '—';
+      const email = r.counterparty_email || (r.counterparty_id ? userMap[r.counterparty_id]?.email : null) || '';
+      return {
+        id: r.id,
+        name,
+        email,
+        amountUsd: parseFloat(String(r.amount_usd)) || 0,
+        dueDate: formatDateShort(dateRaw),
+      };
+    });
+    const total = count ?? 0;
+    return {
+      success: true,
+      message: 'Upcoming supply list retrieved',
+      data: { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 },
+    };
+  }
+
+  /**
+   * Subscription: business escrows with transaction_type = 'subscription' (pending/active), name, email, amount, next payment date.
+   */
+  async getSubscriptionList(
+    userId: string,
+    page: number = 1,
+    pageSize: number = 10
+  ): Promise<BusinessSuiteSubscriptionListResponse> {
+    const check = await this.ensureBusinessSuite(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const from = (page - 1) * pageSize;
+    const { data: rows, error, count } = await client
+      .from('escrows')
+      .select('id, counterparty_id, counterparty_name, counterparty_email, amount_usd, expected_release_date, expected_completion_date', { count: 'exact' })
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'subscription')
+      .in('status', ['pending', 'active'])
+      .order('expected_release_date', { ascending: true, nullsFirst: false })
+      .range(from, from + pageSize - 1);
+    if (error) return { success: false, message: error.message, error: error.message };
+    const list = rows || [];
+    const counterpartyIds = list.map((r: { counterparty_id: string | null }) => r.counterparty_id).filter(Boolean) as string[];
+    const { data: users } = counterpartyIds.length > 0 ? await client.from('users').select('id, full_name, email').in('id', counterpartyIds) : { data: [] };
+    const userMap = (users || []).reduce<Record<string, { full_name: string; email: string }>>((acc, u: { id: string; full_name: string | null; email: string }) => {
+      acc[u.id] = { full_name: u.full_name || '—', email: u.email || '' };
+      return acc;
+    }, {});
+    const items: BusinessSuiteSupplyOrSubscriptionItem[] = list.map((r: any) => {
+      const dateRaw = r.expected_release_date || r.expected_completion_date;
+      const name = r.counterparty_name || (r.counterparty_id ? userMap[r.counterparty_id]?.full_name : null) || '—';
+      const email = r.counterparty_email || (r.counterparty_id ? userMap[r.counterparty_id]?.email : null) || '';
+      return {
+        id: r.id,
+        name,
+        email,
+        amountUsd: parseFloat(String(r.amount_usd)) || 0,
+        dueDate: formatDateShort(dateRaw),
+      };
+    });
+    const total = count ?? 0;
+    return {
+      success: true,
+      message: 'Subscription list retrieved',
+      data: { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 },
+    };
   }
 }
 

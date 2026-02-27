@@ -87,3 +87,38 @@ export interface BusinessSuitePortfolioChartResponse {
   };
   error?: string;
 }
+
+/** Upcoming Supply / Subscription list item (name, email, amount, date) */
+export interface BusinessSuiteSupplyOrSubscriptionItem {
+  id: string;
+  name: string;
+  email: string;
+  amountUsd: number;
+  dueDate: string | null;
+}
+
+export interface BusinessSuiteUpcomingSupplyResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: BusinessSuiteSupplyOrSubscriptionItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  error?: string;
+}
+
+export interface BusinessSuiteSubscriptionListResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: BusinessSuiteSupplyOrSubscriptionItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  error?: string;
+}
