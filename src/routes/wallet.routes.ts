@@ -104,6 +104,15 @@ router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/wallet/create
+ * @desc    Create a new custodial wallet for the user (personal suite). Returns existing address if one already exists.
+ * @access  Private
+ */
+router.post('/create', authenticate, asyncHandler(async (req, res) => {
+  await walletController.createWallet(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/validate-address
  * @desc    Validate wallet address format (helper endpoint - no auth required)
  * @access  Public

@@ -326,7 +326,65 @@ export class WalletService {
       return { success: false, message: error instanceof Error ? error.message : 'Failed to disconnect wallet', error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
-  // ...existing code...
+
+  /**
+   * Create a new custodial wallet for the user (personal suite).
+   * Generates a new XRPL address and stores the encrypted secret. Idempotent: returns existing address if one already exists.
+   */
+  async createWallet(userId: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: { xrpl_address: string };
+    error?: string;
+  }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      const { data: existing } = await adminClient
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', userId)
+        .eq('suite_context', 'personal')
+        .maybeSingle();
+      if (existing?.xrpl_address) {
+        return {
+          success: true,
+          message: 'Wallet already exists',
+          data: { xrpl_address: existing.xrpl_address },
+        };
+      }
+      const { address, secret } = await xrplWalletService.generateWallet();
+      const encryptedSecret = encryptionService.encrypt(secret);
+      const { error: insertError } = await adminClient
+        .from('wallets')
+        .insert({
+          user_id: userId,
+          xrpl_address: address,
+          encrypted_wallet_secret: encryptedSecret,
+          balance_xrp: 0,
+          balance_usdt: 0,
+          balance_usdc: 0,
+          suite_context: 'personal',
+        });
+      if (insertError) {
+        return {
+          success: false,
+          message: 'Failed to create wallet',
+          error: insertError.message || 'Database insert failed',
+        };
+      }
+      return {
+        success: true,
+        message: 'Wallet created successfully',
+        data: { xrpl_address: address },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to create wallet',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
 
   /**
    * Connect wallet via XUMM
