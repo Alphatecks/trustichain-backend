@@ -330,9 +330,10 @@ export class WalletService {
 
   /**
    * Connect wallet via XUMM
-   * Creates a XUMM payload that requests the user's XRPL address
+   * Creates a XUMM payload that requests the user's XRPL address.
+   * Use suiteContext 'business' for business suite (independent from personal).
    */
-  async connectWalletViaXUMM(userId: string): Promise<{
+  async connectWalletViaXUMM(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean,
     message: string,
     data?: {
@@ -683,9 +684,10 @@ export class WalletService {
   }
 
   /**
-   * Check XUMM connection status and connect wallet when signed
+   * Check XUMM connection status and connect wallet when signed.
+   * Use suiteContext 'business' for business suite (independent from personal).
    */
-  async checkXUMMConnectionStatus(userId: string, xummUuid: string): Promise<{
+  async checkXUMMConnectionStatus(userId: string, xummUuid: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
     data?: {
@@ -758,8 +760,8 @@ export class WalletService {
         };
       }
 
-      // Connect the wallet using existing connectWallet logic
-      const connectResult = await this.connectWallet(userId, { walletAddress });
+      // Connect the wallet using existing connectWallet logic (for the given suite)
+      const connectResult = await this.connectWallet(userId, { walletAddress }, suiteContext);
 
       if (connectResult.success) {
         // Update transaction status

@@ -306,6 +306,37 @@ export class BusinessSuiteController {
     if (result.success) res.status(200).json(result);
     else res.status(400).json(result);
   }
+
+  /** Create XUMM payload to connect XRPL wallet to business suite (same flow as personal, but for business wallet). POST /api/business-suite/wallet/connect/xumm */
+  async connectWalletViaXUMM(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pinStatus = await businessSuiteService.getPinStatus(userId);
+    if (!pinStatus.isBusinessSuite) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+      return;
+    }
+    const result = await walletService.connectWalletViaXUMM(userId, 'business');
+    if (result.success) res.status(200).json(result);
+    else res.status(400).json(result);
+  }
+
+  /** Check XUMM connection status and connect business wallet when signed. GET /api/business-suite/wallet/connect/xumm/status?xummUuid=... */
+  async checkXUMMConnectionStatus(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pinStatus = await businessSuiteService.getPinStatus(userId);
+    if (!pinStatus.isBusinessSuite) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+      return;
+    }
+    const xummUuid = req.query.xummUuid as string;
+    if (!xummUuid) {
+      res.status(400).json({ success: false, message: 'xummUuid is required', error: 'Missing xummUuid' });
+      return;
+    }
+    const result = await walletService.checkXUMMConnectionStatus(userId, xummUuid, 'business');
+    if (result.success) res.status(200).json(result);
+    else res.status(400).json(result);
+  }
 }
 
 export const businessSuiteController = new BusinessSuiteController();

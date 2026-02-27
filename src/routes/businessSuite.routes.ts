@@ -194,4 +194,22 @@ router.post('/wallet/disconnect', authenticate, asyncHandler(async (req, res) =>
   await businessSuiteController.disconnectWallet(req, res);
 }));
 
+/**
+ * @route   POST /api/business-suite/wallet/connect/xumm
+ * @desc    Create XUMM payload to connect XRPL wallet to business suite (same as personal flow, independent wallet)
+ * @access  Private (business suite only)
+ */
+router.post('/wallet/connect/xumm', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.connectWalletViaXUMM(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/wallet/connect/xumm/status
+ * @desc    Check XUMM connection status and connect business wallet when signed. Query: xummUuid
+ * @access  Private (business suite only)
+ */
+router.get('/wallet/connect/xumm/status', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.checkXUMMConnectionStatus(req, res);
+}));
+
 export default router;
