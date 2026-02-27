@@ -20,7 +20,8 @@ interface ExchangeRate {
 
 export class ExchangeService {
   private cache: Map<string, CachedRate> = new Map();
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private readonly CACHE_TTL = 60 * 1000; // 1 minute - keep XRP/USD closer to live
+  private readonly MAX_STALE_AGE = 2 * 60 * 1000; // Don't use expired cache older than 2 minutes
   // XRPL server config for future XRPL price oracle implementation
   // private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
   // private readonly XRPL_SERVER = this.XRPL_NETWORK === 'mainnet'
@@ -76,8 +77,8 @@ export class ExchangeService {
             change: usdRate - previousRate,
             changePercent: previousRate > 0 ? ((usdRate - previousRate) / previousRate) * 100 : 0,
           });
-        } else if (usdCached) {
-          // Use expired cache if fetch fails
+        } else if (usdCached && (now - usdCached.timestamp) < this.MAX_STALE_AGE) {
+          // Use expired cache only if not too old (avoid showing very stale rate)
           usdRate = usdCached.rate;
           rates.push({
             currency: usdCurrency,
