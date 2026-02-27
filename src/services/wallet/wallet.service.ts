@@ -333,7 +333,7 @@ export class WalletService {
    * Creates a XUMM payload that requests the user's XRPL address.
    * Use suiteContext 'business' for business suite (independent from personal).
    */
-  async connectWalletViaXUMM(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
+  async connectWalletViaXUMM(userId: string, _suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean,
     message: string,
     data?: {
