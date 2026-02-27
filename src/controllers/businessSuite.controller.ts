@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { businessSuiteService } from '../services/businessSuite/businessSuite.service';
 import { businessSuiteDashboardService } from '../services/businessSuite/businessSuiteDashboard.service';
+import { businessSuiteTeamsService } from '../services/businessSuite/businessSuiteTeams.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 
 export class BusinessSuiteController {
@@ -107,6 +108,41 @@ export class BusinessSuiteController {
     const result = await businessSuiteDashboardService.getPortfolioChart(userId, periodParam, year);
     if (result.success) {
       res.status(200).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
+   * My Teams list (paginated). GET /api/business-suite/teams
+   */
+  async getTeamList(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const page = Math.max(1, req.query.page != null ? Number(req.query.page) : 1);
+    const pageSize = Math.min(100, Math.max(1, req.query.pageSize != null ? Number(req.query.pageSize) : 10));
+    const result = await businessSuiteTeamsService.getTeamList(userId, page, pageSize);
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
+   * Single team detail with members (View). GET /api/business-suite/teams/:id
+   */
+  async getTeamDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const teamId = req.params.id;
+    if (!teamId) {
+      res.status(400).json({ success: false, message: 'Team ID required' });
+      return;
+    }
+    const result = await businessSuiteTeamsService.getTeamDetail(userId, teamId);
+    if (result.success) {
+      res.status(200).json(result);
+    } else if (result.error === 'Team not found') {
+      res.status(404).json(result);
     } else {
       res.status(403).json(result);
     }

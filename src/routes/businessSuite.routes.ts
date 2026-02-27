@@ -59,4 +59,22 @@ router.get('/dashboard/portfolio', authenticate, asyncHandler(async (req, res) =
   await businessSuiteController.getPortfolioChart(req, res);
 }));
 
+/**
+ * @route   GET /api/business-suite/teams
+ * @desc    My Teams list (paginated). Query: page, pageSize
+ * @access  Private (business suite only)
+ */
+router.get('/teams', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getTeamList(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/teams/:id
+ * @desc    Single team detail with members (for View)
+ * @access  Private (business suite only)
+ */
+router.get('/teams/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getTeamDetail(req, res);
+}));
+
 export default router;
