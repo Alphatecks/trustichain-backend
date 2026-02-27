@@ -3,6 +3,7 @@ import { businessSuiteService } from '../services/businessSuite/businessSuite.se
 import { businessSuiteDashboardService } from '../services/businessSuite/businessSuiteDashboard.service';
 import { businessSuiteTeamsService } from '../services/businessSuite/businessSuiteTeams.service';
 import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
+import { walletService } from '../services/wallet/wallet.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
 
@@ -252,6 +253,57 @@ export class BusinessSuiteController {
     const result = await businessSuitePayrollsService.releasePayroll(userId, payrollId);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(400).json(result);
+  }
+
+  /** Business suite wallet balance (separate XRP wallet). GET /api/business-suite/wallet/balance */
+  async getWalletBalance(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pinStatus = await businessSuiteService.getPinStatus(userId);
+    if (!pinStatus.isBusinessSuite) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+      return;
+    }
+    const result = await walletService.getBalance(userId, 'business');
+    if (result.success && result.data) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: { balance: result.data.balance },
+        xrplAddress: result.xrpl_address ?? '',
+      });
+    } else {
+      res.status(200).json({
+        success: false,
+        message: result.message,
+        error: result.error ?? 'Failed to fetch balance',
+      });
+    }
+  }
+
+  /** Connect XRPL wallet to business suite (separate from personal). POST /api/business-suite/wallet/connect */
+  async connectWallet(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pinStatus = await businessSuiteService.getPinStatus(userId);
+    if (!pinStatus.isBusinessSuite) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+      return;
+    }
+    const result = await walletService.connectWallet(userId, req.body || {}, 'business');
+    if (result.success) res.status(200).json(result);
+    else res.status(400).json(result);
+  }
+
+  /** Disconnect business suite XRPL wallet. POST /api/business-suite/wallet/disconnect */
+  async disconnectWallet(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const pinStatus = await businessSuiteService.getPinStatus(userId);
+    if (!pinStatus.isBusinessSuite) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+      return;
+    }
+    const result = await walletService.disconnectWallet(userId, 'business');
+    if (result.success) res.status(200).json(result);
     else res.status(400).json(result);
   }
 }

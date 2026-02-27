@@ -167,4 +167,31 @@ router.post('/payrolls/:id/release', authenticate, asyncHandler(async (req, res)
   await businessSuiteController.releasePayroll(req, res);
 }));
 
+/**
+ * @route   GET /api/business-suite/wallet/balance
+ * @desc    Business suite XRP wallet balance (separate from personal wallet)
+ * @access  Private (business suite only)
+ */
+router.get('/wallet/balance', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getWalletBalance(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/wallet/connect
+ * @desc    Connect XRPL wallet to business suite (body: { walletAddress })
+ * @access  Private (business suite only)
+ */
+router.post('/wallet/connect', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.connectWallet(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/wallet/disconnect
+ * @desc    Disconnect business suite XRPL wallet
+ * @access  Private (business suite only)
+ */
+router.post('/wallet/disconnect', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.disconnectWallet(req, res);
+}));
+
 export default router;

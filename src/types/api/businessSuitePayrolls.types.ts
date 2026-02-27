@@ -8,17 +8,51 @@ export interface BusinessPayrollItemInput {
   dueDate?: string;
 }
 
+/** Payroll cycle from Step 1 */
+export type PayrollCycle = 'Weekly' | 'Bi-weekly' | 'Other';
+
+/** Disbursement mode from Step 3 (maps to freeze_auto_release: Manual => true) */
+export type DisbursementMode = 'auto_release' | 'manual_release';
+
 export interface CreatePayrollRequest {
+  /** Step 1 - Payroll Details */
   name: string;
+  companyName?: string;
+  companyEmail?: string;
+  payrollCycle?: PayrollCycle;
+  cycleDate?: string;
+  startDate?: string;
+  endDate?: string;
+  companyDescription?: string;
+  /** Step 2 - Members: optional; can add after creating payroll */
+  items?: BusinessPayrollItemInput[];
+  /** Step 3 - Payment Details */
   releaseDate?: string;
   freezeAutoRelease?: boolean;
-  items: BusinessPayrollItemInput[];
+  disbursementMode?: DisbursementMode;
+  defaultSalaryType?: string;
+  currency?: string;
+  enableAllowances?: boolean;
+  /** Legacy / convenience */
+  amountUsd?: number;
+  salaryAmount?: number;
 }
 
 export interface UpdatePayrollRequest {
   name?: string;
+  companyName?: string;
+  companyEmail?: string;
+  payrollCycle?: PayrollCycle;
+  cycleDate?: string;
+  startDate?: string;
+  endDate?: string;
+  companyDescription?: string;
   releaseDate?: string;
   freezeAutoRelease?: boolean;
+  disbursementMode?: DisbursementMode;
+  defaultSalaryType?: string;
+  currency?: string;
+  enableAllowances?: boolean;
 }
 
 export interface BusinessPayrollListItem {
@@ -66,8 +100,19 @@ export interface BusinessPayrollDetailResponse {
   data?: {
     id: string;
     name: string;
+    companyName?: string | null;
+    companyEmail?: string | null;
+    payrollCycle?: string | null;
+    cycleDate?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+    companyDescription?: string | null;
+    defaultSalaryType?: string | null;
+    currency?: string | null;
+    enableAllowances?: boolean;
     releaseDate: string | null;
     freezeAutoRelease: boolean;
+    disbursementMode: DisbursementMode;
     status: string;
     totalAmountUsd: number;
     createdAt: string;

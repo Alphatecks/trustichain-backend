@@ -295,11 +295,13 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Automatically fetch payer wallet address and encrypted secret from authenticated user's registered wallet
+      // Payer wallet: use business wallet when creating from business suite, else personal
+      const payerSuiteContext = request.suiteContext === 'business' ? 'business' : 'personal';
       const { data: payerWallet } = await adminClient
         .from('wallets')
         .select('xrpl_address, encrypted_wallet_secret')
         .eq('user_id', userId)
+        .eq('suite_context', payerSuiteContext)
         .single();
 
       if (!payerWallet) {
@@ -326,11 +328,12 @@ export class EscrowService {
       let counterpartyWalletAddress: string;
 
       if (request.counterpartyId) {
-        // If counterpartyId is provided, use it but still validate wallet address
+        // If counterpartyId is provided, use it but still validate wallet address (counterparty personal wallet)
         const { data: counterpartyWallet, error: walletError } = await adminClient
           .from('wallets')
           .select('xrpl_address, user_id')
           .eq('user_id', request.counterpartyId)
+          .eq('suite_context', 'personal')
           .maybeSingle();
 
         if (walletError || !counterpartyWallet) {
@@ -1420,11 +1423,13 @@ export class EscrowService {
         };
       }
 
-      // Payer: user_id (account holder) — wallet, name, email, phone
+      // Payer: user_id (account holder) — wallet by escrow suite_context
+      const payerSuite = (escrow.suite_context === 'business' ? 'business' : 'personal') as 'business' | 'personal';
       const { data: payerWallet } = await adminClient
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', escrow.user_id)
+        .eq('suite_context', payerSuite)
         .maybeSingle();
 
       const { data: payerUser } = await adminClient
@@ -1453,6 +1458,7 @@ export class EscrowService {
           .from('wallets')
           .select('xrpl_address')
           .eq('user_id', escrow.counterparty_id)
+          .eq('suite_context', 'personal')
           .maybeSingle();
 
         const { data: cpUser } = await adminClient
@@ -1751,11 +1757,13 @@ export class EscrowService {
           }
         } catch (txError) {
           console.error('[Escrow Release] Failed to get owner address from transaction:', txError);
-          // Fallback: Try to get owner from user's wallet (for new escrows) or platform (for old escrows)
+          // Fallback: Try to get owner from user's wallet (same suite as escrow) or platform (for old escrows)
+          const releaseSuite = (escrow.suite_context === 'business' ? 'business' : 'personal') as 'personal' | 'business';
           const { data: userWallet } = await adminClient
             .from('wallets')
             .select('xrpl_address')
             .eq('user_id', escrow.user_id)
+            .eq('suite_context', releaseSuite)
             .single();
           
           actualOwnerAddress = userWallet?.xrpl_address || platformAddress;
@@ -3624,10 +3632,10 @@ export class EscrowService {
       // When escrow is cancelled on XRPL, funds are automatically returned to creator
       if (creatorWallet.xrpl_address) {
         try {
-          // Import wallet service to sync balance
+          // Import wallet service to sync balance for the wallet that created the escrow
           const { walletService } = await import('../wallet/wallet.service');
-          // Trigger balance sync - this will update the database with the refunded amount
-          await walletService.getBalance(escrow.user_id).catch((syncError) => {
+          const escrowSuite = (escrow.suite_context === 'business' ? 'business' : 'personal') as 'personal' | 'business';
+          await walletService.getBalance(escrow.user_id, escrowSuite).catch((syncError) => {
             console.warn('[Escrow Cancel] Failed to sync balance after cancellation:', syncError);
           });
           

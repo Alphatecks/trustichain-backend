@@ -15,6 +15,7 @@ import type {
   PayrollTransactionListItem,
   BusinessPayrollTransactionsResponse,
   BusinessPayrollTransactionDetailResponse,
+  DisbursementMode,
 } from '../../types/api/businessSuitePayrolls.types';
 
 const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
@@ -52,32 +53,49 @@ export class BusinessSuitePayrollsService {
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     if (!body.name?.trim()) return { success: false, message: 'Payroll name is required', error: 'Validation' };
-    if (!Array.isArray(body.items) || body.items.length === 0) return { success: false, message: 'At least one item is required', error: 'Validation' };
 
-    const releaseDate = body.releaseDate ? new Date(body.releaseDate).toISOString().split('T')[0] : null;
+    const releaseDate = body.releaseDate ? new Date(body.releaseDate).toISOString().split('T')[0] : body.endDate ? new Date(body.endDate).toISOString().split('T')[0] : null;
+    const freezeAutoRelease = body.freezeAutoRelease ?? (body.disbursementMode === 'manual_release');
+    const cycleDate = body.cycleDate ? new Date(body.cycleDate).toISOString().split('T')[0] : null;
+    const startDate = body.startDate ? new Date(body.startDate).toISOString().split('T')[0] : null;
+    const endDate = body.endDate ? new Date(body.endDate).toISOString().split('T')[0] : null;
+
     const { data: payroll, error: payrollError } = await client
       .from('business_payrolls')
       .insert({
         user_id: userId,
         name: body.name.trim(),
         release_date: releaseDate,
-        freeze_auto_release: body.freezeAutoRelease ?? false,
+        freeze_auto_release: freezeAutoRelease,
         status: releaseDate ? 'scheduled' : 'draft',
+        company_name: body.companyName?.trim() || null,
+        company_email: body.companyEmail?.trim() || null,
+        payroll_cycle: body.payrollCycle || null,
+        cycle_date: cycleDate,
+        start_date: startDate,
+        end_date: endDate,
+        company_description: body.companyDescription?.trim() || null,
+        default_salary_type: body.defaultSalaryType?.trim() || null,
+        currency: body.currency?.trim() || 'USD',
+        enable_allowances: body.enableAllowances ?? false,
       })
       .select('id')
       .single();
     if (payrollError || !payroll) return { success: false, message: payrollError?.message || 'Failed to create payroll', error: payrollError?.message };
 
-    const items = body.items.map((it: { counterpartyId: string; amountUsd: number; dueDate?: string }) => ({
-      payroll_id: payroll.id,
-      counterparty_id: it.counterpartyId,
-      amount_usd: Number(it.amountUsd) || 0,
-      due_date: it.dueDate ? new Date(it.dueDate).toISOString().split('T')[0] : null,
-    }));
-    const { error: itemsError } = await client.from('business_payroll_items').insert(items);
-    if (itemsError) {
-      await client.from('business_payrolls').delete().eq('id', payroll.id);
-      return { success: false, message: itemsError.message, error: itemsError.message };
+    const itemInputs = Array.isArray(body.items) ? body.items : [];
+    if (itemInputs.length > 0) {
+      const items = itemInputs.map((it: { counterpartyId: string; amountUsd: number; dueDate?: string }) => ({
+        payroll_id: payroll.id,
+        counterparty_id: it.counterpartyId,
+        amount_usd: Number(it.amountUsd) || 0,
+        due_date: it.dueDate ? new Date(it.dueDate).toISOString().split('T')[0] : null,
+      }));
+      const { error: itemsError } = await client.from('business_payroll_items').insert(items);
+      if (itemsError) {
+        await client.from('business_payrolls').delete().eq('id', payroll.id);
+        return { success: false, message: itemsError.message, error: itemsError.message };
+      }
     }
     return { success: true, message: 'Payroll created', data: { id: payroll.id } };
   }
@@ -161,14 +179,26 @@ export class BusinessSuitePayrollsService {
       escrowId: r.escrow_id,
       createdAt: r.created_at,
     }));
+    const disbursementMode: DisbursementMode = payroll.freeze_auto_release ? 'manual_release' : 'auto_release';
     return {
       success: true,
       message: 'Payroll detail retrieved',
       data: {
         id: payroll.id,
         name: payroll.name,
+        companyName: payroll.company_name ?? undefined,
+        companyEmail: payroll.company_email ?? undefined,
+        payrollCycle: payroll.payroll_cycle ?? undefined,
+        cycleDate: payroll.cycle_date ?? undefined,
+        startDate: payroll.start_date ?? undefined,
+        endDate: payroll.end_date ?? undefined,
+        companyDescription: payroll.company_description ?? undefined,
+        defaultSalaryType: payroll.default_salary_type ?? undefined,
+        currency: payroll.currency ?? undefined,
+        enableAllowances: !!payroll.enable_allowances,
         releaseDate: payroll.release_date ? formatReleaseDate(payroll.release_date) : null,
         freezeAutoRelease: !!payroll.freeze_auto_release,
+        disbursementMode,
         status: payroll.status,
         totalAmountUsd: parseFloat(totalAmountUsd.toFixed(2)),
         createdAt: payroll.created_at,
@@ -186,8 +216,19 @@ export class BusinessSuitePayrollsService {
     if (!existing) return { success: false, message: 'Payroll not found', error: 'Not found' };
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name.trim();
+    if (body.companyName !== undefined) updates.company_name = body.companyName?.trim() || null;
+    if (body.companyEmail !== undefined) updates.company_email = body.companyEmail?.trim() || null;
+    if (body.payrollCycle !== undefined) updates.payroll_cycle = body.payrollCycle || null;
+    if (body.cycleDate !== undefined) updates.cycle_date = body.cycleDate ? new Date(body.cycleDate).toISOString().split('T')[0] : null;
+    if (body.startDate !== undefined) updates.start_date = body.startDate ? new Date(body.startDate).toISOString().split('T')[0] : null;
+    if (body.endDate !== undefined) updates.end_date = body.endDate ? new Date(body.endDate).toISOString().split('T')[0] : null;
+    if (body.companyDescription !== undefined) updates.company_description = body.companyDescription?.trim() || null;
     if (body.releaseDate !== undefined) updates.release_date = body.releaseDate ? new Date(body.releaseDate).toISOString().split('T')[0] : null;
     if (body.freezeAutoRelease !== undefined) updates.freeze_auto_release = body.freezeAutoRelease;
+    if (body.disbursementMode !== undefined) updates.freeze_auto_release = body.disbursementMode === 'manual_release';
+    if (body.defaultSalaryType !== undefined) updates.default_salary_type = body.defaultSalaryType?.trim() || null;
+    if (body.currency !== undefined) updates.currency = body.currency?.trim() || null;
+    if (body.enableAllowances !== undefined) updates.enable_allowances = body.enableAllowances;
     if (Object.keys(updates).length === 0) return { success: true, message: 'No changes' };
     const { error } = await client.from('business_payrolls').update(updates).eq('id', payrollId).eq('user_id', userId);
     if (error) return { success: false, message: error.message, error: error.message };

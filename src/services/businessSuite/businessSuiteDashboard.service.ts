@@ -94,7 +94,7 @@ export class BusinessSuiteDashboardService {
       { data: supplierRows },
       { count: completedThisMonth },
     ] = await Promise.all([
-      walletService.getBalance(userId),
+      walletService.getBalance(userId, 'business'),
       trustiscoreService.getTrustiscore(userId),
       client.from('escrows').select('amount_usd').eq('suite_context', 'business').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).in('status', ['pending', 'active']),
       client.from('escrows').select('amount_usd').eq('suite_context', 'business').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`),

@@ -20,11 +20,13 @@ import { encryptionService } from '../encryption/encryption.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 
+export type WalletSuiteContext = 'personal' | 'business';
+
 export class WalletService {
   /**
-   * Get wallet balance for a user
+   * Get wallet balance for a user. Use suiteContext 'business' for business suite (separate wallet).
    */
-  async getBalance(userId: string): Promise<{
+  async getBalance(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
     data?: {
@@ -44,6 +46,7 @@ export class WalletService {
         .from('wallets')
         .select('id, balance_xrp, balance_usdt, balance_usdc, xrpl_address')
         .eq('user_id', userId)
+        .eq('suite_context', suiteContext)
         .maybeSingle();
 
       if (error) {
@@ -200,9 +203,9 @@ export class WalletService {
   }
 
   /**
-   * Connect a wallet to a user
+   * Connect a wallet to a user. Use suiteContext 'business' for business suite (separate wallet).
    */
-  async connectWallet(userId: string, request: { walletAddress: string }): Promise<{
+  async connectWallet(userId: string, request: { walletAddress: string }, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
     data?: { walletAddress: string; previousAddress?: string };
@@ -255,6 +258,7 @@ export class WalletService {
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
+        .eq('suite_context', suiteContext)
         .maybeSingle();
       if (walletError) {
         console.error('Error checking wallet:', walletError);
@@ -263,7 +267,7 @@ export class WalletService {
       if (!currentWallet) {
         const { error: createError } = await adminClient
           .from('wallets')
-          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0 });
+          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0, suite_context: suiteContext });
         if (createError) {
           return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
         }
@@ -273,7 +277,8 @@ export class WalletService {
       const { error: updateError } = await adminClient
         .from('wallets')
         .update({ xrpl_address: walletAddress, updated_at: new Date().toISOString() })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .eq('suite_context', suiteContext);
       if (updateError) {
         return { success: false, message: 'Failed to update wallet address', error: 'Database update failed' };
       }
@@ -284,9 +289,9 @@ export class WalletService {
   }
 
   /**
-   * Disconnect user's connected XRPL wallet (e.g., Xaman/XUMM)
+   * Disconnect user's connected XRPL wallet. Use suiteContext 'business' for business suite.
    */
-  async disconnectWallet(userId: string): Promise<{
+  async disconnectWallet(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
     data?: { previousAddress?: string };
@@ -298,6 +303,7 @@ export class WalletService {
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
+        .eq('suite_context', suiteContext)
         .maybeSingle();
       if (walletError) {
         console.error('Error checking wallet:', walletError);
@@ -310,7 +316,8 @@ export class WalletService {
       const { error: updateError } = await adminClient
         .from('wallets')
         .update({ xrpl_address: null, updated_at: new Date().toISOString() })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .eq('suite_context', suiteContext);
       if (updateError) {
         return { success: false, message: 'Failed to disconnect wallet', error: 'Database update failed' };
       }
@@ -403,11 +410,12 @@ export class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get user's wallet
+      // Get user's wallet (personal suite)
       const { data: wallet } = await adminClient
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
+        .eq('suite_context', 'personal')
         .single();
 
       if (!wallet) {
@@ -594,12 +602,13 @@ export class WalletService {
           })
           .eq('id', transactionId);
 
-        // Update wallet balance if successful
+        // Update wallet balance if successful (personal suite)
         if (status === 'completed') {
           const { data: wallet } = await adminClient
             .from('wallets')
             .select('id, xrpl_address')
             .eq('user_id', userId)
+            .eq('suite_context', 'personal')
             .single();
 
           if (wallet) {
@@ -632,11 +641,12 @@ export class WalletService {
           })
           .eq('id', transactionId);
 
-        // Update wallet balance
+        // Update wallet balance (personal suite)
         const { data: wallet } = await adminClient
           .from('wallets')
           .select('id, xrpl_address')
           .eq('user_id', userId)
+          .eq('suite_context', 'personal')
           .single();
 
         if (wallet) {
@@ -1085,11 +1095,12 @@ export class WalletService {
 
       const adminClient = supabaseAdmin || supabase;
 
-      // Get wallet
+      // Get wallet (personal suite)
       const { data: wallet, error: walletError } = await adminClient
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
+        .eq('suite_context', 'personal')
         .single();
 
       if (walletError || !wallet) {
@@ -1627,11 +1638,12 @@ export class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get wallet
+      // Get wallet (personal suite)
       const { data: wallet } = await adminClient
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
+        .eq('suite_context', 'personal')
         .single();
 
       if (!wallet) {
@@ -1898,6 +1910,7 @@ export class WalletService {
             .from('wallets')
             .select('id, xrpl_address')
             .eq('user_id', userId)
+            .eq('suite_context', 'personal')
             .single();
 
           if (wallet) {
@@ -1951,6 +1964,7 @@ export class WalletService {
           .from('wallets')
           .select('id, xrpl_address')
           .eq('user_id', userId)
+          .eq('suite_context', 'personal')
           .single();
 
         if (wallet) {
@@ -2064,12 +2078,13 @@ export class WalletService {
         })
         .eq('id', transactionId);
 
-      // Update wallet balance if successful
+      // Update wallet balance if successful (personal suite)
       if (status === 'completed') {
         const { data: walletForBalance } = await adminClient
           .from('wallets')
           .select('xrpl_address')
           .eq('user_id', userId)
+          .eq('suite_context', 'personal')
           .single();
 
         if (walletForBalance) {
@@ -2082,7 +2097,8 @@ export class WalletService {
               balance_usdc: balances.usdc,
               updated_at: new Date().toISOString(),
             })
-            .eq('user_id', userId);
+            .eq('user_id', userId)
+            .eq('suite_context', 'personal');
 
           // Create notification for successful deposit
           try {
@@ -2187,6 +2203,7 @@ export class WalletService {
         .from('wallets')
         .select('*')
         .eq('user_id', userId)
+        .eq('suite_context', 'personal')
         .single();
       
       // #region agent log
@@ -2551,7 +2568,7 @@ export class WalletService {
       try {
         const { data: receiverWallet } = await adminClient
           .from('wallets')
-          .select('user_id')
+          .select('id, user_id')
           .eq('xrpl_address', request.destinationAddress)
           .maybeSingle();
 
@@ -2571,16 +2588,8 @@ export class WalletService {
             .select()
             .single();
 
-          // Update receiver's wallet balance
-          const { data: receiverWalletData } = await adminClient
-            .from('wallets')
-            .select('id')
-            .eq('user_id', receiverWallet.user_id)
-            .single();
-
-          if (receiverWalletData) {
-            await this.syncBalancesFromXRPL(receiverWallet.user_id, receiverWalletData.id, request.destinationAddress);
-          }
+          // Update receiver's wallet balance (use wallet id from destination lookup)
+          await this.syncBalancesFromXRPL(receiverWallet.user_id, receiverWallet.id, request.destinationAddress);
 
           // Create notification for receiver
           try {
@@ -2827,11 +2836,12 @@ export class WalletService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get user's wallet address
+      // Get user's wallet address (personal suite)
       const { data: wallet } = await adminClient
         .from('wallets')
         .select('id, xrpl_address')
         .eq('user_id', userId)
+        .eq('suite_context', 'personal')
         .single();
 
       if (!wallet) return;
@@ -2959,11 +2969,12 @@ export class WalletService {
       this.syncPendingWithdrawals(userId).catch(() => {});
       this.syncPendingDeposits(userId).catch(() => {});
       
-      // Also sync incoming payments from XRPL if user has a wallet address
+      // Also sync incoming payments from XRPL if user has a wallet address (personal suite)
       const { data: wallet } = await adminClient
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
+        .eq('suite_context', 'personal')
         .maybeSingle();
       
       if (wallet?.xrpl_address) {
