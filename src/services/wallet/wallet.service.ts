@@ -328,10 +328,10 @@ export class WalletService {
   }
 
   /**
-   * Create a new custodial wallet for the user (personal suite).
+   * Create a new custodial wallet for the user. Use suiteContext 'business' for business suite.
    * Generates a new XRPL address and stores the encrypted secret. Idempotent: returns existing address if one already exists.
    */
-  async createWallet(userId: string): Promise<{
+  async createWallet(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
     data?: { xrpl_address: string };
@@ -343,7 +343,7 @@ export class WalletService {
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
-        .eq('suite_context', 'personal')
+        .eq('suite_context', suiteContext)
         .maybeSingle();
       if (existing?.xrpl_address) {
         return {
@@ -363,7 +363,7 @@ export class WalletService {
           balance_xrp: 0,
           balance_usdt: 0,
           balance_usdc: 0,
-          suite_context: 'personal',
+          suite_context: suiteContext,
         });
       if (insertError) {
         return {

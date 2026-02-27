@@ -195,6 +195,15 @@ router.post('/wallet/disconnect', authenticate, asyncHandler(async (req, res) =>
 }));
 
 /**
+ * @route   POST /api/business-suite/wallet/create
+ * @desc    Create a new custodial wallet for business suite (Bearer only). Returns existing address if one already exists.
+ * @access  Private (business suite only)
+ */
+router.post('/wallet/create', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createWallet(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/wallet/connect/xumm
  * @desc    Create XUMM payload to connect XRPL wallet to business suite (same as personal flow, independent wallet)
  * @access  Private (business suite only)
