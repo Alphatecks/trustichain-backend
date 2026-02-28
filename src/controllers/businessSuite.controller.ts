@@ -341,9 +341,9 @@ export class BusinessSuiteController {
   /** Business suite wallet balance (separate XRP wallet). GET /api/business-suite/wallet/balance */
   async getWalletBalance(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const pinStatus = await businessSuiteService.getPinStatus(userId);
-    if (!pinStatus.isBusinessSuite) {
-      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error ?? 'Not business suite' });
       return;
     }
     const result = await walletService.getBalance(userId, 'business');
@@ -366,9 +366,9 @@ export class BusinessSuiteController {
   /** Connect XRPL wallet to business suite (separate from personal). POST /api/business-suite/wallet/connect */
   async connectWallet(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const pinStatus = await businessSuiteService.getPinStatus(userId);
-    if (!pinStatus.isBusinessSuite) {
-      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error ?? 'Not business suite' });
       return;
     }
     const result = await walletService.connectWallet(userId, req.body || {}, 'business');
@@ -379,9 +379,9 @@ export class BusinessSuiteController {
   /** Disconnect business suite XRPL wallet. POST /api/business-suite/wallet/disconnect */
   async disconnectWallet(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const pinStatus = await businessSuiteService.getPinStatus(userId);
-    if (!pinStatus.isBusinessSuite) {
-      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error ?? 'Not business suite' });
       return;
     }
     const result = await walletService.disconnectWallet(userId, 'business');
@@ -392,9 +392,9 @@ export class BusinessSuiteController {
   /** Create custodial wallet for business suite (same as personal create). POST /api/business-suite/wallet/create */
   async createWallet(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const pinStatus = await businessSuiteService.getPinStatus(userId);
-    if (!pinStatus.isBusinessSuite) {
-      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error ?? 'Not business suite' });
       return;
     }
     const result = await walletService.createWallet(userId, 'business');
@@ -408,9 +408,9 @@ export class BusinessSuiteController {
   /** Create XUMM payload to connect XRPL wallet to business suite (same flow as personal, but for business wallet). POST /api/business-suite/wallet/connect/xumm */
   async connectWalletViaXUMM(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const pinStatus = await businessSuiteService.getPinStatus(userId);
-    if (!pinStatus.isBusinessSuite) {
-      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error ?? 'Not business suite' });
       return;
     }
     const result = await walletService.connectWalletViaXUMM(userId, 'business');
@@ -421,9 +421,9 @@ export class BusinessSuiteController {
   /** Check XUMM connection status and connect business wallet when signed. GET /api/business-suite/wallet/connect/xumm/status?xummUuid=... */
   async checkXUMMConnectionStatus(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const pinStatus = await businessSuiteService.getPinStatus(userId);
-    if (!pinStatus.isBusinessSuite) {
-      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' });
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error ?? 'Not business suite' });
       return;
     }
     const xummUuid = req.query.xummUuid as string;

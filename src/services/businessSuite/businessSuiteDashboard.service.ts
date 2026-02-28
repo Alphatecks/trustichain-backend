@@ -1,9 +1,10 @@
 /**
  * Business Suite Dashboard Service
- * Summary and activity list for the business suite dashboard (requires business_suite/enterprise account).
+ * Summary and activity list for the business suite dashboard (requires business_suite/enterprise or approved business_suite_kyc).
  */
 
 import { supabaseAdmin } from '../../config/supabase';
+import { businessSuiteService } from './businessSuite.service';
 import { walletService } from '../wallet/wallet.service';
 import { trustiscoreService } from '../trustiscore/trustiscore.service';
 import type {
@@ -19,8 +20,6 @@ import type {
   BusinessSuiteSubscriptionListResponse,
 } from '../../types/api/businessSuiteDashboard.types';
 
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
-
 const ESCROW_STATUS_TO_ACTIVITY: Record<string, BusinessSuiteActivityStatus> = {
   pending: 'Pending',
   active: 'In progress',
@@ -28,10 +27,6 @@ const ESCROW_STATUS_TO_ACTIVITY: Record<string, BusinessSuiteActivityStatus> = {
   cancelled: 'Pending',
   disputed: 'In progress',
 };
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
 
 function formatEscrowId(year: number, sequence: number): string {
   return `ESC-${year}-${sequence.toString().padStart(3, '0')}`;
@@ -58,25 +53,13 @@ function formatDateShort(iso: string | null): string | null {
 }
 
 export class BusinessSuiteDashboardService {
-  private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
-    const client = supabaseAdmin;
-    if (!client) return { allowed: false, error: 'No admin client' };
-    const { data: user, error } = await client
-      .from('users')
-      .select('account_type')
-      .eq('id', userId)
-      .single();
-    if (error || !user) return { allowed: false, error: 'User not found' };
-    if (!isBusinessSuite(user.account_type)) return { allowed: false, error: 'Not business suite' };
-    return { allowed: true };
-  }
-
   /**
    * Dashboard summary for business suite: only escrows with suite_context = 'business'.
    * Balance and trustiscore remain user-level; all escrow-derived stats are business-only.
+   * Access: account_type business_suite/enterprise OR business_suite_kyc status Approved.
    */
   async getDashboardSummary(userId: string): Promise<BusinessSuiteDashboardSummaryResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -138,7 +121,7 @@ export class BusinessSuiteDashboardService {
    * Paginated activity list (escrows created by this business user).
    */
   async getActivityList(userId: string, params: BusinessSuiteActivityListParams): Promise<BusinessSuiteActivityListResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -226,7 +209,7 @@ export class BusinessSuiteDashboardService {
     period: BusinessSuitePortfolioPeriod = 'monthly',
     year?: number
   ): Promise<{ success: boolean; message: string; data?: { period: BusinessSuitePortfolioPeriod; year?: number; data: BusinessSuitePortfolioDataPoint[] }; error?: string }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -342,7 +325,7 @@ export class BusinessSuiteDashboardService {
     page: number = 1,
     pageSize: number = 10
   ): Promise<BusinessSuiteUpcomingSupplyResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -393,7 +376,7 @@ export class BusinessSuiteDashboardService {
     page: number = 1,
     pageSize: number = 10
   ): Promise<BusinessSuiteSubscriptionListResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }

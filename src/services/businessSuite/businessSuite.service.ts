@@ -47,18 +47,19 @@ export class BusinessSuiteService {
       return { success: false, message: 'PIN must be exactly 6 digits', error: 'Invalid format' };
     }
 
+    const access = await this.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' };
+    }
+
     const { data: user, error: fetchError } = await client
       .from('users')
-      .select('account_type, business_pin_hash')
+      .select('business_pin_hash')
       .eq('id', userId)
       .single();
 
     if (fetchError || !user) {
       return { success: false, message: 'User not found', error: 'User not found' };
-    }
-
-    if (!isBusinessSuite(user.account_type)) {
-      return { success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' };
     }
 
     if (!user.business_pin_hash) {
@@ -92,17 +93,8 @@ export class BusinessSuiteService {
       return { success: false, message: 'PIN must be exactly 6 digits', error: 'Invalid format' };
     }
 
-    const { data: user, error: fetchError } = await client
-      .from('users')
-      .select('account_type')
-      .eq('id', userId)
-      .single();
-
-    if (fetchError || !user) {
-      return { success: false, message: 'User not found', error: 'User not found' };
-    }
-
-    if (!isBusinessSuite(user.account_type)) {
+    const access = await this.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: 'Not business suite' };
     }
 
@@ -119,29 +111,53 @@ export class BusinessSuiteService {
   }
 
   /**
-   * Check whether the user has business suite and whether they have a PIN set (for frontend to show set vs verify).
+   * Returns whether the user is allowed to use business suite features (dashboard, teams, payrolls, suppliers, wallet).
+   * Allowed when: users.account_type is business_suite/enterprise OR business_suite_kyc.status is 'Verified'.
+   */
+  async ensureBusinessSuiteAccess(userId: string): Promise<{ allowed: boolean; error?: string }> {
+    const client = supabaseAdmin;
+    if (!client) return { allowed: false, error: 'No admin client' };
+    const { data: user, error: userError } = await client
+      .from('users')
+      .select('account_type')
+      .eq('id', userId)
+      .single();
+    if (userError || !user) return { allowed: false, error: 'User not found' };
+    if (isBusinessSuite(user.account_type)) return { allowed: true };
+    const { data: kyc } = await client
+      .from('business_suite_kyc')
+      .select('status')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (kyc?.status === 'Verified') return { allowed: true };
+    return { allowed: false, error: 'Not business suite' };
+  }
+
+  /**
+   * Check whether the user has business suite access and whether they have a PIN set (for frontend to show set vs verify).
+   * isBusinessSuite is true when account_type is business_suite/enterprise OR business_suite_kyc is Approved.
    */
   async getPinStatus(
     userId: string
   ): Promise<{ success: boolean; message: string; isBusinessSuite: boolean; pinSet: boolean; error?: string }> {
+    const access = await this.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      return { success: true, message: 'OK', isBusinessSuite: false, pinSet: false };
+    }
     const client = supabaseAdmin;
     if (!client) {
-      return { success: false, message: 'Server configuration error', isBusinessSuite: false, pinSet: false, error: 'No admin client' };
+      return { success: false, message: 'Server configuration error', isBusinessSuite: true, pinSet: false, error: 'No admin client' };
     }
-
     const { data: user, error } = await client
       .from('users')
-      .select('account_type, business_pin_hash')
+      .select('business_pin_hash')
       .eq('id', userId)
       .single();
-
     if (error || !user) {
-      return { success: false, message: 'User not found', isBusinessSuite: false, pinSet: false, error: 'User not found' };
+      return { success: false, message: 'User not found', isBusinessSuite: true, pinSet: false, error: 'User not found' };
     }
-
-    const isBiz = isBusinessSuite(user.account_type);
     const pinSet = Boolean(user.business_pin_hash);
-    return { success: true, message: 'OK', isBusinessSuite: isBiz, pinSet };
+    return { success: true, message: 'OK', isBusinessSuite: true, pinSet };
   }
 }
 

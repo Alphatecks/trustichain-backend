@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
+import { businessSuiteService } from './businessSuite.service';
 import type {
   BusinessSuiteTeamListItem,
   BusinessSuiteTeamListResponse,
@@ -11,12 +12,6 @@ import type {
   CreateTeamRequest,
   AddTeamMemberRequest,
 } from '../../types/api/businessSuiteTeams.types';
-
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
 
 function formatNextDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -28,19 +23,6 @@ function formatNextDate(iso: string | null): string | null {
 }
 
 export class BusinessSuiteTeamsService {
-  private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
-    const client = supabaseAdmin;
-    if (!client) return { allowed: false, error: 'No admin client' };
-    const { data: user, error } = await client
-      .from('users')
-      .select('account_type')
-      .eq('id', userId)
-      .single();
-    if (error || !user) return { allowed: false, error: 'User not found' };
-    if (!isBusinessSuite(user.account_type)) return { allowed: false, error: 'Not business suite' };
-    return { allowed: true };
-  }
-
   /**
    * List teams for the business user (My Teams). Paginated.
    */
@@ -49,7 +31,7 @@ export class BusinessSuiteTeamsService {
     page: number = 1,
     pageSize: number = 10
   ): Promise<BusinessSuiteTeamListResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -104,7 +86,7 @@ export class BusinessSuiteTeamsService {
    * Get single team detail with members (for View).
    */
   async getTeamDetail(userId: string, teamId: string): Promise<BusinessSuiteTeamDetailResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -167,7 +149,7 @@ export class BusinessSuiteTeamsService {
     data?: { id: string; name: string; nextDate: string | null };
     error?: string;
   }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
@@ -206,7 +188,7 @@ export class BusinessSuiteTeamsService {
     data?: { teamMemberId: string; userId: string; email: string };
     error?: string;
   }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }

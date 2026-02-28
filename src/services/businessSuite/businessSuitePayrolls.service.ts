@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
+import { businessSuiteService } from './businessSuite.service';
 import type {
   CreatePayrollRequest,
   UpdatePayrollRequest,
@@ -17,12 +18,6 @@ import type {
   BusinessPayrollTransactionDetailResponse,
   DisbursementMode,
 } from '../../types/api/businessSuitePayrolls.types';
-
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
 
 function formatReleaseDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -39,17 +34,8 @@ function formatTransactionId(payrollId: string, itemId: string): string {
 }
 
 export class BusinessSuitePayrollsService {
-  private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
-    const client = supabaseAdmin;
-    if (!client) return { allowed: false, error: 'No admin client' };
-    const { data: user, error } = await client.from('users').select('account_type').eq('id', userId).single();
-    if (error || !user) return { allowed: false, error: 'User not found' };
-    if (!isBusinessSuite(user.account_type)) return { allowed: false, error: 'Not business suite' };
-    return { allowed: true };
-  }
-
   async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string }; error?: string }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     if (!body.name?.trim()) return { success: false, message: 'Payroll name is required', error: 'Validation' };
@@ -101,7 +87,7 @@ export class BusinessSuitePayrollsService {
   }
 
   async listPayrolls(userId: string, page: number = 1, pageSize: number = 20): Promise<BusinessPayrollListResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const from = (page - 1) * pageSize;
@@ -149,7 +135,7 @@ export class BusinessSuitePayrollsService {
   }
 
   async getPayrollDetail(userId: string, payrollId: string): Promise<BusinessPayrollDetailResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const { data: payroll, error: payrollError } = await client
@@ -209,7 +195,7 @@ export class BusinessSuitePayrollsService {
   }
 
   async updatePayroll(userId: string, payrollId: string, body: UpdatePayrollRequest): Promise<{ success: boolean; message: string; error?: string }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const { data: existing } = await client.from('business_payrolls').select('id').eq('id', payrollId).eq('user_id', userId).single();
@@ -236,7 +222,7 @@ export class BusinessSuitePayrollsService {
   }
 
   async releasePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; error?: string }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const { data: payroll, error: payrollError } = await client.from('business_payrolls').select('*').eq('id', payrollId).eq('user_id', userId).single();
@@ -279,7 +265,7 @@ export class BusinessSuitePayrollsService {
   }
 
   async getSummary(userId: string): Promise<BusinessPayrollSummaryResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const [
@@ -314,7 +300,7 @@ export class BusinessSuitePayrollsService {
     pageSize: number = 20,
     month?: string
   ): Promise<BusinessPayrollTransactionsResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const { data: userPayrolls } = await client.from('business_payrolls').select('id').eq('user_id', userId);
@@ -364,7 +350,7 @@ export class BusinessSuitePayrollsService {
   }
 
   async getTransactionDetail(userId: string, itemId: string): Promise<BusinessPayrollTransactionDetailResponse> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
     const { data: item, error: itemError } = await client.from('business_payroll_items').select('*').eq('id', itemId).single();

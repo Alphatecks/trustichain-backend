@@ -4,16 +4,11 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
-
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
+import { businessSuiteService } from './businessSuite.service';
 
 const KYC_STATUSES = ['Not started', 'Pending', 'In review', 'Verified', 'Rejected'];
 const CONTRACT_TYPES = ['One-time', 'Recurring', 'Framework', 'Master', 'Spot'];
 const ALLOWED_TAGS = ['Local', 'International', 'Logistics', 'Digital', 'Manufacturing', 'Services', 'Wholesale', 'Retail', 'Preferred', 'Trial'];
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
 
 export interface CreateSupplierRequest {
   /** Supplier or business name */
@@ -35,19 +30,6 @@ export interface CreateSupplierRequest {
 }
 
 export class BusinessSuiteSuppliersService {
-  private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
-    const client = supabaseAdmin;
-    if (!client) return { allowed: false, error: 'No admin client' };
-    const { data: user, error } = await client
-      .from('users')
-      .select('account_type')
-      .eq('id', userId)
-      .single();
-    if (error || !user) return { allowed: false, error: 'User not found' };
-    if (!isBusinessSuite(user.account_type)) return { allowed: false, error: 'Not business suite' };
-    return { allowed: true };
-  }
-
   /**
    * Create a new supplier. POST /api/business-suite/suppliers
    * Supports Add supplier UI: name, walletAddress, country, kycStatus, contractType, tags.
@@ -72,7 +54,7 @@ export class BusinessSuiteSuppliersService {
     };
     error?: string;
   }> {
-    const check = await this.ensureBusinessSuite(userId);
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
