@@ -87,6 +87,24 @@ router.post('/suppliers', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/kyc
+ * @desc    Get business suite KYC (business_suite_kyc table)
+ * @access  Private (business suite only)
+ */
+router.get('/kyc', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getKyc(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/kyc
+ * @desc    Submit/update business suite KYC verification (body: companyName, businessDescription?, companyLogoUrl?, defaultEscrowFeeRate?, autoReleasePeriod?, approvalWorkflow?, arbitrationType?, transactionLimits?, identityVerificationRequired?, addressVerificationRequired?, enhancedDueDiligence?)
+ * @access  Private (business suite only)
+ */
+router.post('/kyc', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.submitKyc(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/teams
  * @desc    My Teams list (paginated). Query: page, pageSize
  * @access  Private (business suite only)

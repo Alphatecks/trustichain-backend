@@ -4,6 +4,7 @@ import { businessSuiteDashboardService } from '../services/businessSuite/busines
 import { businessSuiteTeamsService } from '../services/businessSuite/businessSuiteTeams.service';
 import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
 import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
+import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
 import { walletService } from '../services/wallet/wallet.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
@@ -219,6 +220,23 @@ export class BusinessSuiteController {
     const result = await businessSuiteSuppliersService.createSupplier(userId, req.body || {});
     if (result.success) res.status(201).json(result);
     else if (result.error === 'Missing supplier name' || result.error === 'Invalid due date' || result.error === 'Invalid amount') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Get business suite KYC (uses business_suite_kyc table). GET /api/business-suite/kyc */
+  async getKyc(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteKycService.getKyc(userId);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Submit/update business suite KYC verification. POST /api/business-suite/kyc */
+  async submitKyc(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteKycService.submitKyc(userId, req.body || {});
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Missing companyName') res.status(400).json(result);
     else res.status(403).json(result);
   }
 
