@@ -96,6 +96,24 @@ router.get('/teams/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/business-suite/teams
+ * @desc    Create a new team (body: name, nextDate?)
+ * @access  Private (business suite only)
+ */
+router.post('/teams', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createTeam(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/teams/:teamId/members
+ * @desc    Add team member (full modal: personal, job, payment details)
+ * @access  Private (business suite only)
+ */
+router.post('/teams/:teamId/members', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.addTeamMember(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/payrolls
  * @desc    Create payroll (+ Add Payroll)
  * @access  Private (business suite only)

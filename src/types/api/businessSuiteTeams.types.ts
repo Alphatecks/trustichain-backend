@@ -2,6 +2,36 @@
  * Business Suite Teams API Types (My Teams)
  */
 
+/** Request body for POST /api/business-suite/teams (create team) */
+export interface CreateTeamRequest {
+  name: string;
+  nextDate?: string; // YYYY-MM-DD
+}
+
+/** Request body for POST /api/business-suite/teams/:teamId/members (add team member - full modal) */
+export interface AddTeamMemberRequest {
+  /** Step 1: Personal details */
+  email: string;
+  phoneNumber?: string;
+  country?: string;
+  address?: string;
+  gender?: 'Male' | 'Female' | 'Other';
+  /** Step 2: Job details */
+  jobTitle?: string;
+  employmentType?: 'Full time' | 'part time' | 'contract';
+  status?: string;
+  dateJoined?: string; // YYYY-MM-DD
+  currency?: string;
+  defaultSalaryType?: string;
+  salaryAmount?: number;
+  disbursementMode?: 'Auto Release' | 'Manual Release';
+  /** Step 3: Payment details */
+  accountType?: 'Bank Transfer' | 'Wallet Transfer';
+  walletType?: string;
+  walletAddress?: string;
+  network?: string;
+}
+
 export interface BusinessSuiteTeamListItem {
   id: string;
   name: string;

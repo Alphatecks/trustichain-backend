@@ -152,6 +152,43 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Create a new team. POST /api/business-suite/teams
+   */
+  async createTeam(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteTeamsService.createTeam(userId, req.body || {});
+    if (result.success) {
+      res.status(201).json(result);
+    } else if (result.error === 'Missing name') {
+      res.status(400).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
+   * Add team member (full modal: personal, job, payment). POST /api/business-suite/teams/:teamId/members
+   */
+  async addTeamMember(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const teamId = req.params.teamId ?? req.params.id;
+    if (!teamId) {
+      res.status(400).json({ success: false, message: 'Team ID required' });
+      return;
+    }
+    const result = await businessSuiteTeamsService.addTeamMember(userId, teamId, req.body || {});
+    if (result.success) {
+      res.status(201).json(result);
+    } else if (result.error === 'Missing email' || result.error === 'User not found' || result.error === 'Already a member') {
+      res.status(400).json(result);
+    } else if (result.error === 'Team not found') {
+      res.status(404).json(result);
+    } else {
+      res.status(403).json(result);
+    }
+  }
+
+  /**
    * Upcoming Supply list (business escrows pending/active with due date). GET /api/business-suite/dashboard/upcoming-supply
    */
   async getUpcomingSupply(req: Request, res: Response): Promise<void> {
