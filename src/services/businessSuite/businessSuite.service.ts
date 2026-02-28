@@ -110,9 +110,12 @@ export class BusinessSuiteService {
     return { success: true, message: 'PIN set successfully' };
   }
 
+  /** KYC statuses that grant business suite access (submitted and not rejected). */
+  private static readonly ALLOWED_KYC_STATUSES = ['Pending', 'In review', 'Verified'] as const;
+
   /**
    * Returns whether the user is allowed to use business suite features (dashboard, teams, payrolls, suppliers, wallet).
-   * Allowed when: users.account_type is business_suite/enterprise OR business_suite_kyc.status is 'Verified'.
+   * Allowed when: users.account_type is business_suite/enterprise OR business_suite_kyc exists with status in (Pending, In review, Verified).
    */
   async ensureBusinessSuiteAccess(userId: string): Promise<{ allowed: boolean; error?: string }> {
     const client = supabaseAdmin;
@@ -129,7 +132,9 @@ export class BusinessSuiteService {
       .select('status')
       .eq('user_id', userId)
       .maybeSingle();
-    if (kyc?.status === 'Verified') return { allowed: true };
+    if (kyc?.status && (BusinessSuiteService.ALLOWED_KYC_STATUSES as readonly string[]).includes(kyc.status)) {
+      return { allowed: true };
+    }
     return { allowed: false, error: 'Not business suite' };
   }
 
