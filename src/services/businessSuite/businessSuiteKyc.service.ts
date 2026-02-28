@@ -5,13 +5,8 @@
 
 import { supabaseAdmin } from '../../config/supabase';
 
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
 const APPROVAL_WORKFLOWS = ['single', 'dual', 'multi'];
 const ARBITRATION_TYPES = ['binding', 'non-binding', 'mediation'];
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
 
 export interface BusinessSuiteKycVerificationRequest {
   companyName: string;
@@ -72,20 +67,6 @@ function mapRowToResponse(row: any): BusinessSuiteKycResponse {
 }
 
 export class BusinessSuiteKycService {
-  private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
-    const client = supabaseAdmin;
-    if (!client) return { allowed: false, error: 'No admin client' };
-    // Used only by other business suite features that require account_type; KYC get/submit do not.
-    const { data: user, error } = await client
-      .from('users')
-      .select('account_type')
-      .eq('id', userId)
-      .single();
-    if (error || !user) return { allowed: false, error: 'User not found' };
-    if (!isBusinessSuite(user.account_type)) return { allowed: false, error: 'Not business suite' };
-    return { allowed: true };
-  }
-
   /**
    * Get current business suite KYC for the user. GET /api/business-suite/kyc
    * Allowed for any authenticated user (so they can view/edit before or after business suite upgrade).
