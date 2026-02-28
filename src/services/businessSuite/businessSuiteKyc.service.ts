@@ -75,6 +75,7 @@ export class BusinessSuiteKycService {
   private async ensureBusinessSuite(userId: string): Promise<{ allowed: boolean; error?: string }> {
     const client = supabaseAdmin;
     if (!client) return { allowed: false, error: 'No admin client' };
+    // Used only by other business suite features that require account_type; KYC get/submit do not.
     const { data: user, error } = await client
       .from('users')
       .select('account_type')
@@ -87,6 +88,7 @@ export class BusinessSuiteKycService {
 
   /**
    * Get current business suite KYC for the user. GET /api/business-suite/kyc
+   * Allowed for any authenticated user (so they can view/edit before or after business suite upgrade).
    */
   async getKyc(userId: string): Promise<{
     success: boolean;
@@ -94,11 +96,8 @@ export class BusinessSuiteKycService {
     data?: BusinessSuiteKycResponse;
     error?: string;
   }> {
-    const check = await this.ensureBusinessSuite(userId);
-    if (!check.allowed) {
-      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
-    }
-    const client = supabaseAdmin!;
+    const client = supabaseAdmin;
+    if (!client) return { success: false, message: 'Service unavailable', error: 'No admin client' };
     const { data: row, error } = await client
       .from('business_suite_kyc')
       .select('*')
@@ -123,6 +122,7 @@ export class BusinessSuiteKycService {
 
   /**
    * Submit or update business suite KYC. POST /api/business-suite/kyc
+   * Allowed for any authenticated user (verification can be submitted before account is upgraded to business_suite).
    */
   async submitKyc(
     userId: string,
@@ -133,14 +133,12 @@ export class BusinessSuiteKycService {
     data?: BusinessSuiteKycResponse;
     error?: string;
   }> {
-    const check = await this.ensureBusinessSuite(userId);
-    if (!check.allowed) {
-      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
-    }
     const companyName = typeof body.companyName === 'string' ? body.companyName.trim() : '';
     if (!companyName) {
       return { success: false, message: 'companyName is required', error: 'Missing companyName' };
     }
+    const client = supabaseAdmin;
+    if (!client) return { success: false, message: 'Service unavailable', error: 'No admin client' };
 
     const defaultEscrowFeeRate =
       body.defaultEscrowFeeRate != null && body.defaultEscrowFeeRate !== ''
@@ -151,7 +149,6 @@ export class BusinessSuiteKycService {
     const arbitrationType =
       body.arbitrationType && ARBITRATION_TYPES.includes(body.arbitrationType) ? body.arbitrationType : null;
 
-    const client = supabaseAdmin!;
     const { data: existing } = await client
       .from('business_suite_kyc')
       .select('id, status')
