@@ -3,6 +3,7 @@ import { businessSuiteService } from '../services/businessSuite/businessSuite.se
 import { businessSuiteDashboardService } from '../services/businessSuite/businessSuiteDashboard.service';
 import { businessSuiteTeamsService } from '../services/businessSuite/businessSuiteTeams.service';
 import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
+import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
 import { walletService } from '../services/wallet/wallet.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
@@ -209,6 +210,15 @@ export class BusinessSuiteController {
     const pageSize = Math.min(100, Math.max(1, req.query.pageSize != null ? Number(req.query.pageSize) : 10));
     const result = await businessSuiteDashboardService.getSubscriptionList(userId, page, pageSize);
     if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Create new supplier. POST /api/business-suite/suppliers */
+  async createSupplier(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteSuppliersService.createSupplier(userId, req.body || {});
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'Missing supplier name' || result.error === 'Invalid due date' || result.error === 'Invalid amount') res.status(400).json(result);
     else res.status(403).json(result);
   }
 

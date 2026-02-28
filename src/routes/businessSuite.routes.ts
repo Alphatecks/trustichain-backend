@@ -78,6 +78,15 @@ router.get('/dashboard/subscription', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   POST /api/business-suite/suppliers
+ * @desc    Add supplier (body: name, walletAddress?, country?, kycStatus?, contractType?, tags?)
+ * @access  Private (business suite only)
+ */
+router.post('/suppliers', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createSupplier(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/teams
  * @desc    My Teams list (paginated). Query: page, pageSize
  * @access  Private (business suite only)
