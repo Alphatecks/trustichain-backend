@@ -6,6 +6,7 @@ import { businessSuitePayrollsService } from '../services/businessSuite/business
 import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
 import { walletService } from '../services/wallet/wallet.service';
+import { storageService } from '../services/storage/storage.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
 
@@ -238,6 +239,22 @@ export class BusinessSuiteController {
     if (result.success) res.status(200).json(result);
     else if (result.error === 'Missing companyName') res.status(400).json(result);
     else res.status(403).json(result);
+  }
+
+  /** Upload company logo for KYC (image only). POST /api/business-suite/kyc/logo, multipart field: logo */
+  async uploadKycLogo(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ success: false, message: 'No file provided. Send multipart form with field "logo".' });
+      return;
+    }
+    const result = await storageService.uploadCompanyLogo(userId, file);
+    if (result.success && result.data?.fileUrl) {
+      res.status(200).json({ success: true, data: { companyLogoUrl: result.data.fileUrl } });
+    } else {
+      res.status(400).json({ success: false, message: result.message ?? 'Upload failed' });
+    }
   }
 
   /** Create payroll. POST /api/business-suite/payrolls */

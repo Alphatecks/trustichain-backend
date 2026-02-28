@@ -6,6 +6,9 @@
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
+// Image-only for company logo upload
+const IMAGE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+
 // Allowed file types for dispute evidence
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
@@ -193,6 +196,73 @@ export class StorageService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to upload file',
         error: error instanceof Error ? error.message : 'Failed to upload file',
+      };
+    }
+  }
+
+  /**
+   * Upload company logo (image only). Used by business suite KYC.
+   * Path: business-suite-logos/{userId}/...
+   */
+  async uploadCompanyLogo(
+    userId: string,
+    file: Express.Multer.File
+  ): Promise<UploadFileResult> {
+    try {
+      if (!file) {
+        return { success: false, message: 'No file provided', error: 'No file provided' };
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        return {
+          success: false,
+          message: `File size exceeds maximum allowed size of ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
+          error: 'File too large',
+        };
+      }
+      if (!IMAGE_MIME_TYPES.includes(file.mimetype)) {
+        return {
+          success: false,
+          message: 'Only images are allowed (JPEG, PNG, GIF, WebP)',
+          error: 'Invalid file type',
+        };
+      }
+      const adminClient = supabaseAdmin || supabase;
+      if (!adminClient) {
+        return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
+      }
+      await this.ensureBucketExists();
+      const filePath = `business-suite-logos/${this.generateFilePath(userId, file.originalname)}`;
+      const { data, error: uploadError } = await adminClient.storage
+        .from(this.BUCKET_NAME)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+      if (uploadError || !data) {
+        return {
+          success: false,
+          message: uploadError?.message || 'Failed to upload logo',
+          error: uploadError?.message || 'Upload failed',
+        };
+      }
+      const { data: urlData } = adminClient.storage.from(this.BUCKET_NAME).getPublicUrl(data.path);
+      const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
+      return {
+        success: true,
+        message: 'Logo uploaded successfully',
+        data: {
+          fileUrl,
+          filePath: data.path,
+          fileName: file.originalname,
+          fileSize: file.size,
+          fileType: file.mimetype,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to upload logo',
+        error: error instanceof Error ? error.message : 'Failed to upload logo',
       };
     }
   }

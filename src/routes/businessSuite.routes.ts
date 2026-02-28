@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { businessSuiteController } from '../controllers/businessSuite.controller';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 const router = Router();
 
 /**
@@ -93,6 +95,15 @@ router.post('/suppliers', authenticate, asyncHandler(async (req, res) => {
  */
 router.get('/kyc', authenticate, asyncHandler(async (req, res) => {
   await businessSuiteController.getKyc(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/kyc/logo
+ * @desc    Upload company logo (image picker). multipart/form-data field: logo (image only: JPEG, PNG, GIF, WebP). Returns companyLogoUrl to use in POST /kyc.
+ * @access  Private (business suite only)
+ */
+router.post('/kyc/logo', authenticate, upload.single('logo'), asyncHandler(async (req, res) => {
+  await businessSuiteController.uploadKycLogo(req, res);
 }));
 
 /**
