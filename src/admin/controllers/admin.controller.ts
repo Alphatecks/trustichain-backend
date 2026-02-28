@@ -197,6 +197,31 @@ export class AdminController {
     res.status(result.success ? 200 : 400).json(result);
   }
 
+  async approveBusinessSuiteKyc(req: Request, res: Response): Promise<void> {
+    const userId = req.body?.userId as string;
+    const status = req.body?.status as string;
+    const adminId = req.admin?.id;
+    if (!userId || !status || !adminId) {
+      res.status(400).json({
+        success: false,
+        message: 'userId, status, and admin auth required',
+        error: 'Bad request',
+      });
+      return;
+    }
+    const allowed = ['In review', 'Verified', 'Rejected'];
+    if (!allowed.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: `status must be one of: ${allowed.join(', ')}`,
+        error: 'Bad request',
+      });
+      return;
+    }
+    const result = await adminDashboardService.approveBusinessSuiteKyc(userId, status as 'In review' | 'Verified' | 'Rejected', adminId);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
   async search(req: Request, res: Response<AdminSearchResponse>): Promise<void> {
     const q = (req.query.q as string) || '';
     const limit = Math.min(Number(req.query.limit) || 20, 50);

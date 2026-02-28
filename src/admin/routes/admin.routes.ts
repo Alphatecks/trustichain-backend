@@ -93,11 +93,20 @@ router.get('/kyc/:userId', adminAuthenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   POST /api/admin/kyc/approve
- * @desc    Approve/decline/suspend KYC (body: { userId, status: 'verified'|'declined'|'suspended' })
+ * @desc    Approve/decline/suspend personal KYC (user_kyc) (body: { userId, status: 'verified'|'declined'|'suspended' })
  * @access  Private (admin)
  */
 router.post('/kyc/approve', adminAuthenticate, asyncHandler(async (req, res) => {
   await adminController.approveKyc(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/kyc/business-suite/approve
+ * @desc    Approve/reject business suite KYC (business_suite_kyc) (body: { userId, status: 'In review'|'Verified'|'Rejected' })
+ * @access  Private (admin)
+ */
+router.post('/kyc/business-suite/approve', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.approveBusinessSuiteKyc(req, res);
 }));
 
 /**

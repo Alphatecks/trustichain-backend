@@ -578,6 +578,55 @@ export class AdminDashboardService {
   }
 
   /**
+   * Approve / reject / set in-review for business suite KYC (updates business_suite_kyc, not user_kyc).
+   */
+  async approveBusinessSuiteKyc(
+    userId: string,
+    status: 'In review' | 'Verified' | 'Rejected',
+    adminId: string
+  ): Promise<{ success: boolean; message: string; data?: { status: string }; error?: string }> {
+    try {
+      const client = this.getAdminClient();
+      const now = new Date().toISOString();
+
+      const { data: existing, error: fetchError } = await client
+        .from('business_suite_kyc')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (fetchError) {
+        return { success: false, message: fetchError.message, error: fetchError.message };
+      }
+      if (!existing) {
+        return { success: false, message: 'No business suite KYC record found for this user', error: 'Not found' };
+      }
+
+      const { error: updateError } = await client
+        .from('business_suite_kyc')
+        .update({
+          status,
+          reviewed_at: now,
+          reviewed_by: adminId,
+          updated_at: now,
+        })
+        .eq('user_id', userId);
+
+      if (updateError) {
+        return { success: false, message: updateError.message, error: updateError.message };
+      }
+      return { success: true, message: 'Business KYC status updated', data: { status } };
+    } catch (e) {
+      console.error('Admin approveBusinessSuiteKyc error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to update business KYC',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
    * Search across users, escrows, transactions, disputes
    */
   async search(q: string, limit: number = 20): Promise<AdminSearchResponse> {
