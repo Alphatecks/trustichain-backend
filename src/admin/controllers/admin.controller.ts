@@ -279,6 +279,26 @@ export class AdminController {
     res.status(result.success ? 200 : 500).json(result);
   }
 
+  /** List only personal suite users. GET /api/admin/user-management/personal-suites */
+  async getPersonalSuites(req: Request, res: Response<UserManagementListResponse>): Promise<void> {
+    const searchQuery = req.query.searchQuery as string | undefined;
+    const kycStatus = req.query.kycStatus as import('../../types/api/adminUserManagement.types').UserManagementKycStatus | undefined;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const sortBy = req.query.sortBy as string | undefined;
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
+    const result = await adminUserManagementService.getUsers({
+      searchQuery,
+      accountType: 'personal',
+      kycStatus,
+      page,
+      pageSize,
+      sortBy,
+      sortOrder,
+    });
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
   async getUserManagementUsers(req: Request, res: Response<UserManagementListResponse>): Promise<void> {
     const searchQuery = req.query.searchQuery as string | undefined;
     const accountType = req.query.accountType as 'personal' | 'business_suite' | undefined;

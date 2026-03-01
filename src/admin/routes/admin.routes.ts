@@ -157,6 +157,15 @@ router.get('/user-management/stats', adminAuthenticate, asyncHandler(async (req,
 }));
 
 /**
+ * @route   GET /api/admin/user-management/personal-suites
+ * @desc    List only personal suite users. Query: searchQuery, kycStatus, page, pageSize, sortBy, sortOrder
+ * @access  Private (admin)
+ */
+router.get('/user-management/personal-suites', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getPersonalSuites(req, res);
+}));
+
+/**
  * @route   GET /api/admin/user-management/users
  * @desc    User list with search, accountType (personal|business_suite), kycStatus, page, pageSize, sortBy, sortOrder
  * @access  Private (admin)
