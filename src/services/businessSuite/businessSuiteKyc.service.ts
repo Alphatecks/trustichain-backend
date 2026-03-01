@@ -90,14 +90,23 @@ export class BusinessSuiteKycService {
       if (fallback.error || !fallback.data) {
         return { success: false, message: error.message || 'Failed to fetch KYC', error: error.message };
       }
+      if (fallback.data.status === 'In review') {
+        return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
+      }
       return { success: true, message: 'KYC retrieved', data: mapRowToResponse(fallback.data) };
     }
     if (!row) {
       const { data: legacyRow } = await client.from('business_suite_kyc').select('*').eq('user_id', userId).maybeSingle();
       if (legacyRow) {
+        if (legacyRow.status === 'In review') {
+          return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
+        }
         return { success: true, message: 'KYC retrieved', data: mapRowToResponse(legacyRow) };
       }
       return { success: true, message: 'No KYC record yet', data: undefined };
+    }
+    if (row.status === 'In review') {
+      return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
     }
     return { success: true, message: 'KYC retrieved', data: mapRowToResponse(row) };
   }
@@ -150,9 +159,19 @@ export class BusinessSuiteKycService {
 
     const { data: existingBiz } = await client
       .from('businesses')
-      .select('id')
+      .select('id, status')
       .eq('owner_user_id', userId)
       .maybeSingle();
+
+    if (existingBiz?.status === 'In review') {
+      return { success: false, message: 'Account is under review; you cannot update KYC while under review.', error: 'Account under review' };
+    }
+    if (!existingBiz) {
+      const { data: legacyKyc } = await client.from('business_suite_kyc').select('status').eq('user_id', userId).maybeSingle();
+      if (legacyKyc?.status === 'In review') {
+        return { success: false, message: 'Account is under review; you cannot update KYC while under review.', error: 'Account under review' };
+      }
+    }
 
     let resultRow: any;
     if (existingBiz) {

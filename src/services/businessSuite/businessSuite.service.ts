@@ -105,12 +105,24 @@ export class BusinessSuiteService {
     return { success: true, message: 'PIN set successfully' };
   }
 
-  /** KYC statuses that grant business suite access (submitted and not rejected). */
-  private static readonly ALLOWED_KYC_STATUSES = ['Pending', 'In review', 'Verified'] as const;
+  /** KYC statuses that grant business suite access. In review = suspended (no fetch, no operations). */
+  private static readonly ALLOWED_KYC_STATUSES = ['Pending', 'Verified'] as const;
+
+  /**
+   * Returns the business KYC status for a user (from businesses or business_suite_kyc). Null if none.
+   */
+  async getBusinessStatus(userId: string): Promise<string | null> {
+    const client = supabaseAdmin;
+    if (!client) return null;
+    const { data: biz } = await client.from('businesses').select('status').eq('owner_user_id', userId).maybeSingle();
+    if (biz?.status) return biz.status;
+    const { data: kyc } = await client.from('business_suite_kyc').select('status').eq('user_id', userId).maybeSingle();
+    return kyc?.status ?? null;
+  }
 
   /**
    * Returns whether the user is allowed to use business suite features (dashboard, teams, payrolls, suppliers, wallet).
-   * Allowed when: businesses table has a row for owner_user_id with status in (Pending, In review, Verified).
+   * Allowed when status is Pending or Verified. Blocked when In review or Rejected.
    */
   async ensureBusinessSuiteAccess(userId: string): Promise<{ allowed: boolean; error?: string }> {
     const client = supabaseAdmin;
@@ -130,6 +142,10 @@ export class BusinessSuiteService {
       .maybeSingle();
     if (kyc?.status && (BusinessSuiteService.ALLOWED_KYC_STATUSES as readonly string[]).includes(kyc.status)) {
       return { allowed: true };
+    }
+    const status = biz?.status ?? kyc?.status;
+    if (status === 'In review') {
+      return { allowed: false, error: 'Account is under review; access is temporarily suspended.' };
     }
     return { allowed: false, error: 'Not business suite' };
   }

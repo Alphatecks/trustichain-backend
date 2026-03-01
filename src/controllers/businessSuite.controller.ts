@@ -244,6 +244,11 @@ export class BusinessSuiteController {
   /** Upload company logo for KYC (image only). POST /api/business-suite/kyc/logo, multipart field: logo */
   async uploadKycLogo(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
+    const status = await businessSuiteService.getBusinessStatus(userId);
+    if (status === 'In review') {
+      res.status(403).json({ success: false, message: 'Account is under review; access is temporarily suspended.' });
+      return;
+    }
     const file = req.file;
     if (!file) {
       res.status(400).json({ success: false, message: 'No file provided. Send multipart form with field "logo".' });
