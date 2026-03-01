@@ -14,6 +14,7 @@ import type {
   AdminKycApproveResponse,
   AdminSearchResponse,
   AdminAlertsResponse,
+  AdminBusinessListResponse,
 } from '../../types/api/adminDashboard.types';
 import type {
   UserManagementStatsResponse,
@@ -160,6 +161,14 @@ export class AdminController {
 
   async getKycList(_req: Request, res: Response<AdminKycListResponse>): Promise<void> {
     const result = await adminDashboardService.getKycList();
+    res.status(result.success ? 200 : 500).json(result);
+  }
+
+  async getBusinesses(req: Request, res: Response<AdminBusinessListResponse>): Promise<void> {
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const status = (req.query.status as string) || undefined;
+    const result = await adminDashboardService.getBusinesses({ page, pageSize, status });
     res.status(result.success ? 200 : 500).json(result);
   }
 

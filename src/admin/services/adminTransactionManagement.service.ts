@@ -140,11 +140,15 @@ export class AdminTransactionManagementService {
 
       let userIdsFilter: string[] | null = null;
       if (accountType) {
-        const atValue = accountType === 'business_suite' ? 'business_suite' : null;
-        const { data: usersWithType } = atValue
-          ? await client.from('users').select('id').eq('account_type', atValue)
-          : await client.from('users').select('id').or('account_type.is.null,account_type.neq.business_suite');
-        userIdsFilter = (usersWithType || []).map((u: { id: string }) => u.id);
+        if (accountType === 'business_suite') {
+          const { data: bizRows } = await client.from('businesses').select('owner_user_id');
+          userIdsFilter = (bizRows || []).map((r: { owner_user_id: string }) => r.owner_user_id);
+        } else {
+          const { data: bizRows } = await client.from('businesses').select('owner_user_id');
+          const businessOwnerIds = new Set((bizRows || []).map((r: { owner_user_id: string }) => r.owner_user_id));
+          const { data: allUsers } = await client.from('users').select('id');
+          userIdsFilter = (allUsers || []).filter((u: { id: string }) => !businessOwnerIds.has(u.id)).map((u: { id: string }) => u.id);
+        }
         if (userIdsFilter.length === 0) {
           return {
             success: true,

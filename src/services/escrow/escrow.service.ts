@@ -390,16 +390,16 @@ export class EscrowService {
         return 'business';
       })();
       if (request.suiteContext === 'business') {
-        const { data: userRow } = await adminClient
-          .from('users')
-          .select('account_type')
-          .eq('id', userId)
-          .single();
-        const at = userRow?.account_type;
-        if (at !== 'business_suite' && at !== 'enterprise') {
+        const { data: biz } = await adminClient
+          .from('businesses')
+          .select('id, status')
+          .eq('owner_user_id', userId)
+          .maybeSingle();
+        const allowed = biz?.status === 'Verified' || biz?.status === 'In review' || biz?.status === 'Pending';
+        if (!allowed) {
           return {
             success: false,
-            message: 'Business suite is not enabled for this account. Remove suiteContext or upgrade to Business Suite.',
+            message: 'Business suite is not enabled for this account. Remove suiteContext or complete business KYC.',
             error: 'Not business suite',
           };
         }

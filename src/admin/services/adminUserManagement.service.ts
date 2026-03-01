@@ -70,23 +70,17 @@ export class AdminUserManagementService {
       const [
         { count: totalUsers },
         { count: totalUsersLastMonth },
-        allUsersForSuite,
+        { count: businessSuiteCount },
       ] = await Promise.all([
         client.from('users').select('*', { count: 'exact', head: true }),
         client.from('users').select('*', { count: 'exact', head: true }).lt('created_at', thisMonthStart.toISOString()),
-        client.from('users').select('id, account_type'),
+        client.from('businesses').select('*', { count: 'exact', head: true }),
       ]);
 
       const total = totalUsers ?? 0;
       const totalLast = totalUsersLastMonth ?? 0;
-
-      const users = allUsersForSuite?.data ?? [];
-      let personalSuite = 0;
-      let businessSuite = 0;
-      users.forEach((u: { account_type: string | null }) => {
-        if (isBusinessSuite(u.account_type)) businessSuite++;
-        else personalSuite++;
-      });
+      const businessSuite = businessSuiteCount ?? 0;
+      const personalSuite = Math.max(0, total - businessSuite);
 
       const percent = (current: number, prev: number) =>
         prev === 0 ? undefined : Math.round(((current - prev) / prev) * 100);
@@ -154,19 +148,51 @@ export class AdminUserManagementService {
         }
       }
 
+      let userIdsBusinessFilter: string[] | null = null;
+      if (params.accountType === 'business_suite') {
+        try {
+          const { data: bizRows } = await client.from('businesses').select('owner_user_id').in('status', ['Pending', 'In review', 'Verified']);
+          userIdsBusinessFilter = (bizRows || []).map((r: { owner_user_id: string }) => r.owner_user_id);
+          if (userIdsBusinessFilter.length === 0) {
+            return {
+              success: true,
+              message: 'Users retrieved',
+              data: { totalPages: 0, currentPage: page, totalUsers: 0, pageSize, users: [] },
+            };
+          }
+        } catch {
+          userIdsBusinessFilter = [];
+        }
+      } else if (params.accountType === 'personal') {
+        try {
+          const { data: bizRows } = await client.from('businesses').select('owner_user_id');
+          const businessOwnerIds = new Set((bizRows || []).map((r: { owner_user_id: string }) => r.owner_user_id));
+          const { data: allUsers } = await client.from('users').select('id');
+          const personalIds = (allUsers || []).filter((u: { id: string }) => !businessOwnerIds.has(u.id)).map((u: { id: string }) => u.id);
+          if (personalIds.length === 0) {
+            return {
+              success: true,
+              message: 'Users retrieved',
+              data: { totalPages: 0, currentPage: page, totalUsers: 0, pageSize, users: [] },
+            };
+          }
+          userIdsBusinessFilter = personalIds;
+        } catch {
+          userIdsBusinessFilter = [];
+        }
+      }
+
       let query = client.from('users').select('id, full_name, email, account_type, created_at, updated_at', { count: 'exact' });
 
       if (userIdsFilter && userIdsFilter.length > 0) {
         query = query.in('id', userIdsFilter);
       }
+      if (userIdsBusinessFilter && userIdsBusinessFilter.length > 0) {
+        query = query.in('id', userIdsBusinessFilter);
+      }
       if (params.searchQuery?.trim()) {
         const q = params.searchQuery.trim();
         query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%`);
-      }
-      if (params.accountType === 'business_suite') {
-        query = query.in('account_type', BUSINESS_SUITE_TYPES);
-      } else if (params.accountType === 'personal') {
-        query = query.or('account_type.is.null,account_type.not.in.(business_suite,enterprise)');
       }
 
       const orderCol = sortBy === 'name' ? 'full_name' : sortBy === 'accountCreatedDate' ? 'created_at' : sortBy === 'totalVolume' || sortBy === 'lastActivity' ? 'updated_at' : 'created_at';
@@ -210,14 +236,19 @@ export class AdminUserManagementService {
         return acc;
       }, {});
 
-      let businessKycRows: { data: any[] | null } = { data: [] };
+      let businessRows: { data: any[] | null } = { data: [] };
       try {
-        businessKycRows = await client.from('business_suite_kyc').select('user_id, company_name, status').in('user_id', userIds);
+        businessRows = await client.from('businesses').select('owner_user_id, company_name, status').in('owner_user_id', userIds);
       } catch {
-        // business_suite_kyc may not exist
+        try {
+          const kyc = await client.from('business_suite_kyc').select('user_id, company_name, status').in('user_id', userIds);
+          businessRows = { data: (kyc.data || []).map((r: any) => ({ owner_user_id: r.user_id, company_name: r.company_name, status: r.status })) };
+        } catch {
+          // neither table available
+        }
       }
-      const businessByUser = (businessKycRows?.data || []).reduce<Record<string, { company_name: string | null; status: string }>>((acc, r: any) => {
-        acc[r.user_id] = { company_name: r.company_name ?? null, status: r.status };
+      const businessByUser = (businessRows?.data || []).reduce<Record<string, { company_name: string | null; status: string }>>((acc, r: any) => {
+        acc[r.owner_user_id] = { company_name: r.company_name ?? null, status: r.status };
         return acc;
       }, {});
 
@@ -261,7 +292,7 @@ export class AdminUserManagementService {
           accountCreatedDate: u.created_at,
           lastActivityTimestamp: lastActivityByUser[u.id] || null,
           lastActivityAgo: lastDate ? timeAgo(lastDate) : undefined,
-          accountType: u.account_type || undefined,
+          accountType: biz ? 'business_suite' : undefined,
           companyName: biz?.company_name ?? null,
           businessKycStatus: biz?.status ?? null,
         };
@@ -330,7 +361,7 @@ export class AdminUserManagementService {
 
       const [kyc, businessKyc, mainWallet, savingsList, escrowsResp, transactionsResp, disputesResp, volumes, lastTx] = await Promise.all([
         client.from('user_kyc').select('status, submitted_at, reviewed_at, linked_id_type, card_number, wallet_address, document_live_selfie_url, document_front_url, document_back_url').eq('user_id', userId).maybeSingle(),
-        client.from('business_suite_kyc').select('company_logo_url').eq('user_id', userId).maybeSingle(),
+        client.from('businesses').select('company_logo_url').eq('owner_user_id', userId).maybeSingle(),
         client.from('wallets').select('id, balance_usd, balance_xrp, xrpl_address, created_at').eq('user_id', userId).maybeSingle(),
         client.from('savings_wallets').select('id, name, target_amount_usd, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
         client.from('escrows').select('id, user_id, counterparty_id, amount_usd, status, created_at').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).order('created_at', { ascending: false }).range((escrowPage - 1) * escrowPageSize, escrowPage * escrowPageSize - 1),
@@ -341,6 +372,11 @@ export class AdminUserManagementService {
       ]);
 
       const kycData = kyc?.data;
+      let businessKycData = businessKyc?.data as { company_logo_url?: string } | undefined;
+      if (!businessKycData) {
+        const legacy = await client.from('business_suite_kyc').select('company_logo_url').eq('user_id', userId).maybeSingle();
+        businessKycData = legacy?.data as { company_logo_url?: string } | undefined;
+      }
       const kycStatus = (kycData?.status || 'pending') as UserManagementKycStatus;
       const totalVolume = (volumes?.data || []).reduce((sum: number, t: any) => sum + parseFloat(t.amount_usd || '0'), 0);
       const lastAt = lastTx?.data?.created_at ?? null;
@@ -374,7 +410,6 @@ export class AdminUserManagementService {
       });
       const walletTotal = (mainWalletData ? 1 : 0) + savings.length;
 
-      const businessKycData = businessKyc?.data as { company_logo_url?: string } | undefined;
       const rawLogoUrl = businessKycData?.company_logo_url ?? null;
       const companyLogoUrl = rawLogoUrl
         ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
@@ -476,26 +511,13 @@ export class AdminUserManagementService {
       const { count: disputesTotal } = await client.from('disputes').select('*', { count: 'exact', head: true }).or(`initiator_user_id.eq.${userId},respondent_user_id.eq.${userId}`);
       const { count: transactionsTotal } = await client.from('transactions').select('*', { count: 'exact', head: true }).eq('user_id', userId);
 
-      const accountTypeLabel = (v: string | null) => {
-        if (!v) return 'Personal';
-        const map: Record<string, string> = {
-          business_suite: 'Business suite',
-          enterprise: 'Business suite',
-          starter: 'Personal',
-          basic: 'Personal',
-          premium: 'Personal',
-          personal: 'Personal',
-        };
-        return map[v] || v;
-      };
-
       const data: UserManagementDetailData = {
         id: user.id,
         userId: user.id,
         name: user.full_name || '—',
         email: user.email || '—',
         profilePictureUrl: (user as any).avatar_url,
-        accountType: accountTypeLabel(user.account_type),
+        accountType: businessKycData ? 'Business suite' : 'Personal',
         kycStatus,
         walletAddress: userPrimaryWalletAddress,
         country: user.country,

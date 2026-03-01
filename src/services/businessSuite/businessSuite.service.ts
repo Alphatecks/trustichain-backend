@@ -115,18 +115,19 @@ export class BusinessSuiteService {
 
   /**
    * Returns whether the user is allowed to use business suite features (dashboard, teams, payrolls, suppliers, wallet).
-   * Allowed when: users.account_type is business_suite/enterprise OR business_suite_kyc exists with status in (Pending, In review, Verified).
+   * Allowed when: businesses table has a row for owner_user_id with status in (Pending, In review, Verified).
    */
   async ensureBusinessSuiteAccess(userId: string): Promise<{ allowed: boolean; error?: string }> {
     const client = supabaseAdmin;
     if (!client) return { allowed: false, error: 'No admin client' };
-    const { data: user, error: userError } = await client
-      .from('users')
-      .select('account_type')
-      .eq('id', userId)
-      .single();
-    if (userError || !user) return { allowed: false, error: 'User not found' };
-    if (isBusinessSuite(user.account_type)) return { allowed: true };
+    const { data: biz, error: bizError } = await client
+      .from('businesses')
+      .select('status')
+      .eq('owner_user_id', userId)
+      .maybeSingle();
+    if (!bizError && biz?.status && (BusinessSuiteService.ALLOWED_KYC_STATUSES as readonly string[]).includes(biz.status)) {
+      return { allowed: true };
+    }
     const { data: kyc } = await client
       .from('business_suite_kyc')
       .select('status')

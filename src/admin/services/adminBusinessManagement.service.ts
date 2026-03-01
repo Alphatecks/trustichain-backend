@@ -47,13 +47,10 @@ export class AdminBusinessManagementService {
     return client;
   }
 
-  /** Get user IDs that have Business Suite (or enterprise) account type. */
+  /** Get user IDs that own a business (from businesses table). */
   private async getBusinessSuiteUserIds(client: SupabaseClient): Promise<string[]> {
-    const { data: rows } = await client
-      .from('users')
-      .select('id')
-      .in('account_type', BUSINESS_SUITE_TYPES);
-    return (rows || []).map((r: { id: string }) => r.id);
+    const { data: rows } = await client.from('businesses').select('owner_user_id');
+    return (rows || []).map((r: { owner_user_id: string }) => r.owner_user_id);
   }
 
   /**

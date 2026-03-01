@@ -18,6 +18,7 @@ import type {
   AdminKycApproveResponse,
   AdminSearchResponse,
   AdminAlertsResponse,
+  AdminBusinessListResponse,
   KycStatus,
 } from '../../types/api/adminDashboard.types';
 
@@ -327,10 +328,17 @@ export class AdminDashboardService {
 
       const userIds = users.map((u: { id: string }) => u.id);
       let kycRows: { data: any[] | null } = { data: [] };
+      let businessOwnerIds: Set<string> = new Set();
       try {
         kycRows = await client.from('user_kyc').select('user_id, status').in('user_id', userIds);
       } catch {
         // user_kyc table may not exist yet (migration 031 not run)
+      }
+      try {
+        const { data: bizRows } = await client.from('businesses').select('owner_user_id').in('owner_user_id', userIds);
+        businessOwnerIds = new Set((bizRows || []).map((r: { owner_user_id: string }) => r.owner_user_id));
+      } catch {
+        // businesses table may not exist yet
       }
       const txSums = await client.from('transactions').select('user_id, amount_usd').in('user_id', userIds);
 
@@ -372,7 +380,7 @@ export class AdminDashboardService {
           userId: u.id,
           fullName: u.full_name || '—',
           email: u.email || '—',
-          accountType: accountTypeLabel(u.account_type),
+          accountType: businessOwnerIds.has(u.id) ? 'Business Suite' : accountTypeLabel(u.account_type),
           kycStatus: kycByUser[u.id] || 'pending',
           totalVolumeUsd: Math.round((volumeByUser[u.id] || 0) * 100) / 100,
           lastActivityAt: lastAt,
@@ -486,10 +494,11 @@ export class AdminDashboardService {
         };
       }
 
-      const [{ data: user }, { data: businessKyc }] = await Promise.all([
+      const [{ data: user }, { data: businessRow }] = await Promise.all([
         client.from('users').select('id, full_name, email').eq('id', userId).single(),
-        client.from('business_suite_kyc').select('company_name, status, submitted_at, reviewed_at, company_logo_url').eq('user_id', userId).maybeSingle(),
+        client.from('businesses').select('company_name, status, submitted_at, reviewed_at, company_logo_url').eq('owner_user_id', userId).maybeSingle(),
       ]);
+      const businessKyc = businessRow ?? (await client.from('business_suite_kyc').select('company_name, status, submitted_at, reviewed_at, company_logo_url').eq('user_id', userId).maybeSingle()).data;
 
       if (kyc) {
         const documents: string[] = [];
@@ -652,7 +661,8 @@ export class AdminDashboardService {
   }
 
   /**
-   * Approve / reject / set in-review for business suite KYC (updates business_suite_kyc, not user_kyc).
+   * Approve / reject / set in-review for business suite KYC.
+   * Updates businesses table (and business_suite_kyc for legacy sync). Does not modify users table.
    */
   async approveBusinessSuiteKyc(
     userId: string,
@@ -662,43 +672,49 @@ export class AdminDashboardService {
     try {
       const client = this.getAdminClient();
       const now = new Date().toISOString();
+      const updatePayload = { status, reviewed_at: now, reviewed_by: adminId, updated_at: now };
 
-      const { data: existing, error: fetchError } = await client
-        .from('business_suite_kyc')
+      const { data: existingBiz, error: fetchBizError } = await client
+        .from('businesses')
         .select('id')
-        .eq('user_id', userId)
+        .eq('owner_user_id', userId)
         .maybeSingle();
 
-      if (fetchError) {
-        return { success: false, message: fetchError.message, error: fetchError.message };
+      if (fetchBizError) {
+        return { success: false, message: fetchBizError.message, error: fetchBizError.message };
       }
-      if (!existing) {
-        return { success: false, message: 'No business suite KYC record found for this user', error: 'Not found' };
+      if (!existingBiz) {
+        const { data: existingKyc } = await client
+          .from('business_suite_kyc')
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (!existingKyc) {
+          return { success: false, message: 'No business record found for this user', error: 'Not found' };
+        }
+        const { error: kycUpdateError } = await client
+          .from('business_suite_kyc')
+          .update(updatePayload)
+          .eq('user_id', userId);
+        if (kycUpdateError) {
+          return { success: false, message: kycUpdateError.message, error: kycUpdateError.message };
+        }
+        return { success: true, message: 'Business KYC status updated', data: { status } };
       }
 
       const { error: updateError } = await client
-        .from('business_suite_kyc')
-        .update({
-          status,
-          reviewed_at: now,
-          reviewed_by: adminId,
-          updated_at: now,
-        })
-        .eq('user_id', userId);
+        .from('businesses')
+        .update(updatePayload)
+        .eq('owner_user_id', userId);
 
       if (updateError) {
         return { success: false, message: updateError.message, error: updateError.message };
       }
 
-      if (status === 'Verified') {
-        const { error: userUpdateError } = await client
-          .from('users')
-          .update({ account_type: 'business_suite', updated_at: now })
-          .eq('id', userId);
-        if (userUpdateError) {
-          console.warn('Admin approveBusinessSuiteKyc: failed to set users.account_type:', userUpdateError.message);
-        }
-      }
+      await client
+        .from('business_suite_kyc')
+        .update(updatePayload)
+        .eq('user_id', userId);
 
       return { success: true, message: 'Business KYC status updated', data: { status } };
     } catch (e) {
@@ -773,6 +789,79 @@ export class AdminDashboardService {
       return {
         success: false,
         message: e instanceof Error ? e.message : 'Search failed',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * List businesses (from businesses table only). Paginated.
+   * GET /api/admin/businesses?page=1&pageSize=20&status=Pending|Verified|Rejected (optional)
+   */
+  async getBusinesses(params: { page?: number; pageSize?: number; status?: string }): Promise<AdminBusinessListResponse> {
+    try {
+      const client = this.getAdminClient();
+      const page = Math.max(1, params.page ?? 1);
+      const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 20));
+
+      let query = client
+        .from('businesses')
+        .select('id, owner_user_id, company_name, business_description, status, submitted_at, reviewed_at, created_at, updated_at', { count: 'exact' })
+        .order('created_at', { ascending: false });
+
+      if (params.status?.trim()) {
+        query = query.eq('status', params.status.trim());
+      }
+
+      const { data: rows, error, count: total } = await query.range((page - 1) * pageSize, page * pageSize - 1);
+
+      if (error) {
+        return { success: false, message: error.message, error: error.message };
+      }
+
+      const list = rows ?? [];
+      if (list.length === 0) {
+        return {
+          success: true,
+          message: 'Businesses retrieved',
+          data: { businesses: [], total: total ?? 0, page, pageSize, totalPages: Math.ceil((total ?? 0) / pageSize) || 0 },
+        };
+      }
+
+      const ownerIds = [...new Set(list.map((r: any) => r.owner_user_id))];
+      const { data: users } = await client.from('users').select('id, full_name, email').in('id', ownerIds);
+      const userMap = (users || []).reduce<Record<string, { full_name: string; email: string }>>((acc, u: any) => {
+        acc[u.id] = { full_name: u.full_name, email: u.email };
+        return acc;
+      }, {});
+
+      const businesses = list.map((r: any) => ({
+        id: r.id,
+        ownerUserId: r.owner_user_id,
+        ownerFullName: userMap[r.owner_user_id]?.full_name ?? '—',
+        ownerEmail: userMap[r.owner_user_id]?.email ?? '—',
+        companyName: r.company_name ?? null,
+        businessDescription: r.business_description ?? null,
+        status: r.status,
+        submittedAt: r.submitted_at ?? null,
+        reviewedAt: r.reviewed_at ?? null,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
+
+      const totalCount = total ?? 0;
+      const totalPages = Math.ceil(totalCount / pageSize) || 0;
+
+      return {
+        success: true,
+        message: 'Businesses retrieved',
+        data: { businesses, total: totalCount, page, pageSize, totalPages },
+      };
+    } catch (e) {
+      console.error('Admin getBusinesses error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to get businesses',
         error: e instanceof Error ? e.message : 'Unknown error',
       };
     }

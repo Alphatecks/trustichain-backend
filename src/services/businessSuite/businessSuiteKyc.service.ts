@@ -44,9 +44,10 @@ export interface BusinessSuiteKycResponse {
 }
 
 function mapRowToResponse(row: any): BusinessSuiteKycResponse {
+  const userId = row.owner_user_id ?? row.user_id;
   return {
     id: row.id,
-    userId: row.user_id,
+    userId,
     status: row.status,
     companyName: row.company_name ?? null,
     businessDescription: row.business_description ?? null,
@@ -80,25 +81,25 @@ export class BusinessSuiteKycService {
     const client = supabaseAdmin;
     if (!client) return { success: false, message: 'Service unavailable', error: 'No admin client' };
     const { data: row, error } = await client
-      .from('business_suite_kyc')
+      .from('businesses')
       .select('*')
-      .eq('user_id', userId)
+      .eq('owner_user_id', userId)
       .maybeSingle();
     if (error) {
-      return { success: false, message: error.message || 'Failed to fetch KYC', error: error.message };
+      const fallback = await client.from('business_suite_kyc').select('*').eq('user_id', userId).maybeSingle();
+      if (fallback.error || !fallback.data) {
+        return { success: false, message: error.message || 'Failed to fetch KYC', error: error.message };
+      }
+      return { success: true, message: 'KYC retrieved', data: mapRowToResponse(fallback.data) };
     }
     if (!row) {
-      return {
-        success: true,
-        message: 'No KYC record yet',
-        data: undefined,
-      };
+      const { data: legacyRow } = await client.from('business_suite_kyc').select('*').eq('user_id', userId).maybeSingle();
+      if (legacyRow) {
+        return { success: true, message: 'KYC retrieved', data: mapRowToResponse(legacyRow) };
+      }
+      return { success: true, message: 'No KYC record yet', data: undefined };
     }
-    return {
-      success: true,
-      message: 'KYC retrieved',
-      data: mapRowToResponse(row),
-    };
+    return { success: true, message: 'KYC retrieved', data: mapRowToResponse(row) };
   }
 
   /**
@@ -130,12 +131,6 @@ export class BusinessSuiteKycService {
     const arbitrationType =
       body.arbitrationType && ARBITRATION_TYPES.includes(body.arbitrationType) ? body.arbitrationType : null;
 
-    const { data: existing } = await client
-      .from('business_suite_kyc')
-      .select('id, status')
-      .eq('user_id', userId)
-      .maybeSingle();
-
     const payload = {
       company_name: companyName,
       business_description: body.businessDescription?.trim() || null,
@@ -153,38 +148,47 @@ export class BusinessSuiteKycService {
       updated_at: new Date().toISOString(),
     };
 
-    if (existing) {
+    const { data: existingBiz } = await client
+      .from('businesses')
+      .select('id')
+      .eq('owner_user_id', userId)
+      .maybeSingle();
+
+    let resultRow: any;
+    if (existingBiz) {
       const { data: updated, error: updateError } = await client
-        .from('business_suite_kyc')
+        .from('businesses')
         .update(payload)
-        .eq('user_id', userId)
+        .eq('owner_user_id', userId)
         .select()
         .single();
       if (updateError) {
         return { success: false, message: updateError.message || 'Failed to update KYC', error: updateError.message };
       }
-      return {
-        success: true,
-        message: 'KYC updated and submitted for review',
-        data: mapRowToResponse(updated),
-      };
+      resultRow = updated;
+    } else {
+      const { data: inserted, error: insertError } = await client
+        .from('businesses')
+        .insert({ owner_user_id: userId, ...payload })
+        .select()
+        .single();
+      if (insertError) {
+        return { success: false, message: insertError.message || 'Failed to submit KYC', error: insertError.message };
+      }
+      resultRow = inserted;
     }
 
-    const { data: inserted, error: insertError } = await client
+    await client
       .from('business_suite_kyc')
-      .insert({
-        user_id: userId,
-        ...payload,
-      })
-      .select()
-      .single();
-    if (insertError) {
-      return { success: false, message: insertError.message || 'Failed to submit KYC', error: insertError.message };
-    }
+      .upsert(
+        { user_id: userId, ...payload },
+        { onConflict: 'user_id' }
+      );
+
     return {
       success: true,
-      message: 'KYC submitted for review',
-      data: mapRowToResponse(inserted),
+      message: existingBiz ? 'KYC updated and submitted for review' : 'KYC submitted for review',
+      data: mapRowToResponse(resultRow),
     };
   }
 }

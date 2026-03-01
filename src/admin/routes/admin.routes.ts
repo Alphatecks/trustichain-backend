@@ -74,6 +74,15 @@ router.get('/dashboard/users', adminAuthenticate, asyncHandler(async (req, res) 
 }));
 
 /**
+ * @route   GET /api/admin/businesses
+ * @desc    List businesses (from businesses table). Query: page, pageSize, status (optional)
+ * @access  Private (admin)
+ */
+router.get('/businesses', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.getBusinesses(req, res);
+}));
+
+/**
  * @route   GET /api/admin/kyc
  * @desc    List users for KYC verification
  * @access  Private (admin)

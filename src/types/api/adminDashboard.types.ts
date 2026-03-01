@@ -178,3 +178,30 @@ export interface AdminAlertsResponse {
   };
   error?: string;
 }
+
+export interface AdminBusinessListItem {
+  id: string;
+  ownerUserId: string;
+  ownerFullName: string;
+  ownerEmail: string;
+  companyName: string | null;
+  businessDescription: string | null;
+  status: string;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminBusinessListResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    businesses: AdminBusinessListItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  error?: string;
+}
