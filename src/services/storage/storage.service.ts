@@ -255,8 +255,8 @@ export class StorageService {
           error: uploadError?.message || 'Upload failed',
         };
       }
-      const { data: urlData } = adminClient.storage.from(this.BUCKET_NAME).getPublicUrl(data.path);
-      const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
+      // Store bucket+path (bucket is private – use getSignedUrl when serving; do not store public URL)
+      const fileUrl = `${this.BUCKET_NAME}/${data.path}`;
       return {
         success: true,
         message: 'Logo uploaded successfully',
@@ -353,8 +353,7 @@ export class StorageService {
           error: uploadError?.message || 'Upload failed',
         };
       }
-      const { data: urlData } = adminClient.storage.from(this.BUCKET_NAME).getPublicUrl(data.path);
-      const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
+      const fileUrl = `${this.BUCKET_NAME}/${data.path}`;
       return {
         success: true,
         message: 'Document uploaded successfully',
@@ -426,20 +425,15 @@ export class StorageService {
 
   /**
    * Resolve stored company logo URL (or path) to a signed URL for viewing.
-   * If the stored value is a full URL we can't map to our bucket, or signed URL fails, return it as-is so existing logos still work.
+   * Bucket is private – only signed URLs work. Do not return the stored public URL (it 404s for private buckets).
    */
   async getSignedUrlForCompanyLogo(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
     if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
     const trimmed = storedUrlOrPath.trim();
     if (!trimmed) return null;
     const path = this.normalizeStoredPathToBucketPath(storedUrlOrPath);
-    if (path) {
-      const signed = await this.getSignedUrl(path, expiresIn);
-      if (signed) return signed;
-    }
-    // Fallback for existing data: return full URL as-is so old public URLs or same-project URLs can still load
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-    return null;
+    if (!path) return null;
+    return this.getSignedUrl(path, expiresIn);
   }
 
   /**
