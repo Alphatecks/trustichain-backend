@@ -20,6 +20,9 @@ export interface BusinessSuiteKycVerificationRequest {
   identityVerificationRequired?: boolean;
   addressVerificationRequired?: boolean;
   enhancedDueDiligence?: boolean;
+  identityVerificationDocumentUrl?: string;
+  addressVerificationDocumentUrl?: string;
+  enhancedDueDiligenceDocumentUrl?: string;
 }
 
 export interface BusinessSuiteKycResponse {
@@ -37,6 +40,9 @@ export interface BusinessSuiteKycResponse {
   identityVerificationRequired: boolean;
   addressVerificationRequired: boolean;
   enhancedDueDiligence: boolean;
+  identityVerificationDocumentUrl: string | null;
+  addressVerificationDocumentUrl: string | null;
+  enhancedDueDiligenceDocumentUrl: string | null;
   submittedAt: string | null;
   reviewedAt: string | null;
   createdAt: string;
@@ -60,6 +66,9 @@ function mapRowToResponse(row: any): BusinessSuiteKycResponse {
     identityVerificationRequired: row.identity_verification_required ?? false,
     addressVerificationRequired: row.address_verification_required ?? false,
     enhancedDueDiligence: row.enhanced_due_diligence ?? false,
+    identityVerificationDocumentUrl: row.identity_verification_document_url ?? null,
+    addressVerificationDocumentUrl: row.address_verification_document_url ?? null,
+    enhancedDueDiligenceDocumentUrl: row.enhanced_due_diligence_document_url ?? null,
     submittedAt: row.submitted_at ?? null,
     reviewedAt: row.reviewed_at ?? null,
     createdAt: row.created_at,
@@ -152,6 +161,9 @@ export class BusinessSuiteKycService {
       identity_verification_required: Boolean(body.identityVerificationRequired),
       address_verification_required: Boolean(body.addressVerificationRequired),
       enhanced_due_diligence: Boolean(body.enhancedDueDiligence),
+      identity_verification_document_url: body.identityVerificationDocumentUrl?.trim() || null,
+      address_verification_document_url: body.addressVerificationDocumentUrl?.trim() || null,
+      enhanced_due_diligence_document_url: body.enhancedDueDiligenceDocumentUrl?.trim() || null,
       status: 'Pending',
       submitted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

@@ -9,6 +9,16 @@ import { v4 as uuidv4 } from 'uuid';
 // Image-only for company logo upload
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
+// Business KYC documents: PDF or image (Identity, Address, Enhanced Due Diligence)
+const KYC_DOCUMENT_MIME_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+];
+
 // Allowed file types for dispute evidence
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
@@ -298,10 +308,91 @@ export class StorageService {
   }
 
   /**
+   * Upload business KYC document (Identity, Address, or Enhanced Due Diligence). PDF or image.
+   * Path: business-kyc-docs/{userId}/{type}/...
+   */
+  async uploadBusinessKycDocument(
+    userId: string,
+    file: Express.Multer.File,
+    type: 'identity' | 'address' | 'enhanced_due_diligence'
+  ): Promise<UploadFileResult> {
+    try {
+      if (!file) {
+        return { success: false, message: 'No file provided', error: 'No file provided' };
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        return {
+          success: false,
+          message: `File size exceeds maximum allowed size of ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
+          error: 'File too large',
+        };
+      }
+      if (!KYC_DOCUMENT_MIME_TYPES.includes(file.mimetype)) {
+        return {
+          success: false,
+          message: 'Only PDF or images are allowed (JPEG, PNG, GIF, WebP, PDF)',
+          error: 'Invalid file type',
+        };
+      }
+      const adminClient = supabaseAdmin || supabase;
+      if (!adminClient) {
+        return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
+      }
+      await this.ensureBucketExists();
+      const filePath = `business-kyc-docs/${userId}/${type}/${this.generateFilePath(userId, file.originalname)}`;
+      const { data, error: uploadError } = await adminClient.storage
+        .from(this.BUCKET_NAME)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: true,
+        });
+      if (uploadError || !data) {
+        return {
+          success: false,
+          message: uploadError?.message || 'Failed to upload document',
+          error: uploadError?.message || 'Upload failed',
+        };
+      }
+      const { data: urlData } = adminClient.storage.from(this.BUCKET_NAME).getPublicUrl(data.path);
+      const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
+      return {
+        success: true,
+        message: 'Document uploaded successfully',
+        data: {
+          fileUrl,
+          filePath: data.path,
+          fileName: file.originalname,
+          fileSize: file.size,
+          fileType: file.mimetype,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to upload document',
+        error: error instanceof Error ? error.message : 'Failed to upload document',
+      };
+    }
+  }
+
+  /**
    * Resolve stored company logo URL (or path) to a signed URL for viewing.
    * Use when returning logo to admin or anywhere the bucket is private.
    */
   async getSignedUrlForCompanyLogo(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
+    if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
+    const trimmed = storedUrlOrPath.trim();
+    if (!trimmed) return null;
+    const path = trimmed.includes(this.BUCKET_NAME)
+      ? (trimmed.split(`${this.BUCKET_NAME}/`)[1] || trimmed)
+      : trimmed;
+    return this.getSignedUrl(path, expiresIn);
+  }
+
+  /**
+   * Resolve stored business KYC document URL (or path) to a signed URL for viewing (e.g. admin).
+   */
+  async getSignedUrlForBusinessKycDocument(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
     if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
     const trimmed = storedUrlOrPath.trim();
     if (!trimmed) return null;

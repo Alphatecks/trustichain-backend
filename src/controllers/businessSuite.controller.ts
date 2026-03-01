@@ -262,6 +262,40 @@ export class BusinessSuiteController {
     }
   }
 
+  /** Upload KYC document (Identity, Address, or Enhanced Due Diligence). POST /api/business-suite/kyc/documents/:type, multipart field: document */
+  async uploadKycDocument(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const status = await businessSuiteService.getBusinessStatus(userId);
+    if (status === 'In review') {
+      res.status(403).json({ success: false, message: 'Account is under review; access is temporarily suspended.' });
+      return;
+    }
+    const type = req.params.type as string;
+    const allowed = ['identity', 'address', 'enhanced-due-diligence'];
+    if (!type || !allowed.includes(type)) {
+      res.status(400).json({ success: false, message: 'Invalid type. Use: identity, address, or enhanced-due-diligence.' });
+      return;
+    }
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ success: false, message: 'No file provided. Send multipart form with field "document".' });
+      return;
+    }
+    const docType = type === 'enhanced-due-diligence' ? 'enhanced_due_diligence' : (type as 'identity' | 'address');
+    const result = await storageService.uploadBusinessKycDocument(userId, file, docType);
+    if (result.success && result.data?.fileUrl) {
+      const key =
+        type === 'identity'
+          ? 'identityVerificationDocumentUrl'
+          : type === 'address'
+            ? 'addressVerificationDocumentUrl'
+            : 'enhancedDueDiligenceDocumentUrl';
+      res.status(200).json({ success: true, data: { [key]: result.data.fileUrl } });
+    } else {
+      res.status(400).json({ success: false, message: result.message ?? 'Upload failed' });
+    }
+  }
+
   /** Create payroll. POST /api/business-suite/payrolls */
   async createPayroll(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;

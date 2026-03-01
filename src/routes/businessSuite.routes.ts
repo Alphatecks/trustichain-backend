@@ -107,9 +107,18 @@ router.post('/kyc/logo', authenticate, upload.single('logo'), asyncHandler(async
 }));
 
 /**
+ * @route   POST /api/business-suite/kyc/documents/:type
+ * @desc    Upload KYC document (PDF or image). type = identity | address | enhanced-due-diligence. Multipart field: document. Returns URL to include in POST /kyc.
+ * @access  Private
+ */
+router.post('/kyc/documents/:type', authenticate, upload.single('document'), asyncHandler(async (req, res) => {
+  await businessSuiteController.uploadKycDocument(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/kyc
- * @desc    Submit/update business suite KYC verification (body: companyName, businessDescription?, companyLogoUrl?, defaultEscrowFeeRate?, autoReleasePeriod?, approvalWorkflow?, arbitrationType?, transactionLimits?, identityVerificationRequired?, addressVerificationRequired?, enhancedDueDiligence?)
- * @access  Private (business suite only)
+ * @desc    Submit/update business suite KYC (body: companyName, businessDescription?, companyLogoUrl?, identityVerificationDocumentUrl?, addressVerificationDocumentUrl?, enhancedDueDiligenceDocumentUrl?, defaultEscrowFeeRate?, ...)
+ * @access  Private
  */
 router.post('/kyc', authenticate, asyncHandler(async (req, res) => {
   await businessSuiteController.submitKyc(req, res);

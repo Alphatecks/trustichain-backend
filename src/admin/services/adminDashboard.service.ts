@@ -496,9 +496,9 @@ export class AdminDashboardService {
 
       const [{ data: user }, { data: businessRow }] = await Promise.all([
         client.from('users').select('id, full_name, email').eq('id', userId).single(),
-        client.from('businesses').select('company_name, status, submitted_at, reviewed_at, company_logo_url').eq('owner_user_id', userId).maybeSingle(),
+        client.from('businesses').select('company_name, status, submitted_at, reviewed_at, company_logo_url, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('owner_user_id', userId).maybeSingle(),
       ]);
-      const businessKyc = businessRow ?? (await client.from('business_suite_kyc').select('company_name, status, submitted_at, reviewed_at, company_logo_url').eq('user_id', userId).maybeSingle()).data;
+      const businessKyc = businessRow ?? (await client.from('business_suite_kyc').select('company_name, status, submitted_at, reviewed_at, company_logo_url, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('user_id', userId).maybeSingle()).data;
 
       if (kyc) {
         const documents: string[] = [];
@@ -510,6 +510,11 @@ export class AdminDashboardService {
         const companyLogoUrl = rawLogoUrl
           ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
           : null;
+        const [identityVerificationDocumentUrl, addressVerificationDocumentUrl, enhancedDueDiligenceDocumentUrl] = await Promise.all([
+          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.identity_verification_document_url, 3600),
+          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.address_verification_document_url, 3600),
+          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.enhanced_due_diligence_document_url, 3600),
+        ]);
 
         return {
           success: true,
@@ -527,6 +532,9 @@ export class AdminDashboardService {
             businessKycStatus: (businessKyc as any)?.status ?? null,
             businessSubmittedAt: (businessKyc as any)?.submitted_at ?? null,
             businessReviewedAt: (businessKyc as any)?.reviewed_at ?? null,
+            identityVerificationDocumentUrl: identityVerificationDocumentUrl ?? null,
+            addressVerificationDocumentUrl: addressVerificationDocumentUrl ?? null,
+            enhancedDueDiligenceDocumentUrl: enhancedDueDiligenceDocumentUrl ?? null,
           },
         };
       }
@@ -536,6 +544,11 @@ export class AdminDashboardService {
         const companyLogoUrl = rawLogoUrl
           ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
           : null;
+        const [identityVerificationDocumentUrl, addressVerificationDocumentUrl, enhancedDueDiligenceDocumentUrl] = await Promise.all([
+          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.identity_verification_document_url, 3600),
+          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.address_verification_document_url, 3600),
+          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.enhanced_due_diligence_document_url, 3600),
+        ]);
         const bizStatus = (businessKyc as any)?.status;
         const kycStatusFromBiz: KycStatus =
           bizStatus === 'Verified' ? 'verified' : bizStatus === 'Rejected' ? 'declined' : 'pending';
@@ -556,6 +569,9 @@ export class AdminDashboardService {
             businessKycStatus: (businessKyc as any)?.status ?? null,
             businessSubmittedAt: (businessKyc as any)?.submitted_at ?? null,
             businessReviewedAt: (businessKyc as any)?.reviewed_at ?? null,
+            identityVerificationDocumentUrl: identityVerificationDocumentUrl ?? null,
+            addressVerificationDocumentUrl: addressVerificationDocumentUrl ?? null,
+            enhancedDueDiligenceDocumentUrl: enhancedDueDiligenceDocumentUrl ?? null,
           },
         };
       }
@@ -686,7 +702,7 @@ export class AdminDashboardService {
       if (!existingBiz) {
         const { data: kycRow, error: kycFetchError } = await client
           .from('business_suite_kyc')
-          .select('id, company_name, business_description, company_logo_url, default_escrow_fee_rate, auto_release_period, approval_workflow, arbitration_type, transaction_limits, identity_verification_required, address_verification_required, enhanced_due_diligence, submitted_at')
+          .select('id, company_name, business_description, company_logo_url, default_escrow_fee_rate, auto_release_period, approval_workflow, arbitration_type, transaction_limits, identity_verification_required, address_verification_required, enhanced_due_diligence, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url, submitted_at')
           .eq('user_id', userId)
           .maybeSingle();
         if (kycFetchError || !kycRow) {
@@ -716,6 +732,9 @@ export class AdminDashboardService {
           identity_verification_required: Boolean(kycRow.identity_verification_required),
           address_verification_required: Boolean(kycRow.address_verification_required),
           enhanced_due_diligence: Boolean(kycRow.enhanced_due_diligence),
+          identity_verification_document_url: (kycRow as any).identity_verification_document_url ?? null,
+          address_verification_document_url: (kycRow as any).address_verification_document_url ?? null,
+          enhanced_due_diligence_document_url: (kycRow as any).enhanced_due_diligence_document_url ?? null,
           submitted_at: kycRow.submitted_at ?? null,
         });
         if (insertBizError) {

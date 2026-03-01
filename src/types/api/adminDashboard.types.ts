@@ -129,6 +129,9 @@ export interface AdminKycDetailResponse {
     businessKycStatus?: string | null;
     businessSubmittedAt?: string | null;
     businessReviewedAt?: string | null;
+    identityVerificationDocumentUrl?: string | null;
+    addressVerificationDocumentUrl?: string | null;
+    enhancedDueDiligenceDocumentUrl?: string | null;
   };
   error?: string;
 }

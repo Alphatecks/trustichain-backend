@@ -76,6 +76,10 @@ export interface UserDetailKyc {
   };
   /** Company logo URL from business suite KYC onboarding */
   companyLogoUrl?: string | null;
+  /** Business KYC document URLs (signed for viewing) */
+  identityVerificationDocumentUrl?: string | null;
+  addressVerificationDocumentUrl?: string | null;
+  enhancedDueDiligenceDocumentUrl?: string | null;
   submittedAt?: string;
   reviewedAt?: string;
 }

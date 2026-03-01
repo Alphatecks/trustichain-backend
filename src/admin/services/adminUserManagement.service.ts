@@ -355,7 +355,7 @@ export class AdminUserManagementService {
 
       const [kyc, businessKyc, mainWallet, savingsList, escrowsResp, transactionsResp, disputesResp, volumes, lastTx] = await Promise.all([
         client.from('user_kyc').select('status, submitted_at, reviewed_at, linked_id_type, card_number, wallet_address, document_live_selfie_url, document_front_url, document_back_url').eq('user_id', userId).maybeSingle(),
-        client.from('businesses').select('company_logo_url').eq('owner_user_id', userId).maybeSingle(),
+        client.from('businesses').select('company_logo_url, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('owner_user_id', userId).maybeSingle(),
         client.from('wallets').select('id, balance_usd, balance_xrp, xrpl_address, created_at').eq('user_id', userId).maybeSingle(),
         client.from('savings_wallets').select('id, name, target_amount_usd, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
         client.from('escrows').select('id, user_id, counterparty_id, amount_usd, status, created_at').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).order('created_at', { ascending: false }).range((escrowPage - 1) * escrowPageSize, escrowPage * escrowPageSize - 1),
@@ -366,10 +366,10 @@ export class AdminUserManagementService {
       ]);
 
       const kycData = kyc?.data;
-      let businessKycData = businessKyc?.data as { company_logo_url?: string } | undefined;
+      let businessKycData = businessKyc?.data as { company_logo_url?: string; identity_verification_document_url?: string; address_verification_document_url?: string; enhanced_due_diligence_document_url?: string } | undefined;
       if (!businessKycData) {
-        const legacy = await client.from('business_suite_kyc').select('company_logo_url').eq('user_id', userId).maybeSingle();
-        businessKycData = legacy?.data as { company_logo_url?: string } | undefined;
+        const legacy = await client.from('business_suite_kyc').select('company_logo_url, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('user_id', userId).maybeSingle();
+        businessKycData = legacy?.data as { company_logo_url?: string; identity_verification_document_url?: string; address_verification_document_url?: string; enhanced_due_diligence_document_url?: string } | undefined;
       }
       const kycStatus = (kycData?.status || 'pending') as UserManagementKycStatus;
       const totalVolume = (volumes?.data || []).reduce((sum: number, t: any) => sum + parseFloat(t.amount_usd || '0'), 0);
@@ -408,6 +408,11 @@ export class AdminUserManagementService {
       const companyLogoUrl = rawLogoUrl
         ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
         : null;
+      const [identityVerificationDocumentUrl, addressVerificationDocumentUrl, enhancedDueDiligenceDocumentUrl] = await Promise.all([
+        storageService.getSignedUrlForBusinessKycDocument(businessKycData?.identity_verification_document_url, 3600),
+        storageService.getSignedUrlForBusinessKycDocument(businessKycData?.address_verification_document_url, 3600),
+        storageService.getSignedUrlForBusinessKycDocument(businessKycData?.enhanced_due_diligence_document_url, 3600),
+      ]);
       const userKyc: UserDetailKyc = {
         status: kycStatus,
         linkedIdType: kycData?.linked_id_type ?? undefined,
@@ -419,6 +424,9 @@ export class AdminUserManagementService {
           back: (kycData as any)?.document_back_url,
         },
         companyLogoUrl,
+        identityVerificationDocumentUrl: identityVerificationDocumentUrl ?? null,
+        addressVerificationDocumentUrl: addressVerificationDocumentUrl ?? null,
+        enhancedDueDiligenceDocumentUrl: enhancedDueDiligenceDocumentUrl ?? null,
         submittedAt: kycData?.submitted_at,
         reviewedAt: kycData?.reviewed_at,
       };
