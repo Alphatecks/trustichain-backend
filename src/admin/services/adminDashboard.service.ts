@@ -494,11 +494,13 @@ export class AdminDashboardService {
         };
       }
 
-      const [{ data: user }, { data: businessRow }] = await Promise.all([
+      const [{ data: user }, { data: businessRow }, { data: kycDocRow }] = await Promise.all([
         client.from('users').select('id, full_name, email').eq('id', userId).single(),
         client.from('businesses').select('company_name, status, submitted_at, reviewed_at, company_logo_url, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('owner_user_id', userId).maybeSingle(),
+        client.from('business_suite_kyc').select('identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('user_id', userId).maybeSingle(),
       ]);
       const businessKyc = businessRow ?? (await client.from('business_suite_kyc').select('company_name, status, submitted_at, reviewed_at, company_logo_url, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url').eq('user_id', userId).maybeSingle()).data;
+      const docUrlsFromKyc = (businessRow && kycDocRow) ? kycDocRow : null;
 
       if (kyc) {
         const documents: string[] = [];
@@ -510,10 +512,13 @@ export class AdminDashboardService {
         const companyLogoUrl = rawLogoUrl
           ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
           : null;
+        const rawIdentity = (businessKyc as any)?.identity_verification_document_url ?? (docUrlsFromKyc as any)?.identity_verification_document_url ?? null;
+        const rawAddress = (businessKyc as any)?.address_verification_document_url ?? (docUrlsFromKyc as any)?.address_verification_document_url ?? null;
+        const rawEdd = (businessKyc as any)?.enhanced_due_diligence_document_url ?? (docUrlsFromKyc as any)?.enhanced_due_diligence_document_url ?? null;
         const [identityVerificationDocumentUrl, addressVerificationDocumentUrl, enhancedDueDiligenceDocumentUrl] = await Promise.all([
-          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.identity_verification_document_url, 3600),
-          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.address_verification_document_url, 3600),
-          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.enhanced_due_diligence_document_url, 3600),
+          storageService.getSignedUrlForBusinessKycDocument(rawIdentity, 3600),
+          storageService.getSignedUrlForBusinessKycDocument(rawAddress, 3600),
+          storageService.getSignedUrlForBusinessKycDocument(rawEdd, 3600),
         ]);
 
         return {
@@ -544,10 +549,13 @@ export class AdminDashboardService {
         const companyLogoUrl = rawLogoUrl
           ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
           : null;
+        const rawIdentity = (businessKyc as any)?.identity_verification_document_url ?? (docUrlsFromKyc as any)?.identity_verification_document_url ?? null;
+        const rawAddress = (businessKyc as any)?.address_verification_document_url ?? (docUrlsFromKyc as any)?.address_verification_document_url ?? null;
+        const rawEdd = (businessKyc as any)?.enhanced_due_diligence_document_url ?? (docUrlsFromKyc as any)?.enhanced_due_diligence_document_url ?? null;
         const [identityVerificationDocumentUrl, addressVerificationDocumentUrl, enhancedDueDiligenceDocumentUrl] = await Promise.all([
-          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.identity_verification_document_url, 3600),
-          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.address_verification_document_url, 3600),
-          storageService.getSignedUrlForBusinessKycDocument((businessKyc as any)?.enhanced_due_diligence_document_url, 3600),
+          storageService.getSignedUrlForBusinessKycDocument(rawIdentity, 3600),
+          storageService.getSignedUrlForBusinessKycDocument(rawAddress, 3600),
+          storageService.getSignedUrlForBusinessKycDocument(rawEdd, 3600),
         ]);
         const bizStatus = (businessKyc as any)?.status;
         const kycStatusFromBiz: KycStatus =
