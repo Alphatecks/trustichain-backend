@@ -377,34 +377,69 @@ export class StorageService {
 
   /**
    * Normalize stored URL or path to a path within our bucket for createSignedUrl (no full URL, no leading bucket name).
-   * Handles: "dispute-evidence/path", full Supabase storage URLs, or plain paths like "business-suite-logos/..." / "business-kyc-docs/...".
+   * Handles: "dispute-evidence/path", full Supabase storage URLs (including encoded), or plain paths.
    */
   private normalizeStoredPathToBucketPath(storedUrlOrPath: string): string | null {
-    const trimmed = storedUrlOrPath.trim();
+    let trimmed = storedUrlOrPath.trim();
     if (!trimmed) return null;
-    // Full URL: extract path after bucket so we never pass a URL to createSignedUrl (avoids "Bucket not found" from wrong parsing)
+    try {
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        trimmed = decodeURIComponent(trimmed);
+      }
+    } catch {
+      // leave trimmed as-is if decode fails
+    }
+    const bucketLower = this.BUCKET_NAME.toLowerCase();
+    const bucketAndSlash = this.BUCKET_NAME + '/';
+    const hasBucket = trimmed.toLowerCase().includes(bucketLower + '/');
+    // Full URL: extract path after bucket (Supabase format: .../object/public/<bucket>/<path> or .../object/sign/...)
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      if (trimmed.includes(this.BUCKET_NAME + '/')) {
-        const after = trimmed.split(this.BUCKET_NAME + '/')[1];
-        return after ? after.split('?')[0] : null;
+      if (hasBucket) {
+        const idx = trimmed.toLowerCase().indexOf(bucketLower + '/');
+        const after = trimmed.slice(idx + bucketAndSlash.length);
+        const path = after ? after.split('?')[0].trim() : null;
+        return path || null;
+      }
+      // Supabase URL but bucket name not in string: try /object/public/ or /object/sign/ then take segment after bucket
+      const objectPublic = '/object/public/';
+      const objectSign = '/object/sign/';
+      const i = trimmed.toLowerCase().indexOf(objectPublic);
+      const j = trimmed.toLowerCase().indexOf(objectSign);
+      const segStart = i >= 0 ? i + objectPublic.length : j >= 0 ? j + objectSign.length : -1;
+      if (segStart >= 0) {
+        const afterSlug = trimmed.slice(segStart);
+        const parts = afterSlug.split('/');
+        if (parts[0]?.toLowerCase() === bucketLower && parts.length > 1) {
+          return parts.slice(1).join('/').split('?')[0].trim() || null;
+        }
       }
       return null;
     }
     // Stored as "dispute-evidence/path" -> return "path"
-    if (trimmed.includes(this.BUCKET_NAME + '/')) return trimmed.split(this.BUCKET_NAME + '/')[1] || null;
+    if (hasBucket) {
+      const idx = trimmed.toLowerCase().indexOf(bucketLower + '/');
+      return trimmed.slice(idx + bucketAndSlash.length) || null;
+    }
     // Plain path already within bucket (e.g. business-suite-logos/... or business-kyc-docs/...)
     return trimmed;
   }
 
   /**
    * Resolve stored company logo URL (or path) to a signed URL for viewing.
-   * Use when returning logo to admin or anywhere the bucket is private.
+   * If the stored value is a full URL we can't map to our bucket, or signed URL fails, return it as-is so existing logos still work.
    */
   async getSignedUrlForCompanyLogo(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
     if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
+    const trimmed = storedUrlOrPath.trim();
+    if (!trimmed) return null;
     const path = this.normalizeStoredPathToBucketPath(storedUrlOrPath);
-    if (!path) return null;
-    return this.getSignedUrl(path, expiresIn);
+    if (path) {
+      const signed = await this.getSignedUrl(path, expiresIn);
+      if (signed) return signed;
+    }
+    // Fallback for existing data: return full URL as-is so old public URLs or same-project URLs can still load
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    return null;
   }
 
   /**
