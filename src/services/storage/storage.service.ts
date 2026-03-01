@@ -376,16 +376,34 @@ export class StorageService {
   }
 
   /**
+   * Normalize stored URL or path to a path within our bucket for createSignedUrl (no full URL, no leading bucket name).
+   * Handles: "dispute-evidence/path", full Supabase storage URLs, or plain paths like "business-suite-logos/..." / "business-kyc-docs/...".
+   */
+  private normalizeStoredPathToBucketPath(storedUrlOrPath: string): string | null {
+    const trimmed = storedUrlOrPath.trim();
+    if (!trimmed) return null;
+    // Full URL: extract path after bucket so we never pass a URL to createSignedUrl (avoids "Bucket not found" from wrong parsing)
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      if (trimmed.includes(this.BUCKET_NAME + '/')) {
+        const after = trimmed.split(this.BUCKET_NAME + '/')[1];
+        return after ? after.split('?')[0] : null;
+      }
+      return null;
+    }
+    // Stored as "dispute-evidence/path" -> return "path"
+    if (trimmed.includes(this.BUCKET_NAME + '/')) return trimmed.split(this.BUCKET_NAME + '/')[1] || null;
+    // Plain path already within bucket (e.g. business-suite-logos/... or business-kyc-docs/...)
+    return trimmed;
+  }
+
+  /**
    * Resolve stored company logo URL (or path) to a signed URL for viewing.
    * Use when returning logo to admin or anywhere the bucket is private.
    */
   async getSignedUrlForCompanyLogo(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
     if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
-    const trimmed = storedUrlOrPath.trim();
-    if (!trimmed) return null;
-    const path = trimmed.includes(this.BUCKET_NAME)
-      ? (trimmed.split(`${this.BUCKET_NAME}/`)[1] || trimmed)
-      : trimmed;
+    const path = this.normalizeStoredPathToBucketPath(storedUrlOrPath);
+    if (!path) return null;
     return this.getSignedUrl(path, expiresIn);
   }
 
@@ -394,11 +412,8 @@ export class StorageService {
    */
   async getSignedUrlForBusinessKycDocument(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
     if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
-    const trimmed = storedUrlOrPath.trim();
-    if (!trimmed) return null;
-    const path = trimmed.includes(this.BUCKET_NAME)
-      ? (trimmed.split(`${this.BUCKET_NAME}/`)[1] || trimmed)
-      : trimmed;
+    const path = this.normalizeStoredPathToBucketPath(storedUrlOrPath);
+    if (!path) return null;
     return this.getSignedUrl(path, expiresIn);
   }
 
