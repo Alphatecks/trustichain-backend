@@ -5,6 +5,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import { storageService } from '../../services/storage/storage.service';
 import type {
   UserManagementStatsResponse,
   UserManagementListResponse,
@@ -209,6 +210,17 @@ export class AdminUserManagementService {
         return acc;
       }, {});
 
+      let businessKycRows: { data: any[] | null } = { data: [] };
+      try {
+        businessKycRows = await client.from('business_suite_kyc').select('user_id, company_name, status').in('user_id', userIds);
+      } catch {
+        // business_suite_kyc may not exist
+      }
+      const businessByUser = (businessKycRows?.data || []).reduce<Record<string, { company_name: string | null; status: string }>>((acc, r: any) => {
+        acc[r.user_id] = { company_name: r.company_name ?? null, status: r.status };
+        return acc;
+      }, {});
+
       const [escrowCounts, savingsCounts, volumes, lastActivities] = await Promise.all([
         client.from('escrows').select('user_id').in('user_id', userIds),
         client.from('savings_wallets').select('user_id').in('user_id', userIds),
@@ -237,6 +249,7 @@ export class AdminUserManagementService {
         const kyc = (kycByUser[u.id] || 'pending') as UserManagementKycStatus;
         const lastAt = lastActivityByUser[u.id] || u.updated_at;
         const lastDate = lastAt ? new Date(lastAt) : null;
+        const biz = businessByUser[u.id];
         return {
           id: u.id,
           name: u.full_name || '—',
@@ -249,6 +262,8 @@ export class AdminUserManagementService {
           lastActivityTimestamp: lastActivityByUser[u.id] || null,
           lastActivityAgo: lastDate ? timeAgo(lastDate) : undefined,
           accountType: u.account_type || undefined,
+          companyName: biz?.company_name ?? null,
+          businessKycStatus: biz?.status ?? null,
         };
       });
 
@@ -313,8 +328,9 @@ export class AdminUserManagementService {
         };
       }
 
-      const [kyc, mainWallet, savingsList, escrowsResp, transactionsResp, disputesResp, volumes, lastTx] = await Promise.all([
+      const [kyc, businessKyc, mainWallet, savingsList, escrowsResp, transactionsResp, disputesResp, volumes, lastTx] = await Promise.all([
         client.from('user_kyc').select('status, submitted_at, reviewed_at, linked_id_type, card_number, wallet_address, document_live_selfie_url, document_front_url, document_back_url').eq('user_id', userId).maybeSingle(),
+        client.from('business_suite_kyc').select('company_logo_url').eq('user_id', userId).maybeSingle(),
         client.from('wallets').select('id, balance_usd, balance_xrp, xrpl_address, created_at').eq('user_id', userId).maybeSingle(),
         client.from('savings_wallets').select('id, name, target_amount_usd, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
         client.from('escrows').select('id, user_id, counterparty_id, amount_usd, status, created_at').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).order('created_at', { ascending: false }).range((escrowPage - 1) * escrowPageSize, escrowPage * escrowPageSize - 1),
@@ -358,6 +374,11 @@ export class AdminUserManagementService {
       });
       const walletTotal = (mainWalletData ? 1 : 0) + savings.length;
 
+      const businessKycData = businessKyc?.data as { company_logo_url?: string } | undefined;
+      const rawLogoUrl = businessKycData?.company_logo_url ?? null;
+      const companyLogoUrl = rawLogoUrl
+        ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
+        : null;
       const userKyc: UserDetailKyc = {
         status: kycStatus,
         linkedIdType: kycData?.linked_id_type ?? undefined,
@@ -368,6 +389,7 @@ export class AdminUserManagementService {
           front: (kycData as any)?.document_front_url,
           back: (kycData as any)?.document_back_url,
         },
+        companyLogoUrl,
         submittedAt: kycData?.submitted_at,
         reviewedAt: kycData?.reviewed_at,
       };

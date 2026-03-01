@@ -298,6 +298,20 @@ export class StorageService {
   }
 
   /**
+   * Resolve stored company logo URL (or path) to a signed URL for viewing.
+   * Use when returning logo to admin or anywhere the bucket is private.
+   */
+  async getSignedUrlForCompanyLogo(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
+    if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
+    const trimmed = storedUrlOrPath.trim();
+    if (!trimmed) return null;
+    const path = trimmed.includes(this.BUCKET_NAME)
+      ? (trimmed.split(`${this.BUCKET_NAME}/`)[1] || trimmed)
+      : trimmed;
+    return this.getSignedUrl(path, expiresIn);
+  }
+
+  /**
    * Generate signed URL for private file access
    */
   async getSignedUrl(filePath: string, expiresIn: number = 3600): Promise<string | null> {

@@ -4,6 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import { storageService } from '../../services/storage/storage.service';
 import type {
   AdminOverviewResponse,
   AdminEscrowInsightResponse,
@@ -461,7 +462,8 @@ export class AdminDashboardService {
   }
 
   /**
-   * KYC detail for one user
+   * KYC detail for one user. Returns personal KYC and/or business KYC when present.
+   * Supports users who only have business_suite_kyc (no user_kyc).
    */
   async getKycDetail(userId: string): Promise<AdminKycDetailResponse> {
     try {
@@ -471,12 +473,12 @@ export class AdminDashboardService {
         .from('user_kyc')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
       if (kycError?.code === '42P01') {
         return { success: false, message: 'KYC table not available', error: 'Run migration 031_create_user_kyc_and_account_type.sql' };
       }
-      if (kycError || !kyc) {
+      if (kycError) {
         return {
           success: false,
           message: 'KYC record not found',
@@ -484,20 +486,75 @@ export class AdminDashboardService {
         };
       }
 
-      const { data: user } = await client.from('users').select('id, full_name, email').eq('id', userId).single();
+      const [{ data: user }, { data: businessKyc }] = await Promise.all([
+        client.from('users').select('id, full_name, email').eq('id', userId).single(),
+        client.from('business_suite_kyc').select('company_name, status, submitted_at, reviewed_at, company_logo_url').eq('user_id', userId).maybeSingle(),
+      ]);
+
+      if (kyc) {
+        const documents: string[] = [];
+        if ((kyc as any).document_live_selfie_url) documents.push((kyc as any).document_live_selfie_url);
+        if ((kyc as any).document_front_url) documents.push((kyc as any).document_front_url);
+        if ((kyc as any).document_back_url) documents.push((kyc as any).document_back_url);
+
+        const rawLogoUrl = (businessKyc as any)?.company_logo_url ?? null;
+        const companyLogoUrl = rawLogoUrl
+          ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
+          : null;
+
+        return {
+          success: true,
+          message: 'KYC detail retrieved',
+          data: {
+            userId: kyc.user_id,
+            fullName: (user as any)?.full_name || '—',
+            email: (user as any)?.email || '—',
+            kycStatus: kyc.status as KycStatus,
+            submittedAt: kyc.submitted_at,
+            reviewedAt: kyc.reviewed_at,
+            documents,
+            companyLogoUrl,
+            companyName: (businessKyc as any)?.company_name ?? null,
+            businessKycStatus: (businessKyc as any)?.status ?? null,
+            businessSubmittedAt: (businessKyc as any)?.submitted_at ?? null,
+            businessReviewedAt: (businessKyc as any)?.reviewed_at ?? null,
+          },
+        };
+      }
+
+      if (businessKyc) {
+        const rawLogoUrl = (businessKyc as any)?.company_logo_url ?? null;
+        const companyLogoUrl = rawLogoUrl
+          ? await storageService.getSignedUrlForCompanyLogo(rawLogoUrl, 3600)
+          : null;
+        const bizStatus = (businessKyc as any)?.status;
+        const kycStatusFromBiz: KycStatus =
+          bizStatus === 'Verified' ? 'verified' : bizStatus === 'Rejected' ? 'declined' : 'pending';
+
+        return {
+          success: true,
+          message: 'KYC detail retrieved',
+          data: {
+            userId,
+            fullName: (user as any)?.full_name || '—',
+            email: (user as any)?.email || '—',
+            kycStatus: kycStatusFromBiz,
+            submittedAt: (businessKyc as any)?.submitted_at ?? null,
+            reviewedAt: (businessKyc as any)?.reviewed_at ?? null,
+            documents: [],
+            companyLogoUrl,
+            companyName: (businessKyc as any)?.company_name ?? null,
+            businessKycStatus: (businessKyc as any)?.status ?? null,
+            businessSubmittedAt: (businessKyc as any)?.submitted_at ?? null,
+            businessReviewedAt: (businessKyc as any)?.reviewed_at ?? null,
+          },
+        };
+      }
 
       return {
-        success: true,
-        message: 'KYC detail retrieved',
-        data: {
-          userId: kyc.user_id,
-          fullName: (user as any)?.full_name || '—',
-          email: (user as any)?.email || '—',
-          kycStatus: kyc.status as KycStatus,
-          submittedAt: kyc.submitted_at,
-          reviewedAt: kyc.reviewed_at,
-          documents: [],
-        },
+        success: false,
+        message: 'KYC record not found',
+        error: 'Not found',
       };
     } catch (e) {
       console.error('Admin getKycDetail error:', e);
@@ -562,6 +619,23 @@ export class AdminDashboardService {
         }
       }
 
+      // Also update business_suite_kyc for this user when admin approves/declines (so one Approve updates both).
+      const businessStatus = status === 'verified' ? 'Verified' : 'Rejected';
+      try {
+        const { error: bizError } = await client
+          .from('business_suite_kyc')
+          .update({
+            status: businessStatus,
+            reviewed_at: now,
+            reviewed_by: adminId,
+            updated_at: now,
+          })
+          .eq('user_id', userId);
+        if (bizError) console.warn('Admin approveKyc: business_suite_kyc update failed (may have no row):', bizError.message);
+      } catch (e) {
+        console.warn('Admin approveKyc: business_suite_kyc update error:', e);
+      }
+
       return {
         success: true,
         message: 'KYC status updated',
@@ -615,6 +689,17 @@ export class AdminDashboardService {
       if (updateError) {
         return { success: false, message: updateError.message, error: updateError.message };
       }
+
+      if (status === 'Verified') {
+        const { error: userUpdateError } = await client
+          .from('users')
+          .update({ account_type: 'business_suite', updated_at: now })
+          .eq('id', userId);
+        if (userUpdateError) {
+          console.warn('Admin approveBusinessSuiteKyc: failed to set users.account_type:', userUpdateError.message);
+        }
+      }
+
       return { success: true, message: 'Business KYC status updated', data: { status } };
     } catch (e) {
       console.error('Admin approveBusinessSuiteKyc error:', e);

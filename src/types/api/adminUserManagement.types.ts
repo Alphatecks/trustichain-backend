@@ -35,6 +35,8 @@ export interface UserManagementListItem {
   lastActivityTimestamp: string | null;
   lastActivityAgo?: string;
   accountType?: string;
+  companyName?: string | null;
+  businessKycStatus?: string | null;
 }
 
 export interface UserManagementListResponse {
@@ -72,6 +74,8 @@ export interface UserDetailKyc {
     front?: string;
     back?: string;
   };
+  /** Company logo URL from business suite KYC onboarding */
+  companyLogoUrl?: string | null;
   submittedAt?: string;
   reviewedAt?: string;
 }

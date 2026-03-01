@@ -122,7 +122,14 @@ export interface AdminKycListResponse {
 export interface AdminKycDetailResponse {
   success: boolean;
   message: string;
-  data?: AdminKycListItem & { documents?: unknown[] };
+  data?: AdminKycListItem & {
+    documents?: unknown[];
+    companyLogoUrl?: string | null;
+    companyName?: string | null;
+    businessKycStatus?: string | null;
+    businessSubmittedAt?: string | null;
+    businessReviewedAt?: string | null;
+  };
   error?: string;
 }
 
