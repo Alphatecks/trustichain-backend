@@ -110,20 +110,21 @@ export class BusinessSuiteService {
 
   /**
    * When business_suite_kyc has a row but businesses does not, create a businesses row so admin can see and change status.
+   * Uses only columns that exist in migration 047 so sync works even if 048 (document URLs) is not applied yet.
    */
   private async syncBusinessRowFromKyc(userId: string): Promise<void> {
     const client = supabaseAdmin;
     if (!client) return;
     const { data: existing } = await client.from('businesses').select('id').eq('owner_user_id', userId).maybeSingle();
     if (existing) return;
-    const { data: kycRow } = await client
+    const { data: kycRow, error: selectError } = await client
       .from('business_suite_kyc')
-      .select('company_name, business_description, company_logo_url, default_escrow_fee_rate, auto_release_period, approval_workflow, arbitration_type, transaction_limits, identity_verification_required, address_verification_required, enhanced_due_diligence, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url, status, submitted_at, reviewed_at, reviewed_by, updated_at')
+      .select('company_name, business_description, company_logo_url, default_escrow_fee_rate, auto_release_period, approval_workflow, arbitration_type, transaction_limits, identity_verification_required, address_verification_required, enhanced_due_diligence, status, submitted_at, reviewed_at, reviewed_by, updated_at')
       .eq('user_id', userId)
       .maybeSingle();
-    if (!kycRow) return;
+    if (selectError || !kycRow) return;
     const now = new Date().toISOString();
-    await client.from('businesses').insert({
+    const basePayload = {
       owner_user_id: userId,
       status: (kycRow as any).status ?? 'Pending',
       company_name: (kycRow as any).company_name ?? null,
@@ -137,14 +138,22 @@ export class BusinessSuiteService {
       identity_verification_required: Boolean((kycRow as any).identity_verification_required),
       address_verification_required: Boolean((kycRow as any).address_verification_required),
       enhanced_due_diligence: Boolean((kycRow as any).enhanced_due_diligence),
-      identity_verification_document_url: (kycRow as any).identity_verification_document_url ?? null,
-      address_verification_document_url: (kycRow as any).address_verification_document_url ?? null,
-      enhanced_due_diligence_document_url: (kycRow as any).enhanced_due_diligence_document_url ?? null,
       submitted_at: (kycRow as any).submitted_at ?? null,
       reviewed_at: (kycRow as any).reviewed_at ?? null,
       reviewed_by: (kycRow as any).reviewed_by ?? null,
       updated_at: (kycRow as any).updated_at ?? now,
-    });
+    };
+    const { error: insertError } = await client.from('businesses').insert(basePayload);
+    if (insertError) {
+      console.warn('[BusinessSuite] sync business row from kyc insert failed:', insertError.message);
+    }
+  }
+
+  /**
+   * Public: ensure a businesses row exists when business_suite_kyc has one (so admin can see and change status). Idempotent.
+   */
+  async ensureBusinessRowSynced(userId: string): Promise<void> {
+    await this.syncBusinessRowFromKyc(userId);
   }
 
   /**
@@ -185,6 +194,9 @@ export class BusinessSuiteService {
       .maybeSingle();
     if (kyc?.status && (BusinessSuiteService.ALLOWED_KYC_STATUSES as readonly string[]).includes(kyc.status)) {
       return { allowed: true };
+    }
+    if (!biz && kyc) {
+      await this.ensureBusinessRowSynced(userId).catch((err) => console.warn('[BusinessSuite] ensureBusinessRowSynced:', err));
     }
     const status = biz?.status ?? kyc?.status;
     if (status === 'In review') {

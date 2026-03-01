@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
+import { businessSuiteService } from './businessSuite.service';
 
 const APPROVAL_WORKFLOWS = ['single', 'dual', 'multi'];
 const ARBITRATION_TYPES = ['binding', 'non-binding', 'mediation'];
@@ -99,6 +100,7 @@ export class BusinessSuiteKycService {
       if (fallback.error || !fallback.data) {
         return { success: false, message: error.message || 'Failed to fetch KYC', error: error.message };
       }
+      await businessSuiteService.ensureBusinessRowSynced(userId).catch(() => {});
       if (fallback.data.status === 'In review') {
         return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
       }
@@ -107,6 +109,7 @@ export class BusinessSuiteKycService {
     if (!row) {
       const { data: legacyRow } = await client.from('business_suite_kyc').select('*').eq('user_id', userId).maybeSingle();
       if (legacyRow) {
+        await businessSuiteService.ensureBusinessRowSynced(userId).catch(() => {});
         if (legacyRow.status === 'In review') {
           return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
         }
