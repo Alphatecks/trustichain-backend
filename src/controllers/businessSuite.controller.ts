@@ -262,7 +262,7 @@ export class BusinessSuiteController {
     }
   }
 
-  /** Upload KYC document (Identity, Address, or Enhanced Due Diligence). POST /api/business-suite/kyc/documents/:type, multipart field: document */
+  /** Upload KYC document: logo (image) or identity/address/enhanced-due-diligence (PDF/image). POST /kyc/documents/:type, multipart field: document */
   async uploadKycDocument(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
     const status = await businessSuiteService.getBusinessStatus(userId);
@@ -271,14 +271,23 @@ export class BusinessSuiteController {
       return;
     }
     const type = req.params.type as string;
-    const allowed = ['identity', 'address', 'enhanced-due-diligence'];
+    const allowed = ['logo', 'identity', 'address', 'enhanced-due-diligence'];
     if (!type || !allowed.includes(type)) {
-      res.status(400).json({ success: false, message: 'Invalid type. Use: identity, address, or enhanced-due-diligence.' });
+      res.status(400).json({ success: false, message: 'Invalid type. Use: logo, identity, address, or enhanced-due-diligence.' });
       return;
     }
     const file = req.file;
     if (!file) {
       res.status(400).json({ success: false, message: 'No file provided. Send multipart form with field "document".' });
+      return;
+    }
+    if (type === 'logo') {
+      const result = await storageService.uploadCompanyLogo(userId, file);
+      if (result.success && result.data?.fileUrl) {
+        res.status(200).json({ success: true, data: { companyLogoUrl: result.data.fileUrl } });
+      } else {
+        res.status(400).json({ success: false, message: result.message ?? 'Upload failed' });
+      }
       return;
     }
     const docType = type === 'enhanced-due-diligence' ? 'enhanced_due_diligence' : (type as 'identity' | 'address');

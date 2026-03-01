@@ -99,8 +99,8 @@ router.get('/kyc', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   POST /api/business-suite/kyc/logo
- * @desc    Upload company logo (image picker). multipart/form-data field: logo (image only: JPEG, PNG, GIF, WebP). Returns companyLogoUrl to use in POST /kyc.
- * @access  Private (business suite only)
+ * @desc    [Legacy] Upload company logo. Prefer POST /kyc/documents/logo with field "document".
+ * @access  Private
  */
 router.post('/kyc/logo', authenticate, upload.single('logo'), asyncHandler(async (req, res) => {
   await businessSuiteController.uploadKycLogo(req, res);
@@ -108,7 +108,7 @@ router.post('/kyc/logo', authenticate, upload.single('logo'), asyncHandler(async
 
 /**
  * @route   POST /api/business-suite/kyc/documents/:type
- * @desc    Upload KYC document (PDF or image). type = identity | address | enhanced-due-diligence. Multipart field: document. Returns URL to include in POST /kyc.
+ * @desc    Upload KYC file (local file). type = logo (image) | identity | address | enhanced-due-diligence (PDF or image). Multipart field: document. Returns URL to include in POST /kyc.
  * @access  Private
  */
 router.post('/kyc/documents/:type', authenticate, upload.single('document'), asyncHandler(async (req, res) => {
