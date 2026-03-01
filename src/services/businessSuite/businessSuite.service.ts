@@ -6,13 +6,8 @@
 import * as crypto from 'crypto';
 import { supabaseAdmin } from '../../config/supabase';
 
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_COST = 16384;
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
 
 function isValidPin(pin: string): boolean {
   return /^\d{6}$/.test(pin);

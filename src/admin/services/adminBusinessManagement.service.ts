@@ -17,8 +17,6 @@ function formatEscrowId(year: number, sequence: number): string {
   return `ESC-${year}-${sequence.toString().padStart(3, '0')}`;
 }
 
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
-
 const ESCROW_STATUS_TO_ACTIVITY: Record<string, AdminBusinessActivityStatus> = {
   pending: 'Pending',
   active: 'In progress',

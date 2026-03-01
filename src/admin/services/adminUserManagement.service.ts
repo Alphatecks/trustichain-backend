@@ -32,12 +32,6 @@ function timeAgo(date: Date): string {
   return `${Math.floor(seconds / 31536000)} years ago`;
 }
 
-const BUSINESS_SUITE_TYPES = ['business_suite', 'enterprise'];
-
-function isBusinessSuite(accountType: string | null): boolean {
-  return accountType != null && BUSINESS_SUITE_TYPES.includes(accountType);
-}
-
 export class AdminUserManagementService {
   private getAdminClient() {
     const client = supabaseAdmin || supabase;
