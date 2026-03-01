@@ -109,7 +109,47 @@ export class BusinessSuiteService {
   private static readonly ALLOWED_KYC_STATUSES = ['Pending', 'Verified'] as const;
 
   /**
+   * When business_suite_kyc has a row but businesses does not, create a businesses row so admin can see and change status.
+   */
+  private async syncBusinessRowFromKyc(userId: string): Promise<void> {
+    const client = supabaseAdmin;
+    if (!client) return;
+    const { data: existing } = await client.from('businesses').select('id').eq('owner_user_id', userId).maybeSingle();
+    if (existing) return;
+    const { data: kycRow } = await client
+      .from('business_suite_kyc')
+      .select('company_name, business_description, company_logo_url, default_escrow_fee_rate, auto_release_period, approval_workflow, arbitration_type, transaction_limits, identity_verification_required, address_verification_required, enhanced_due_diligence, identity_verification_document_url, address_verification_document_url, enhanced_due_diligence_document_url, status, submitted_at, reviewed_at, reviewed_by, updated_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!kycRow) return;
+    const now = new Date().toISOString();
+    await client.from('businesses').insert({
+      owner_user_id: userId,
+      status: (kycRow as any).status ?? 'Pending',
+      company_name: (kycRow as any).company_name ?? null,
+      business_description: (kycRow as any).business_description ?? null,
+      company_logo_url: (kycRow as any).company_logo_url ?? null,
+      default_escrow_fee_rate: (kycRow as any).default_escrow_fee_rate ?? null,
+      auto_release_period: (kycRow as any).auto_release_period ?? null,
+      approval_workflow: (kycRow as any).approval_workflow ?? null,
+      arbitration_type: (kycRow as any).arbitration_type ?? null,
+      transaction_limits: (kycRow as any).transaction_limits ?? null,
+      identity_verification_required: Boolean((kycRow as any).identity_verification_required),
+      address_verification_required: Boolean((kycRow as any).address_verification_required),
+      enhanced_due_diligence: Boolean((kycRow as any).enhanced_due_diligence),
+      identity_verification_document_url: (kycRow as any).identity_verification_document_url ?? null,
+      address_verification_document_url: (kycRow as any).address_verification_document_url ?? null,
+      enhanced_due_diligence_document_url: (kycRow as any).enhanced_due_diligence_document_url ?? null,
+      submitted_at: (kycRow as any).submitted_at ?? null,
+      reviewed_at: (kycRow as any).reviewed_at ?? null,
+      reviewed_by: (kycRow as any).reviewed_by ?? null,
+      updated_at: (kycRow as any).updated_at ?? now,
+    });
+  }
+
+  /**
    * Returns the business KYC status for a user (from businesses or business_suite_kyc). Null if none.
+   * If only business_suite_kyc exists, syncs a row into businesses so admin can see it.
    */
   async getBusinessStatus(userId: string): Promise<string | null> {
     const client = supabaseAdmin;
@@ -117,6 +157,9 @@ export class BusinessSuiteService {
     const { data: biz } = await client.from('businesses').select('status').eq('owner_user_id', userId).maybeSingle();
     if (biz?.status) return biz.status;
     const { data: kyc } = await client.from('business_suite_kyc').select('status').eq('user_id', userId).maybeSingle();
+    if (kyc) {
+      this.syncBusinessRowFromKyc(userId).catch((err) => console.warn('[BusinessSuite] sync business row from kyc:', err));
+    }
     return kyc?.status ?? null;
   }
 
