@@ -684,12 +684,12 @@ export class AdminDashboardService {
         return { success: false, message: fetchBizError.message, error: fetchBizError.message };
       }
       if (!existingBiz) {
-        const { data: existingKyc } = await client
+        const { data: kycRow, error: kycFetchError } = await client
           .from('business_suite_kyc')
-          .select('id')
+          .select('id, company_name, business_description, company_logo_url, default_escrow_fee_rate, auto_release_period, approval_workflow, arbitration_type, transaction_limits, identity_verification_required, address_verification_required, enhanced_due_diligence, submitted_at')
           .eq('user_id', userId)
           .maybeSingle();
-        if (!existingKyc) {
+        if (kycFetchError || !kycRow) {
           return { success: false, message: 'No business record found for this user', error: 'Not found' };
         }
         const { error: kycUpdateError } = await client
@@ -698,6 +698,28 @@ export class AdminDashboardService {
           .eq('user_id', userId);
         if (kycUpdateError) {
           return { success: false, message: kycUpdateError.message, error: kycUpdateError.message };
+        }
+        const { error: insertBizError } = await client.from('businesses').insert({
+          owner_user_id: userId,
+          status,
+          reviewed_at: now,
+          reviewed_by: adminId,
+          updated_at: now,
+          company_name: kycRow.company_name ?? null,
+          business_description: kycRow.business_description ?? null,
+          company_logo_url: kycRow.company_logo_url ?? null,
+          default_escrow_fee_rate: kycRow.default_escrow_fee_rate ?? null,
+          auto_release_period: kycRow.auto_release_period ?? null,
+          approval_workflow: kycRow.approval_workflow ?? null,
+          arbitration_type: kycRow.arbitration_type ?? null,
+          transaction_limits: kycRow.transaction_limits ?? null,
+          identity_verification_required: Boolean(kycRow.identity_verification_required),
+          address_verification_required: Boolean(kycRow.address_verification_required),
+          enhanced_due_diligence: Boolean(kycRow.enhanced_due_diligence),
+          submitted_at: kycRow.submitted_at ?? null,
+        });
+        if (insertBizError) {
+          console.warn('Admin: synced business_suite_kyc status but could not create businesses row:', insertBizError.message);
         }
         return { success: true, message: 'Business KYC status updated', data: { status } };
       }
