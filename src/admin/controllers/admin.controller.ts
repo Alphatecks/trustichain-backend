@@ -172,6 +172,35 @@ export class AdminController {
     res.status(result.success ? 200 : 500).json(result);
   }
 
+  async updateBusinessKycStatus(req: Request, res: Response): Promise<void> {
+    const businessId = req.params.businessId as string;
+    const status = req.body?.status as string;
+    const adminId = req.admin?.id;
+    if (!businessId || !status || !adminId) {
+      res.status(400).json({
+        success: false,
+        message: 'businessId, status, and admin auth required',
+        error: 'Bad request',
+      });
+      return;
+    }
+    const allowed = ['In review', 'Verified', 'Rejected'];
+    if (!allowed.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: `status must be one of: ${allowed.join(', ')}`,
+        error: 'Bad request',
+      });
+      return;
+    }
+    const result = await adminDashboardService.updateBusinessKycStatus(
+      businessId,
+      status as 'In review' | 'Verified' | 'Rejected',
+      adminId
+    );
+    res.status(result.success ? 200 : 404).json(result);
+  }
+
   async getKycDetail(req: Request, res: Response<AdminKycDetailResponse>): Promise<void> {
     const userId = req.params.userId;
     if (!userId) {

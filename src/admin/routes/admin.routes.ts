@@ -83,6 +83,15 @@ router.get('/businesses', adminAuthenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   PATCH /api/admin/businesses/:businessId/status
+ * @desc    Update a business's KYC status. Body: { status: 'In review' | 'Verified' | 'Rejected' }
+ * @access  Private (admin)
+ */
+router.patch('/businesses/:businessId/status', adminAuthenticate, asyncHandler(async (req, res) => {
+  await adminController.updateBusinessKycStatus(req, res);
+}));
+
+/**
  * @route   GET /api/admin/kyc
  * @desc    List users for KYC verification
  * @access  Private (admin)

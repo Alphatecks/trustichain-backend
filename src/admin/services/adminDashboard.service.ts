@@ -728,6 +728,58 @@ export class AdminDashboardService {
   }
 
   /**
+   * Update a business's KYC status by business id (standalone businesses table).
+   * PATCH /api/admin/businesses/:businessId/status with body { status: 'In review' | 'Verified' | 'Rejected' }
+   */
+  async updateBusinessKycStatus(
+    businessId: string,
+    status: 'In review' | 'Verified' | 'Rejected',
+    adminId: string
+  ): Promise<{ success: boolean; message: string; data?: { status: string }; error?: string }> {
+    try {
+      const client = this.getAdminClient();
+      const now = new Date().toISOString();
+      const updatePayload = { status, reviewed_at: now, reviewed_by: adminId, updated_at: now };
+
+      const { data: business, error: fetchError } = await client
+        .from('businesses')
+        .select('id, owner_user_id')
+        .eq('id', businessId)
+        .maybeSingle();
+
+      if (fetchError) {
+        return { success: false, message: fetchError.message, error: fetchError.message };
+      }
+      if (!business) {
+        return { success: false, message: 'Business not found', error: 'Not found' };
+      }
+
+      const { error: updateError } = await client
+        .from('businesses')
+        .update(updatePayload)
+        .eq('id', businessId);
+
+      if (updateError) {
+        return { success: false, message: updateError.message, error: updateError.message };
+      }
+
+      await client
+        .from('business_suite_kyc')
+        .update(updatePayload)
+        .eq('user_id', business.owner_user_id);
+
+      return { success: true, message: 'Business KYC status updated', data: { status } };
+    } catch (e) {
+      console.error('Admin updateBusinessKycStatus error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to update business KYC status',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
    * Search across users, escrows, transactions, disputes
    */
   async search(q: string, limit: number = 20): Promise<AdminSearchResponse> {
