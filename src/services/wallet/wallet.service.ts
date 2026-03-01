@@ -19,6 +19,7 @@ import { exchangeService } from '../exchange/exchange.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
+import { businessSuiteService } from '../businessSuite/businessSuite.service';
 
 export type WalletSuiteContext = 'personal' | 'business';
 
@@ -41,6 +42,16 @@ export class WalletService {
     error?: string;
   }> {
     try {
+      if (suiteContext === 'business') {
+        const status = await businessSuiteService.getBusinessStatus(userId);
+        if (status === 'In review') {
+          return {
+            success: false,
+            message: 'Account is under review; you cannot create or use a wallet until review is complete.',
+            error: 'Account under review',
+          };
+        }
+      }
       const adminClient = supabaseAdmin || supabase;
       const { data: wallet, error } = await adminClient
         .from('wallets')
@@ -213,6 +224,16 @@ export class WalletService {
     help?: { detectedType?: 'ethereum' | 'invalid' | 'wrong_length'; exampleCode?: string; correctFormat?: string };
   }> {
     try {
+      if (suiteContext === 'business') {
+        const status = await businessSuiteService.getBusinessStatus(userId);
+        if (status === 'In review') {
+          return {
+            success: false,
+            message: 'Account is under review; you cannot create or use a wallet until review is complete.',
+            error: 'Account under review',
+          };
+        }
+      }
       const adminClient = supabaseAdmin || supabase;
       let { walletAddress } = request;
       walletAddress = String(walletAddress || '').trim();
@@ -298,6 +319,16 @@ export class WalletService {
     error?: string;
   }> {
     try {
+      if (suiteContext === 'business') {
+        const status = await businessSuiteService.getBusinessStatus(userId);
+        if (status === 'In review') {
+          return {
+            success: false,
+            message: 'Account is under review; you cannot create or use a wallet until review is complete.',
+            error: 'Account under review',
+          };
+        }
+      }
       const adminClient = supabaseAdmin || supabase;
       const { data: currentWallet, error: walletError } = await adminClient
         .from('wallets')
@@ -338,6 +369,16 @@ export class WalletService {
     error?: string;
   }> {
     try {
+      if (suiteContext === 'business') {
+        const status = await businessSuiteService.getBusinessStatus(userId);
+        if (status === 'In review') {
+          return {
+            success: false,
+            message: 'Account is under review; you cannot create or use a wallet until review is complete.',
+            error: 'Account under review',
+          };
+        }
+      }
       const adminClient = supabaseAdmin || supabase;
       const { data: existing } = await adminClient
         .from('wallets')
@@ -391,7 +432,7 @@ export class WalletService {
    * Creates a XUMM payload that requests the user's XRPL address.
    * Use suiteContext 'business' for business suite (independent from personal).
    */
-  async connectWalletViaXUMM(userId: string, _suiteContext: WalletSuiteContext = 'personal'): Promise<{
+  async connectWalletViaXUMM(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean,
     message: string,
     data?: {
@@ -404,6 +445,16 @@ export class WalletService {
     error?: string
   }> {
     try {
+      if (suiteContext === 'business') {
+        const status = await businessSuiteService.getBusinessStatus(userId);
+        if (status === 'In review') {
+          return {
+            success: false,
+            message: 'Account is under review; you cannot create or use a wallet until review is complete.',
+            error: 'Account under review',
+          };
+        }
+      }
       // Create a SignIn transaction to get the user's XRPL address
       // SignIn is a special XUMM transaction type that just requires signing
       // It doesn't submit anything to XRPL, just gets the account address
@@ -757,6 +808,16 @@ export class WalletService {
     error?: string;
   }> {
     try {
+      if (suiteContext === 'business') {
+        const status = await businessSuiteService.getBusinessStatus(userId);
+        if (status === 'In review') {
+          return {
+            success: false,
+            message: 'Account is under review; you cannot create or use a wallet until review is complete.',
+            error: 'Account under review',
+          };
+        }
+      }
       // Get payload status from XUMM
       const payloadStatus = await xummService.getPayloadStatus(xummUuid);
 
