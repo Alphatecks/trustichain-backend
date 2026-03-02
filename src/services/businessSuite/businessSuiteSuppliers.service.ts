@@ -62,6 +62,14 @@ export class BusinessSuiteSuppliersService {
     if (!businessId) {
       return { success: false, message: 'No registered business for this account', error: 'No business' };
     }
+    const businessStatus = await businessSuiteService.getBusinessStatus(userId);
+    if (businessStatus !== 'Verified') {
+      return {
+        success: false,
+        message: 'Your business must be registered and verified to add suppliers',
+        error: 'Business not verified',
+      };
+    }
 
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) {
