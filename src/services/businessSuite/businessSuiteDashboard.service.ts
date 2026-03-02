@@ -64,6 +64,7 @@ export class BusinessSuiteDashboardService {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
 
+    const businessId = await businessSuiteService.getBusinessId(userId);
     const client = supabaseAdmin!;
     const now = new Date();
     const thisMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -74,7 +75,7 @@ export class BusinessSuiteDashboardService {
       { data: activeEscrowRows },
       { data: allBusinessEscrowRows },
       { count: payrollsCreated },
-      { data: supplierRows },
+      { count: supplierCount },
       { count: completedThisMonth },
     ] = await Promise.all([
       walletService.getBalance(userId, 'business'),
@@ -82,7 +83,9 @@ export class BusinessSuiteDashboardService {
       client.from('escrows').select('amount_usd').eq('suite_context', 'business').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`).in('status', ['pending', 'active']),
       client.from('escrows').select('amount_usd').eq('suite_context', 'business').or(`user_id.eq.${userId},counterparty_id.eq.${userId}`),
       client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('suite_context', 'business'),
-      client.from('escrows').select('counterparty_id').eq('user_id', userId).eq('suite_context', 'business').not('counterparty_id', 'is', null),
+      businessId
+        ? client.from('business_suppliers').select('*', { count: 'exact', head: true }).eq('business_id', businessId)
+        : Promise.resolve({ count: 0 }),
       client.from('escrows').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('suite_context', 'business').eq('status', 'completed').gte('updated_at', thisMonthStart.toISOString()),
     ]);
 
@@ -97,11 +100,6 @@ export class BusinessSuiteDashboardService {
     const lockedAmount = activeEscrowRows?.reduce((sum: number, r: { amount_usd: string | number }) => sum + parseFloat(String(r.amount_usd)), 0) ?? 0;
     const totalEscrowed = allBusinessEscrowRows?.reduce((sum: number, r: { amount_usd: string | number }) => sum + parseFloat(String(r.amount_usd)), 0) ?? 0;
 
-    const supplierIds = new Set<string>();
-    (supplierRows || []).forEach((r: { counterparty_id: string | null }) => {
-      if (r.counterparty_id) supplierIds.add(r.counterparty_id);
-    });
-
     return {
       success: true,
       message: 'Business suite dashboard summary retrieved',
@@ -111,7 +109,7 @@ export class BusinessSuiteDashboardService {
         trustiscore: { score: trustiscoreResult.data.score, level: trustiscoreResult.data.level },
         totalEscrowed: parseFloat(totalEscrowed.toFixed(2)),
         payrollsCreated: payrollsCreated ?? 0,
-        suppliers: supplierIds.size,
+        suppliers: supplierCount ?? 0,
         completedThisMonth: completedThisMonth ?? 0,
       },
     };
