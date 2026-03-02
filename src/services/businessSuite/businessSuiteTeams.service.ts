@@ -12,6 +12,7 @@ import type {
   CreateTeamRequest,
   AddTeamMemberRequest,
   CheckTeamMemberResponse,
+  TeamMembersByNameResponse,
 } from '../../types/api/businessSuiteTeams.types';
 
 function formatNextDate(iso: string | null): string | null {
@@ -84,6 +85,67 @@ export class BusinessSuiteTeamsService {
         pageSize,
         totalPages: Math.ceil(total / pageSize) || 1,
       },
+    };
+  }
+
+  /**
+   * Get list of team members by team name. GET /api/business-suite/teams/members?name=...
+   * Matches team by name (case-insensitive) for the user's business; returns members.
+   */
+  async getTeamMembersByTeamName(userId: string, teamName: string): Promise<TeamMembersByNameResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
+    const name = typeof teamName === 'string' ? teamName.trim() : '';
+    if (!name) {
+      return { success: false, message: 'Team name is required', error: 'Missing team name' };
+    }
+    const client = supabaseAdmin!;
+    const { data: teams, error: teamError } = await client
+      .from('business_teams')
+      .select('id, name')
+      .eq('business_id', businessId)
+      .ilike('name', name)
+      .limit(10);
+    if (teamError) {
+      return { success: false, message: teamError.message || 'Failed to find team', error: teamError.message };
+    }
+    const exact = (teams || []).find((t: { name: string }) => (t.name || '').trim().toLowerCase() === name.toLowerCase());
+    const team = exact || (teams || [])[0];
+    if (!team) {
+      return { success: false, message: 'No team found with this name', error: 'Team not found' };
+    }
+    const teamId = (team as { id: string }).id;
+    const teamNameRes = (team as { name: string }).name;
+    const { data: memberRows } = await client
+      .from('business_team_members')
+      .select('id, user_id, created_at')
+      .eq('team_id', teamId)
+      .order('created_at', { ascending: true });
+    const memberUserIds = (memberRows || []).map((m: { user_id: string }) => m.user_id);
+    const { data: users } = memberUserIds.length > 0
+      ? await client.from('users').select('id, full_name, email').in('id', memberUserIds)
+      : { data: [] };
+    const userMap = (users || []).reduce<Record<string, { full_name: string; email: string }>>((acc, u: { id: string; full_name: string | null; email: string }) => {
+      acc[u.id] = { full_name: u.full_name || '—', email: u.email || '' };
+      return acc;
+    }, {});
+    const members = (memberRows || []).map((m: { id: string; user_id: string; created_at: string }) => ({
+      id: m.id,
+      userId: m.user_id,
+      fullName: userMap[m.user_id]?.full_name ?? '—',
+      email: userMap[m.user_id]?.email ?? '',
+      addedAt: m.created_at,
+    }));
+    return {
+      success: true,
+      message: 'Team members retrieved',
+      data: { teamId, teamName: teamNameRes, members },
     };
   }
 

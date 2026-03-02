@@ -170,6 +170,19 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Get team members by team name. GET /api/business-suite/teams/members?name=
+   */
+  async getTeamMembersByName(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const teamName = typeof req.query.name === 'string' ? req.query.name : '';
+    const result = await businessSuiteTeamsService.getTeamMembersByTeamName(userId, teamName);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Missing team name') res.status(400).json(result);
+    else if (result.error === 'Team not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Check team member by full name. POST /api/business-suite/teams/members/check (body: { fullName }) or query ?fullName=
    */
   async checkTeamMemberByName(req: Request, res: Response): Promise<void> {

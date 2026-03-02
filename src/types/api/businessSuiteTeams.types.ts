@@ -74,6 +74,18 @@ export interface BusinessSuiteTeamMemberItem {
   addedAt: string;
 }
 
+/** Response for GET team members by team name */
+export interface TeamMembersByNameResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    teamId: string;
+    teamName: string;
+    members: BusinessSuiteTeamMemberItem[];
+  };
+  error?: string;
+}
+
 export interface BusinessSuiteTeamDetailResponse {
   success: boolean;
   message: string;
