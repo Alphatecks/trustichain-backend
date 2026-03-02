@@ -74,9 +74,20 @@ export class BusinessSuitePayrollsService {
 
     const itemInputs = Array.isArray(body.items) ? body.items : [];
     if (itemInputs.length > 0) {
-      const items = itemInputs.map((it: { counterpartyId: string; amountUsd: number; dueDate?: string }) => ({
+      const validItems = itemInputs.filter(
+        (it: { counterpartyId?: string | null }) => it != null && typeof it.counterpartyId === 'string' && it.counterpartyId.trim().length > 0
+      );
+      if (validItems.length !== itemInputs.length) {
+        await client.from('business_payrolls').delete().eq('id', payroll.id);
+        return {
+          success: false,
+          message: 'Each payroll item must have a valid counterpartyId (team member user id).',
+          error: 'Invalid items',
+        };
+      }
+      const items = validItems.map((it: { counterpartyId: string; amountUsd: number; dueDate?: string }) => ({
         payroll_id: payroll.id,
-        counterparty_id: it.counterpartyId,
+        counterparty_id: it.counterpartyId.trim(),
         amount_usd: Number(it.amountUsd) || 0,
         due_date: it.dueDate ? new Date(it.dueDate).toISOString().split('T')[0] : null,
       }));
