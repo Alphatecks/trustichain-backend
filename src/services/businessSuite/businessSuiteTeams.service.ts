@@ -11,6 +11,7 @@ import type {
   BusinessSuiteTeamDetailResponse,
   CreateTeamRequest,
   AddTeamMemberRequest,
+  CheckTeamMemberResponse,
 } from '../../types/api/businessSuiteTeams.types';
 
 function formatNextDate(iso: string | null): string | null {
@@ -191,6 +192,60 @@ export class BusinessSuiteTeamsService {
   }
 
   /**
+   * Check if a personal suite user exists by full name; return their email, phone, country.
+   * Returns error if the name matches the current user (business suite owner cannot add themselves).
+   * GET/POST /api/business-suite/teams/members/check
+   */
+  async checkTeamMemberByFullName(userId: string, fullName: string): Promise<CheckTeamMemberResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const name = typeof fullName === 'string' ? fullName.trim() : '';
+    if (!name) {
+      return { success: false, message: 'Full name is required', error: 'Missing full name' };
+    }
+    const client = supabaseAdmin!;
+    const normalized = name.toLowerCase();
+    const { data: rows, error } = await client
+      .from('users')
+      .select('id, email, full_name, country, phone')
+      .ilike('full_name', name)
+      .limit(20);
+    if (error) {
+      return { success: false, message: error.message || 'Failed to lookup user', error: error.message };
+    }
+    const exactMatches = (rows || []).filter(
+      (u: { full_name: string | null }) => (u.full_name || '').trim().toLowerCase() === normalized
+    );
+    if (exactMatches.length === 0) {
+      return {
+        success: false,
+        message: 'No registered personal user found with this full name.',
+        error: 'User not found',
+      };
+    }
+    const user = exactMatches[0] as { id: string; email: string; country: string | null; phone: string | null };
+    if (user.id === userId) {
+      return {
+        success: false,
+        message: 'You cannot add yourself as a team member. The name matches the personal account that owns the business suite.',
+        error: 'Cannot add self',
+      };
+    }
+    return {
+      success: true,
+      message: 'User found',
+      data: {
+        exists: true as const,
+        email: user.email,
+        phone: user.phone ?? null,
+        country: user.country ?? null,
+      },
+    };
+  }
+
+  /**
    * Add a team member (full modal: personal, job, payment). POST /api/business-suite/teams/:teamId/members
    * Looks up user by email; adds them to the team and saves profile.
    */
@@ -231,6 +286,19 @@ export class BusinessSuiteTeamsService {
       .maybeSingle();
     if (userError || !memberUser) {
       return { success: false, message: 'No user found with this email. They must have an account to be added.', error: 'User not found' };
+    }
+
+    const { data: memberKyc } = await client
+      .from('user_kyc')
+      .select('status')
+      .eq('user_id', memberUser.id)
+      .maybeSingle();
+    if (!memberKyc || (memberKyc as { status: string }).status !== 'verified') {
+      return {
+        success: false,
+        message: 'This user is not a registered, approved personal user on Trustichain. Only users with verified personal KYC can be added as team members.',
+        error: 'Member not approved',
+      };
     }
 
     const { data: existing } = await client

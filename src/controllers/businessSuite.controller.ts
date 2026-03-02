@@ -170,6 +170,22 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Check team member by full name. POST /api/business-suite/teams/members/check (body: { fullName }) or query ?fullName=
+   */
+  async checkTeamMemberByName(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const fullName =
+      (req.body && typeof (req.body as { fullName?: string }).fullName === 'string'
+        ? (req.body as { fullName: string }).fullName
+        : null) ?? (typeof req.query.fullName === 'string' ? req.query.fullName : '');
+    const result = await businessSuiteTeamsService.checkTeamMemberByFullName(userId, fullName);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Missing full name' || result.error === 'User not found') res.status(400).json(result);
+    else if (result.error === 'Cannot add self') res.status(403).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Add team member (full modal: personal, job, payment). POST /api/business-suite/teams/:teamId/members
    */
   async addTeamMember(req: Request, res: Response): Promise<void> {

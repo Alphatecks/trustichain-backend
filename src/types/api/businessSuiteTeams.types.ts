@@ -2,6 +2,19 @@
  * Business Suite Teams API Types (My Teams)
  */
 
+/** Response for GET/POST check team member by full name */
+export interface CheckTeamMemberResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    exists: true;
+    email: string;
+    phone: string | null;
+    country: string | null;
+  };
+  error?: string;
+}
+
 /** Request body for POST /api/business-suite/teams (create team) */
 export interface CreateTeamRequest {
   name: string;

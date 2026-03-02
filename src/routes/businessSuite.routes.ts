@@ -152,6 +152,19 @@ router.get('/teams', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/teams/members/check?fullName=
+ * @route   POST /api/business-suite/teams/members/check (body: { fullName })
+ * @desc    Check if a personal user exists by full name; returns email, phone, country. Errors if name is the business owner (cannot add self).
+ * @access  Private (business suite only)
+ */
+router.get('/teams/members/check', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.checkTeamMemberByName(req, res);
+}));
+router.post('/teams/members/check', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.checkTeamMemberByName(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/teams/:id
  * @desc    Single team detail with members (for View)
  * @access  Private (business suite only)
