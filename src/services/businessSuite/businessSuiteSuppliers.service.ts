@@ -159,7 +159,6 @@ export class BusinessSuiteSuppliersService {
       },
     };
   }
-}
 
   /**
    * Check if a supplier (business) name is registered as a verified business.
