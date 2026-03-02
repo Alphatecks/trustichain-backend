@@ -58,6 +58,10 @@ export class BusinessSuiteSuppliersService {
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
 
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) {
@@ -105,6 +109,7 @@ export class BusinessSuiteSuppliersService {
     const { data: supplier, error } = await client
       .from('business_suppliers')
       .insert({
+        business_id: businessId,
         user_id: userId,
         name,
         wallet_address: walletAddress,

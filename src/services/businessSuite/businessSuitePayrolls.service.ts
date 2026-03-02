@@ -37,6 +37,8 @@ export class BusinessSuitePayrollsService {
   async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string }; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: 'No business' };
     const client = supabaseAdmin!;
     if (!body.name?.trim()) return { success: false, message: 'Payroll name is required', error: 'Validation' };
 
@@ -49,6 +51,7 @@ export class BusinessSuitePayrollsService {
     const { data: payroll, error: payrollError } = await client
       .from('business_payrolls')
       .insert({
+        business_id: businessId,
         user_id: userId,
         name: body.name.trim(),
         release_date: releaseDate,
@@ -89,12 +92,14 @@ export class BusinessSuitePayrollsService {
   async listPayrolls(userId: string, page: number = 1, pageSize: number = 20): Promise<BusinessPayrollListResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: check.error };
     const client = supabaseAdmin!;
     const from = (page - 1) * pageSize;
     const { data: payrolls, error, count } = await client
       .from('business_payrolls')
       .select('id, name, release_date, freeze_auto_release, status, created_at', { count: 'exact' })
-      .eq('user_id', userId)
+      .eq('business_id', businessId)
       .order('created_at', { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) return { success: false, message: error.message, error: error.message };
@@ -137,12 +142,14 @@ export class BusinessSuitePayrollsService {
   async getPayrollDetail(userId: string, payrollId: string): Promise<BusinessPayrollDetailResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: 'No business' };
     const client = supabaseAdmin!;
     const { data: payroll, error: payrollError } = await client
       .from('business_payrolls')
       .select('*')
       .eq('id', payrollId)
-      .eq('user_id', userId)
+      .eq('business_id', businessId)
       .single();
     if (payrollError || !payroll) return { success: false, message: 'Payroll not found', error: 'Not found' };
     const { data: itemRows } = await client.from('business_payroll_items').select('*').eq('payroll_id', payrollId).order('created_at', { ascending: true });
@@ -198,7 +205,9 @@ export class BusinessSuitePayrollsService {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const client = supabaseAdmin!;
-    const { data: existing } = await client.from('business_payrolls').select('id').eq('id', payrollId).eq('user_id', userId).single();
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: 'No business' };
+    const { data: existing } = await client.from('business_payrolls').select('id').eq('id', payrollId).eq('business_id', businessId).single();
     if (!existing) return { success: false, message: 'Payroll not found', error: 'Not found' };
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name.trim();
@@ -216,7 +225,7 @@ export class BusinessSuitePayrollsService {
     if (body.currency !== undefined) updates.currency = body.currency?.trim() || null;
     if (body.enableAllowances !== undefined) updates.enable_allowances = body.enableAllowances;
     if (Object.keys(updates).length === 0) return { success: true, message: 'No changes' };
-    const { error } = await client.from('business_payrolls').update(updates).eq('id', payrollId).eq('user_id', userId);
+    const { error } = await client.from('business_payrolls').update(updates).eq('id', payrollId).eq('business_id', businessId);
     if (error) return { success: false, message: error.message, error: error.message };
     return { success: true, message: 'Payroll updated' };
   }
@@ -224,8 +233,10 @@ export class BusinessSuitePayrollsService {
   async releasePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: 'No business' };
     const client = supabaseAdmin!;
-    const { data: payroll, error: payrollError } = await client.from('business_payrolls').select('*').eq('id', payrollId).eq('user_id', userId).single();
+    const { data: payroll, error: payrollError } = await client.from('business_payrolls').select('*').eq('id', payrollId).eq('business_id', businessId).single();
     if (payrollError || !payroll) return { success: false, message: 'Payroll not found', error: 'Not found' };
     if (payroll.status === 'released') return { success: false, message: 'Payroll already released', error: 'Already released' };
     const { data: items } = await client.from('business_payroll_items').select('*').eq('payroll_id', payrollId).eq('status', 'pending');
@@ -267,14 +278,16 @@ export class BusinessSuitePayrollsService {
   async getSummary(userId: string): Promise<BusinessPayrollSummaryResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: check.error };
     const client = supabaseAdmin!;
     const [
       { count: totalPayroll },
       { data: teamIds },
       { data: escrowRows },
     ] = await Promise.all([
-      client.from('business_payrolls').select('*', { count: 'exact', head: true }).eq('user_id', userId),
-      client.from('business_teams').select('id').eq('user_id', userId),
+      client.from('business_payrolls').select('*', { count: 'exact', head: true }).eq('business_id', businessId),
+      client.from('business_teams').select('id').eq('business_id', businessId),
       client.from('escrows').select('amount_usd').eq('user_id', userId).eq('suite_context', 'business').eq('transaction_type', 'payroll').in('status', ['pending', 'active']),
     ]);
     let totalTeamMembers = 0;
@@ -302,8 +315,10 @@ export class BusinessSuitePayrollsService {
   ): Promise<BusinessPayrollTransactionsResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: check.error };
     const client = supabaseAdmin!;
-    const { data: userPayrolls } = await client.from('business_payrolls').select('id').eq('user_id', userId);
+    const { data: userPayrolls } = await client.from('business_payrolls').select('id').eq('business_id', businessId);
     const payrollIds = (userPayrolls || []).map((p: { id: string }) => p.id);
     if (payrollIds.length === 0) {
       return { success: true, message: 'Transaction history retrieved', data: { items: [], total: 0, page, pageSize, totalPages: 0 } };
@@ -355,7 +370,9 @@ export class BusinessSuitePayrollsService {
     const client = supabaseAdmin!;
     const { data: item, error: itemError } = await client.from('business_payroll_items').select('*').eq('id', itemId).single();
     if (itemError || !item) return { success: false, message: 'Transaction not found', error: 'Not found' };
-    const { data: payroll } = await client.from('business_payrolls').select('id, name').eq('id', item.payroll_id).eq('user_id', userId).single();
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: 'No business' };
+    const { data: payroll } = await client.from('business_payrolls').select('id, name').eq('id', item.payroll_id).eq('business_id', businessId).single();
     if (!payroll) return { success: false, message: 'Transaction not found', error: 'Not found' };
     const { data: counterparty } = await client.from('users').select('full_name, email').eq('id', item.counterparty_id).single();
     const out = {

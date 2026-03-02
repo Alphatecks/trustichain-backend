@@ -35,6 +35,10 @@ export class BusinessSuiteTeamsService {
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
 
     const client = supabaseAdmin!;
     const from = (page - 1) * pageSize;
@@ -42,7 +46,7 @@ export class BusinessSuiteTeamsService {
     const { data: teams, error: teamsError, count } = await client
       .from('business_teams')
       .select('id, name, next_date, created_at', { count: 'exact' })
-      .eq('user_id', userId)
+      .eq('business_id', businessId)
       .order('created_at', { ascending: false })
       .range(from, from + pageSize - 1);
 
@@ -90,13 +94,17 @@ export class BusinessSuiteTeamsService {
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
 
     const client = supabaseAdmin!;
     const { data: team, error: teamError } = await client
       .from('business_teams')
       .select('id, name, next_date, created_at, updated_at')
       .eq('id', teamId)
-      .eq('user_id', userId)
+      .eq('business_id', businessId)
       .single();
 
     if (teamError || !team) {
@@ -157,11 +165,15 @@ export class BusinessSuiteTeamsService {
     if (!name) {
       return { success: false, message: 'Team name is required', error: 'Missing name' };
     }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
     const client = supabaseAdmin!;
     const nextDate = body.nextDate && /^\d{4}-\d{2}-\d{2}$/.test(body.nextDate) ? body.nextDate : null;
     const { data: team, error } = await client
       .from('business_teams')
-      .insert({ user_id: userId, name, next_date: nextDate })
+      .insert({ business_id: businessId, user_id: userId, name, next_date: nextDate })
       .select('id, name, next_date')
       .single();
     if (error) {
@@ -198,11 +210,15 @@ export class BusinessSuiteTeamsService {
     }
     const client = supabaseAdmin!;
 
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
     const { data: team, error: teamError } = await client
       .from('business_teams')
       .select('id')
       .eq('id', teamId)
-      .eq('user_id', userId)
+      .eq('business_id', businessId)
       .single();
     if (teamError || !team) {
       return { success: false, message: 'Team not found', error: 'Team not found' };

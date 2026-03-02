@@ -157,6 +157,18 @@ export class BusinessSuiteService {
   }
 
   /**
+   * Returns the registered business id for the user (businesses.id where owner_user_id = userId).
+   * Ensures a businesses row exists (syncs from business_suite_kyc if needed). Returns null if user has no business.
+   */
+  async getBusinessId(userId: string): Promise<string | null> {
+    const client = supabaseAdmin;
+    if (!client) return null;
+    await this.ensureBusinessRowSynced(userId);
+    const { data: biz } = await client.from('businesses').select('id').eq('owner_user_id', userId).maybeSingle();
+    return biz?.id ?? null;
+  }
+
+  /**
    * Returns the business KYC status for a user (from businesses or business_suite_kyc). Null if none.
    * If only business_suite_kyc exists, syncs a row into businesses so admin can see it.
    */
