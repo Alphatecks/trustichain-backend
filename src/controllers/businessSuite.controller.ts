@@ -225,6 +225,14 @@ export class BusinessSuiteController {
     else res.status(403).json(result);
   }
 
+  /** Supplier details list (cards). GET /api/business-suite/suppliers/details */
+  async getSupplierDetails(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteSuppliersService.getSupplierDetails(userId);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
   /** Check if supplier (business) name is registered. POST /api/business-suite/suppliers/check */
   async checkSupplierRegistered(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;

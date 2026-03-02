@@ -80,6 +80,15 @@ router.get('/dashboard/subscription', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   GET /api/business-suite/suppliers/details
+ * @desc    Supplier details list for UI cards (supplierId, progressPercentage, statusDetail, amount, dueDate).
+ * @access  Private (business suite only)
+ */
+router.get('/suppliers/details', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplierDetails(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/suppliers/check
  * @desc    Check if a supplier (business) name is registered. Body: { name }. Returns { registered: boolean, message }.
  * @access  Private (business suite only)

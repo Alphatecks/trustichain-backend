@@ -5,10 +5,21 @@
 
 import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
+import type { SupplierDetailItem, SupplierDetailsResponse } from '../../types/api/businessSuiteSuppliers.types';
 
 const KYC_STATUSES = ['Not started', 'Pending', 'In review', 'Verified', 'Rejected'];
 const CONTRACT_TYPES = ['One-time', 'Recurring', 'Framework', 'Master', 'Spot'];
 const ALLOWED_TAGS = ['Local', 'International', 'Logistics', 'Digital', 'Manufacturing', 'Services', 'Wholesale', 'Retail', 'Preferred', 'Trial'];
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatDueDateShort(isoDate: string): string {
+  const d = new Date(isoDate);
+  const day = d.getUTCDate();
+  const suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
+  const month = MONTHS_SHORT[d.getUTCMonth()];
+  const year = String(d.getUTCFullYear()).slice(-2);
+  return `${day}${suffix} ${month} ${year}`;
+}
 
 export interface CreateSupplierRequest {
   /** Supplier or business name */
@@ -193,6 +204,56 @@ export class BusinessSuiteSuppliersService {
       success: true,
       registered: false,
       message: 'Supplier is not registered',
+    };
+  }
+
+  /**
+   * Supplier details list for the Supplier details UI (cards with donut, SUPP-YYYY-NNN, due date/%, amount).
+   * GET /api/business-suite/suppliers/details
+   */
+  async getSupplierDetails(userId: string): Promise<SupplierDetailsResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
+    const client = supabaseAdmin!;
+    const { data: rows, error } = await client
+      .from('business_suppliers')
+      .select('id, name, due_date, amount_usd, progress, created_at')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch supplier details', error: error.message };
+    }
+    const list = rows || [];
+    const byYear = new Map<number, number>();
+    const items: SupplierDetailItem[] = list.map((row: { id: string; created_at: string; due_date: string | null; amount_usd: string | number | null; progress: number | null }) => {
+      const year = new Date(row.created_at).getUTCFullYear();
+      const seq = (byYear.get(year) ?? 0) + 1;
+      byYear.set(year, seq);
+      const supplierId = `SUPP-${year}-${String(seq).padStart(3, '0')}`;
+      const progressPct = row.progress != null ? Math.min(100, Math.max(0, Number(row.progress))) : 0;
+      const statusDetail = row.due_date
+        ? `Due date: ${formatDueDateShort(row.due_date)}`
+        : `${progressPct}%`;
+      const amount = row.amount_usd != null ? parseFloat(String(row.amount_usd)) : 0;
+      return {
+        id: row.id,
+        supplierId,
+        progressPercentage: progressPct,
+        statusDetail,
+        amount,
+        dueDate: row.due_date || null,
+      };
+    });
+    return {
+      success: true,
+      message: 'Supplier details retrieved',
+      data: { items },
     };
   }
 
