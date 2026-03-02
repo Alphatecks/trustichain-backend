@@ -208,6 +208,23 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Remove team member. DELETE /api/business-suite/teams/:teamId/members/:memberId
+   */
+  async removeTeamMember(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const teamId = req.params.teamId;
+    const memberId = req.params.memberId;
+    if (!teamId || !memberId) {
+      res.status(400).json({ success: false, message: 'Team ID and member ID are required' });
+      return;
+    }
+    const result = await businessSuiteTeamsService.removeTeamMember(userId, teamId, memberId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Team not found' || result.error === 'Member not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Upcoming Supply list (business escrows pending/active with due date). GET /api/business-suite/dashboard/upcoming-supply
    */
   async getUpcomingSupply(req: Request, res: Response): Promise<void> {

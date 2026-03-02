@@ -192,6 +192,15 @@ router.post('/teams/:teamId/members', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   DELETE /api/business-suite/teams/:teamId/members/:memberId
+ * @desc    Remove a team member from the team. memberId is the member row id (from team detail members[].id).
+ * @access  Private (business suite only)
+ */
+router.delete('/teams/:teamId/members/:memberId', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.removeTeamMember(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/payrolls
  * @desc    Create payroll (+ Add Payroll)
  * @access  Private (business suite only)

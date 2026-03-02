@@ -352,6 +352,53 @@ export class BusinessSuiteTeamsService {
       data: { teamMemberId: teamMember.id, userId: memberUser.id, email },
     };
   }
+
+  /**
+   * Remove a team member from a team. DELETE /api/business-suite/teams/:teamId/members/:memberId
+   * memberId is business_team_members.id (returned in team detail as members[].id).
+   */
+  async removeTeamMember(
+    userId: string,
+    teamId: string,
+    memberId: string
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
+    const client = supabaseAdmin!;
+    const { data: team } = await client
+      .from('business_teams')
+      .select('id')
+      .eq('id', teamId)
+      .eq('business_id', businessId)
+      .single();
+    if (!team) {
+      return { success: false, message: 'Team not found', error: 'Team not found' };
+    }
+    const { data: member, error: fetchError } = await client
+      .from('business_team_members')
+      .select('id')
+      .eq('id', memberId)
+      .eq('team_id', teamId)
+      .maybeSingle();
+    if (fetchError || !member) {
+      return { success: false, message: 'Team member not found', error: 'Member not found' };
+    }
+    const { error: deleteError } = await client
+      .from('business_team_members')
+      .delete()
+      .eq('id', memberId)
+      .eq('team_id', teamId);
+    if (deleteError) {
+      return { success: false, message: deleteError.message || 'Failed to remove team member', error: deleteError.message };
+    }
+    return { success: true, message: 'Team member removed successfully' };
+  }
 }
 
 export const businessSuiteTeamsService = new BusinessSuiteTeamsService();
