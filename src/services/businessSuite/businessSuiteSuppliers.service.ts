@@ -75,6 +75,14 @@ export class BusinessSuiteSuppliersService {
     if (!name) {
       return { success: false, message: 'Name is required (supplier or business name)', error: 'Missing name' };
     }
+    const supplierBusinessId = await this.findRegisteredBusinessIdByCompanyName(name);
+    if (!supplierBusinessId) {
+      return {
+        success: false,
+        message: 'Supplier is not registered. Only verified businesses can be added as suppliers.',
+        error: 'Supplier not registered',
+      };
+    }
 
     let walletAddress: string | null = null;
     if (body.walletAddress != null && body.walletAddress !== '') {
@@ -150,6 +158,59 @@ export class BusinessSuiteSuppliersService {
         amountUsd: supplier.amount_usd != null ? Number(supplier.amount_usd) : null,
       },
     };
+  }
+}
+
+  /**
+   * Check if a supplier (business) name is registered as a verified business.
+   * Frontend can call this (e.g. on blur or before submit) to show "Supplier is not registered".
+   * Match is case-insensitive on trimmed company_name; only Verified businesses count.
+   */
+  async checkSupplierRegistered(
+    userId: string,
+    name: string
+  ): Promise<{ success: boolean; registered: boolean; message?: string; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, registered: false, message: 'Business suite is not enabled', error: check.error };
+    }
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    if (!trimmed) {
+      return { success: false, registered: false, message: 'Name is required', error: 'Missing name' };
+    }
+    const client = supabaseAdmin!;
+    const { data: rows } = await client
+      .from('businesses')
+      .select('id, company_name')
+      .eq('status', 'Verified')
+      .not('company_name', 'is', null);
+    const matched = (rows || []).find(
+      (b) => b.company_name && b.company_name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (matched) {
+      return { success: true, registered: true, message: 'Supplier is registered' };
+    }
+    return {
+      success: true,
+      registered: false,
+      message: 'Supplier is not registered',
+    };
+  }
+
+  /** Returns verified business id if company name matches (case-insensitive), else null. */
+  async findRegisteredBusinessIdByCompanyName(name: string): Promise<string | null> {
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    if (!trimmed) return null;
+    const client = supabaseAdmin!;
+    const { data: rows } = await client
+      .from('businesses')
+      .select('id, company_name')
+      .eq('status', 'Verified')
+      .not('company_name', 'is', null);
+    const matched = (rows || []).find(
+      (b) => b.company_name && b.company_name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    return matched?.id ?? null;
   }
 }
 

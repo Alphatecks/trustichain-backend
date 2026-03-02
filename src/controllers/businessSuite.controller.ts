@@ -220,8 +220,18 @@ export class BusinessSuiteController {
     const userId = req.userId!;
     const result = await businessSuiteSuppliersService.createSupplier(userId, req.body || {});
     if (result.success) res.status(201).json(result);
-    else if (result.error === 'Missing supplier name' || result.error === 'Invalid due date' || result.error === 'Invalid amount') res.status(400).json(result);
+    else if (result.error === 'Supplier not registered') res.status(404).json(result);
+    else if (result.error === 'Missing name' || result.error === 'Missing supplier name' || result.error === 'Invalid due date' || result.error === 'Invalid amount') res.status(400).json(result);
     else res.status(403).json(result);
+  }
+
+  /** Check if supplier (business) name is registered. POST /api/business-suite/suppliers/check */
+  async checkSupplierRegistered(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const name = (req.body && (req.body as { name?: string }).name) ?? (req.query.name as string) ?? '';
+    const result = await businessSuiteSuppliersService.checkSupplierRegistered(userId, name);
+    if (!result.success) res.status(403).json(result);
+    else res.status(200).json(result);
   }
 
   /** Get business suite KYC (uses business_suite_kyc table). GET /api/business-suite/kyc */

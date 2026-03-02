@@ -80,8 +80,17 @@ router.get('/dashboard/subscription', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   POST /api/business-suite/suppliers/check
+ * @desc    Check if a supplier (business) name is registered. Body: { name }. Returns { registered: boolean, message }.
+ * @access  Private (business suite only)
+ */
+router.post('/suppliers/check', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.checkSupplierRegistered(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/suppliers
- * @desc    Add supplier (body: name, walletAddress?, country?, kycStatus?, contractType?, tags?)
+ * @desc    Add supplier (body: name, walletAddress?, country?, kycStatus?, contractType?, tags?). Fails with 404 if supplier not registered.
  * @access  Private (business suite only)
  */
 router.post('/suppliers', authenticate, asyncHandler(async (req, res) => {
