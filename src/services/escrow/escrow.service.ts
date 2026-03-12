@@ -2699,6 +2699,19 @@ export class EscrowService {
           throw new Error(`Failed to finish escrow on XRPL: ${errorMessage}`);
         }
 
+        // Wait for EscrowFinish to be validated so funds have actually been delivered to the receiver
+        try {
+          await xrplEscrowService.waitForTransactionValidation(finishTxHash);
+        } catch (waitErr) {
+          const msg = waitErr instanceof Error ? waitErr.message : String(waitErr);
+          console.error('[Escrow Release] EscrowFinish tx not validated in time:', { finishTxHash, error: msg });
+          return {
+            success: false,
+            message: `Escrow release was submitted but could not confirm delivery. ${msg} The receiver may still get the funds shortly; please check again.`,
+            error: 'Validation timeout',
+          };
+        }
+
         // Update escrow status to completed
         const { data: updatedEscrow } = await adminClient
           .from('escrows')

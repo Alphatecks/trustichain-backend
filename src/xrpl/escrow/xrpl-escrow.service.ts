@@ -1298,6 +1298,43 @@ export class XRPLEscrowService {
   }
 
   /**
+   * Wait for a transaction to be validated on the ledger before considering it final.
+   * Funds are only delivered when the tx is validated. Polls up to timeoutMs (default 30s).
+   */
+  async waitForTransactionValidation(txHash: string, timeoutMs: number = 30000): Promise<void> {
+    const client = new Client(this.XRPL_SERVER);
+    await client.connect();
+    try {
+      const start = Date.now();
+      const pollIntervalMs = 1000;
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const txResponse = await (client as any).request({
+            command: 'tx',
+            transaction: txHash,
+            binary: false,
+          });
+          if (txResponse.result && (txResponse.result as any).validated) {
+            const result = txResponse.result as any;
+            if (result.meta?.TransactionResult && result.meta.TransactionResult !== 'tesSUCCESS') {
+              throw new Error(`Transaction failed on ledger: ${result.meta.TransactionResult}`);
+            }
+            return;
+          }
+        } catch (e: any) {
+          if (e?.data?.error !== 'txnNotFound') throw e;
+        }
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+      }
+      throw new Error(`Transaction ${txHash} was not validated within ${timeoutMs / 1000}s`);
+    } finally {
+      try {
+        await client.disconnect();
+      } catch {}
+    }
+  }
+
+  /**
    * Prepare an unsigned EscrowCreate transaction for user signing
    * Returns transaction object that can be sent to XUMM/MetaMask for signing
    */
