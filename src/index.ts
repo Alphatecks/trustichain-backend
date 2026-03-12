@@ -19,6 +19,7 @@ import savingsRoutes from './routes/savings.routes';
 import notificationRoutes from './routes/notification.routes';
 import cardyfieRoutes from './routes/cardyfie.routes';
 import businessSuiteRoutes from './routes/businessSuite.routes';
+import lookupRoutes from './routes/lookup.routes';
 import adminRoutes from './admin/routes/admin.routes';
 
 dotenv.config();
@@ -224,6 +225,7 @@ app.use('/api/savings', savingsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/cardyfie', cardyfieRoutes);
 app.use('/api/business-suite', businessSuiteRoutes);
+app.use('/api/lookup', lookupRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

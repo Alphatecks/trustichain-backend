@@ -86,6 +86,24 @@ export class ExchangeService {
             change: 0,
             changePercent: 0,
           });
+        } else if (usdCurrency === 'USD') {
+          // When all APIs fail (e.g. Binance geo-blocked, CoinGecko/CryptoCompare rate-limited),
+          // use optional env fallback so balance USD still displays (e.g. on Render).
+          const fallback = process.env.FALLBACK_XRP_USD_RATE;
+          const fallbackRate = fallback != null ? parseFloat(fallback) : NaN;
+          if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
+            usdRate = fallbackRate;
+            rates.push({
+              currency: usdCurrency,
+              rate: fallbackRate,
+              change: 0,
+              changePercent: 0,
+            });
+            console.warn('[Exchange] Using FALLBACK_XRP_USD_RATE (all APIs failed or unavailable)', {
+              rate: fallbackRate,
+              hint: 'Set FALLBACK_XRP_USD_RATE in Render env to a rough XRP/USD value; update periodically.',
+            });
+          }
         }
       }
 
@@ -373,12 +391,15 @@ export class ExchangeService {
       console.log('[DEBUG] fetchFromCoinGecko: Attempting to fetch from CoinGecko', { currency });
       
       const url = `https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=${currency.toLowerCase()}`;
-      
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      const apiKey = process.env.COINGECKO_API_KEY;
+      if (apiKey) {
+        headers['x-cg-demo-api-key'] = apiKey;
+      }
+
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers,
       });
 
       if (!response.ok) {

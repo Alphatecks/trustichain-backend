@@ -149,13 +149,27 @@ export class WalletService {
 
   /**
    * Compute total USD equivalent from XRP (via live rate), USDT, and USDC (1:1 USD).
+   * Balances may be strings from DB; we coerce to number. Returns 0 only when rate is unavailable.
    */
   private async computeUsdEquivalent(xrp: number, usdt: number, usdc: number): Promise<number> {
+    const x = Number(xrp) || 0;
+    const u = Number(usdt) || 0;
+    const c = Number(usdc) || 0;
     const rates = await exchangeService.getLiveExchangeRates();
-    if (!rates.success || !rates.data) return 0;
+    if (!rates.success || !rates.data) {
+      console.warn('[Wallet] computeUsdEquivalent: exchange rates unavailable (success or data missing)');
+      return 0;
+    }
     const usdRate = rates.data.rates.find((r) => r.currency === 'USD')?.rate;
-    if (!usdRate || usdRate <= 0) return 0;
-    return xrp * usdRate + usdt + usdc;
+    if (usdRate == null || usdRate <= 0) {
+      console.warn('[Wallet] computeUsdEquivalent: USD rate missing or invalid', {
+        hasRates: rates.data.rates.length,
+        currencies: rates.data.rates.map((r) => r.currency),
+      });
+      return 0;
+    }
+    const total = x * usdRate + u + c;
+    return Math.round(total * 100) / 100;
   }
 
   /**
