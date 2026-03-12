@@ -40,7 +40,7 @@ function formatTransactionId(payrollId: string, itemId: string): string {
 }
 
 export class BusinessSuitePayrollsService {
-  async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string }; error?: string }> {
+  async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string; escrowsCreated?: boolean }; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const businessId = await businessSuiteService.getBusinessId(userId);
