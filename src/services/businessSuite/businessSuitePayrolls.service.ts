@@ -405,7 +405,7 @@ export class BusinessSuitePayrollsService {
     const client = supabaseAdmin!;
     const { data: payroll, error: payrollError } = await client.from('business_payrolls').select('*').eq('id', payrollId).eq('business_id', businessId).single();
     if (payrollError || !payroll) return { success: false, message: 'Payroll not found', error: 'Not found' };
-    if (payroll.status === 'released') return { success: false, message: 'Payroll already released', error: 'Already released' };
+    if (payroll.status === 'released') return { success: true, message: 'Payroll was already released' };
     const releaseDate = payroll.release_date ? String(payroll.release_date).split('T')[0] : null;
     const created = await this.createEscrowsForPayroll(client, userId, payrollId, payroll.name, releaseDate);
     if (!created.success) return { success: false, message: created.message, error: created.error };
