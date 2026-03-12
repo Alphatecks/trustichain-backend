@@ -95,15 +95,19 @@ export class WalletService {
             .single();
           
           if (updatedWallet) {
+            const xrp = updatedWallet.balance_xrp ?? 0;
+            const usdt = updatedWallet.balance_usdt ?? 0;
+            const usdc = updatedWallet.balance_usdc ?? 0;
+            const usd = await this.computeUsdEquivalent(xrp, usdt, usdc);
             return {
               success: true,
               message: 'Balance retrieved successfully',
               data: {
                 balance: {
-                  xrp: updatedWallet.balance_xrp ?? 0,
-                  usdt: updatedWallet.balance_usdt ?? 0,
-                  usdc: updatedWallet.balance_usdc ?? 0,
-                  usd: 0, // TODO: Calculate USD equivalent if needed
+                  xrp,
+                  usdt,
+                  usdc,
+                  usd,
                 },
               },
               xrpl_address: wallet.xrpl_address,
@@ -116,15 +120,19 @@ export class WalletService {
       }
 
       // Fallback: return database balance if sync fails or no xrpl_address
+      const xrp = wallet.balance_xrp ?? 0;
+      const usdt = wallet.balance_usdt ?? 0;
+      const usdc = wallet.balance_usdc ?? 0;
+      const usd = await this.computeUsdEquivalent(xrp, usdt, usdc);
       return {
         success: true,
         message: 'Balance retrieved successfully',
         data: {
           balance: {
-            xrp: wallet.balance_xrp ?? 0,
-            usdt: wallet.balance_usdt ?? 0,
-            usdc: wallet.balance_usdc ?? 0,
-            usd: 0, // TODO: Calculate USD equivalent if needed
+            xrp,
+            usdt,
+            usdc,
+            usd,
           },
         },
         xrpl_address: wallet.xrpl_address ?? null,
@@ -137,6 +145,17 @@ export class WalletService {
         error: error instanceof Error ? error.message : 'Failed to get wallet balance',
       };
     }
+  }
+
+  /**
+   * Compute total USD equivalent from XRP (via live rate), USDT, and USDC (1:1 USD).
+   */
+  private async computeUsdEquivalent(xrp: number, usdt: number, usdc: number): Promise<number> {
+    const rates = await exchangeService.getLiveExchangeRates();
+    if (!rates.success || !rates.data) return 0;
+    const usdRate = rates.data.rates.find((r) => r.currency === 'USD')?.rate;
+    if (!usdRate || usdRate <= 0) return 0;
+    return xrp * usdRate + usdt + usdc;
   }
 
   /**
