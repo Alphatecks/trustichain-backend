@@ -350,19 +350,7 @@ export class BusinessSuiteTeamsService {
       return { success: false, message: 'No user found with this email. They must have an account to be added.', error: 'User not found' };
     }
 
-    const { data: memberKyc } = await client
-      .from('user_kyc')
-      .select('status')
-      .eq('user_id', memberUser.id)
-      .maybeSingle();
-    if (!memberKyc || (memberKyc as { status: string }).status !== 'verified') {
-      return {
-        success: false,
-        message: 'This user is not a registered, approved personal user on Trustichain. Only users with verified personal KYC can be added as team members.',
-        error: 'Member not approved',
-      };
-    }
-
+    // Allow any registered user to be added as a team member. Wallet is required when releasing payroll (checked at release time).
     const { data: existing } = await client
       .from('business_team_members')
       .select('id')
