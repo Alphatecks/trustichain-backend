@@ -63,6 +63,7 @@ export class BusinessSuitePayrollsService {
         release_date: releaseDate,
         freeze_auto_release: freezeAutoRelease,
         status: releaseDate ? 'scheduled' : 'draft',
+        team_name: body.teamName?.trim() || null,
         company_name: body.companyName?.trim() || null,
         company_email: body.companyEmail?.trim() || null,
         payroll_cycle: body.payrollCycle || null,
@@ -343,6 +344,7 @@ export class BusinessSuitePayrollsService {
       data: {
         id: payroll.id,
         name: payroll.name,
+        teamName: payroll.team_name ?? undefined,
         companyName: payroll.company_name ?? undefined,
         companyEmail: payroll.company_email ?? undefined,
         payrollCycle: payroll.payroll_cycle ?? undefined,
@@ -375,6 +377,7 @@ export class BusinessSuitePayrollsService {
     if (!existing) return { success: false, message: 'Payroll not found', error: 'Not found' };
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name.trim();
+    if (body.teamName !== undefined) updates.team_name = body.teamName?.trim() || null;
     if (body.companyName !== undefined) updates.company_name = body.companyName?.trim() || null;
     if (body.companyEmail !== undefined) updates.company_email = body.companyEmail?.trim() || null;
     if (body.payrollCycle !== undefined) updates.payroll_cycle = body.payrollCycle || null;

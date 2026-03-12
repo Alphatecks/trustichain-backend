@@ -17,6 +17,8 @@ export type DisbursementMode = 'auto_release' | 'manual_release';
 export interface CreatePayrollRequest {
   /** Step 1 - Payroll Details */
   name: string;
+  /** Team name from Step 1; used to load members in Step 2 (GET /teams/members?name=). Stored for reference. */
+  teamName?: string;
   companyName?: string;
   companyEmail?: string;
   payrollCycle?: PayrollCycle;
@@ -42,6 +44,7 @@ export interface CreatePayrollRequest {
 
 export interface UpdatePayrollRequest {
   name?: string;
+  teamName?: string;
   companyName?: string;
   companyEmail?: string;
   payrollCycle?: PayrollCycle;
@@ -102,6 +105,7 @@ export interface BusinessPayrollDetailResponse {
   data?: {
     id: string;
     name: string;
+    teamName?: string | null;
     companyName?: string | null;
     companyEmail?: string | null;
     payrollCycle?: string | null;
