@@ -11,6 +11,7 @@ import { exchangeService } from '../exchange/exchange.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
+import { escrowService } from '../escrow/escrow.service';
 import type {
   CreatePayrollRequest,
   UpdatePayrollRequest,
@@ -179,7 +180,8 @@ export class BusinessSuitePayrollsService {
       }
     }
     if (finishAfter == null) {
-      finishAfter = Math.floor(Date.now() / 1000) + 10 - RIPPLE_EPOCH_OFFSET;
+      // Release now: use a time already passed so owner can EscrowFinish immediately
+      finishAfter = Math.floor(Date.now() / 1000) - 60 - RIPPLE_EPOCH_OFFSET;
     }
 
     const itemAmountsXrp = items.map((i: any) => {
@@ -405,12 +407,38 @@ export class BusinessSuitePayrollsService {
     const client = supabaseAdmin!;
     const { data: payroll, error: payrollError } = await client.from('business_payrolls').select('*').eq('id', payrollId).eq('business_id', businessId).single();
     if (payrollError || !payroll) return { success: false, message: 'Payroll not found', error: 'Not found' };
-    if (payroll.status === 'released') return { success: true, message: 'Payroll was already released' };
+
     const releaseDate = payroll.release_date ? String(payroll.release_date).split('T')[0] : null;
-    const created = await this.createEscrowsForPayroll(client, userId, payrollId, payroll.name, releaseDate);
-    if (!created.success) return { success: false, message: created.message, error: created.error };
-    await client.from('business_payrolls').update({ status: 'released' }).eq('id', payrollId);
-    return { success: true, message: 'Payroll released' };
+    const alreadyReleased = payroll.status === 'released';
+
+    if (!alreadyReleased) {
+      const created = await this.createEscrowsForPayroll(client, userId, payrollId, payroll.name, releaseDate);
+      if (!created.success) return { success: false, message: created.message, error: created.error };
+    }
+
+    const { data: items } = await client.from('business_payroll_items').select('escrow_id').eq('payroll_id', payrollId).not('escrow_id', 'is', null);
+    const escrowIds = [...new Set((items || []).map((r: { escrow_id: string }) => r.escrow_id).filter(Boolean))] as string[];
+    let finishedCount = 0;
+    for (const escrowId of escrowIds) {
+      const { data: escrow } = await client.from('escrows').select('id, status').eq('id', escrowId).single();
+      if (!escrow || escrow.status !== 'active') continue;
+      const result = await escrowService.releaseEscrow(userId, escrowId);
+      if (!result.success) return { success: false, message: result.message || 'Failed to release escrow', error: result.error };
+      finishedCount += 1;
+    }
+
+    if (alreadyReleased && finishedCount === 0) {
+      return { success: true, message: 'Payroll was already released' };
+    }
+    if (!alreadyReleased) {
+      await client.from('business_payrolls').update({ status: 'released' }).eq('id', payrollId);
+    }
+    return {
+      success: true,
+      message: alreadyReleased && finishedCount > 0
+        ? `Released ${finishedCount} remaining escrow(s); payroll is now fully released.`
+        : 'Payroll released',
+    };
   }
 
   async getSummary(userId: string): Promise<BusinessPayrollSummaryResponse> {

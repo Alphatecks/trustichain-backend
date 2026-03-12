@@ -2493,11 +2493,13 @@ export class EscrowService {
           }
         } else {
           // Owner can finish (either no FinishAfter or FinishAfter has passed)
-          // Get owner's wallet (User A who created the escrow)
+          // Get owner's wallet (User A who created the escrow); use suite_context so business payroll uses business wallet
+          const ownerSuite = (escrow.suite_context === 'business' ? 'business' : 'personal') as 'business' | 'personal';
           const { data: ownerWallet } = await adminClient
             .from('wallets')
             .select('xrpl_address, encrypted_wallet_secret')
             .eq('user_id', escrow.user_id)
+            .eq('suite_context', ownerSuite)
             .single();
 
           if (!ownerWallet) {
