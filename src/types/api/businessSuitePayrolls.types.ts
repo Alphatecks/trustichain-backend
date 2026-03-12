@@ -33,6 +33,8 @@ export interface CreatePayrollRequest {
   defaultSalaryType?: string;
   currency?: string;
   enableAllowances?: boolean;
+  /** When true, create escrows for each member immediately (payroll becomes released). Use when completing the Add Payroll wizard. */
+  createEscrows?: boolean;
   /** Legacy / convenience */
   amountUsd?: number;
   salaryAmount?: number;

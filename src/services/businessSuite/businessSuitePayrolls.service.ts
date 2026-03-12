@@ -1,10 +1,16 @@
 /**
  * Business Suite Payrolls Service
  * CRUD, release, summary, and transaction history for payrolls.
+ * Payroll release creates real XRPL escrows: XRP is locked from business wallet and released to each team member.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
+import { exchangeService } from '../exchange/exchange.service';
+import { encryptionService } from '../encryption/encryption.service';
+import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
+import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import type {
   CreatePayrollRequest,
   UpdatePayrollRequest,
@@ -96,8 +102,155 @@ export class BusinessSuitePayrollsService {
         await client.from('business_payrolls').delete().eq('id', payroll.id);
         return { success: false, message: itemsError.message, error: itemsError.message };
       }
+
+      if (body.createEscrows === true) {
+        const releaseDate = body.releaseDate ? new Date(body.releaseDate).toISOString().split('T')[0] : null;
+        const created = await this.createEscrowsForPayroll(client, userId, payroll.id, body.name.trim(), releaseDate);
+        if (!created.success) {
+          await client.from('business_payrolls').delete().eq('id', payroll.id);
+          return { success: false, message: created.message, error: created.error };
+        }
+        await client.from('business_payrolls').update({ status: 'released' }).eq('id', payroll.id);
+        return { success: true, message: 'Payroll created and escrowed', data: { id: payroll.id, escrowsCreated: true } };
+      }
     }
     return { success: true, message: 'Payroll created', data: { id: payroll.id } };
+  }
+
+  /** Create one XRPL escrow per payroll item: real XRP from business wallet to each team member. */
+  private async createEscrowsForPayroll(
+    client: SupabaseClient,
+    userId: string,
+    payrollId: string,
+    payrollName: string,
+    releaseDate: string | null
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    if (!client) return { success: false, message: 'Database unavailable', error: 'Database' };
+    const { data: items } = await client.from('business_payroll_items').select('*').eq('payroll_id', payrollId).eq('status', 'pending');
+    if (!items?.length) return { success: false, message: 'No pending items to create escrows for', error: 'No items' };
+
+    const { data: businessWallet } = await client
+      .from('wallets')
+      .select('xrpl_address, encrypted_wallet_secret')
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .single();
+    if (!businessWallet?.xrpl_address) {
+      return { success: false, message: 'Business wallet not found. Connect a business wallet first.', error: 'Wallet not found' };
+    }
+    if (!businessWallet.encrypted_wallet_secret) {
+      return { success: false, message: 'Business wallet must be connected with signing capability to release XRP to team members.', error: 'Wallet signing required' };
+    }
+
+    const rates = await exchangeService.getLiveExchangeRates();
+    if (!rates.success || !rates.data) {
+      return { success: false, message: 'Failed to fetch exchange rates for USD to XRP conversion.', error: 'Exchange rate fetch failed' };
+    }
+    const usdRate = rates.data.rates.find((r) => r.currency === 'USD')?.rate;
+    if (!usdRate || usdRate <= 0) {
+      return { success: false, message: 'XRP/USD exchange rate not available.', error: 'Exchange rate not available' };
+    }
+
+    const counterpartyIds = [...new Set(items.map((i: any) => i.counterparty_id))];
+    const { data: counterpartyWallets } = await client
+      .from('wallets')
+      .select('user_id, xrpl_address')
+      .in('user_id', counterpartyIds)
+      .eq('suite_context', 'personal');
+    const walletByUser = (counterpartyWallets || []).reduce<Record<string, string>>((acc, w: any) => {
+      if (w.xrpl_address) acc[w.user_id] = w.xrpl_address;
+      return acc;
+    }, {});
+    const missing = counterpartyIds.filter((id) => !walletByUser[id]);
+    if (missing.length > 0) {
+      const { data: users } = await client.from('users').select('id, full_name, email').in('id', missing);
+      const names = (users || []).map((u: any) => u.full_name || u.email || u.id).join(', ');
+      return { success: false, message: `Team member(s) must connect a wallet to receive XRP: ${names}`, error: 'Counterparty wallet missing' };
+    }
+
+    const RIPPLE_EPOCH_OFFSET = 946684800;
+    let finishAfter: number | undefined;
+    if (releaseDate) {
+      const [y, m, d] = releaseDate.split('-').map(Number);
+      const release = new Date(y, m - 1, d, 0, 0, 0, 0);
+      if (release > new Date()) {
+        finishAfter = Math.floor(release.getTime() / 1000) - RIPPLE_EPOCH_OFFSET;
+      }
+    }
+    if (finishAfter == null) {
+      finishAfter = Math.floor(Date.now() / 1000) + 10 - RIPPLE_EPOCH_OFFSET;
+    }
+
+    const itemAmountsXrp = items.map((i: any) => {
+      const usd = parseFloat(String(i.amount_usd));
+      return { item: i, amountUsd: usd, amountXrp: parseFloat((usd / usdRate).toFixed(6)) };
+    });
+    const totalXrp = itemAmountsXrp.reduce((s, x) => s + x.amountXrp, 0);
+    const feePerTx = 0.000012;
+    const requiredXrp = totalXrp + items.length * feePerTx;
+    const balanceXrp = await xrplWalletService.getBalance(businessWallet.xrpl_address);
+    if (balanceXrp < requiredXrp) {
+      return {
+        success: false,
+        message: `Insufficient XRP in business wallet. Required ${requiredXrp.toFixed(6)} XRP (${totalXrp.toFixed(6)} for payroll + fees), have ${balanceXrp.toFixed(6)} XRP.`,
+        error: 'Insufficient balance',
+      };
+    }
+
+    let decryptedSecret: string;
+    try {
+      decryptedSecret = encryptionService.decrypt(businessWallet.encrypted_wallet_secret).trim();
+    } catch {
+      return { success: false, message: 'Could not use business wallet for signing. Reconnect the wallet if needed.', error: 'Decryption failed' };
+    }
+
+    const { data: payer } = await client.from('users').select('full_name, email').eq('id', userId).single();
+    const currentYear = new Date().getFullYear();
+    const { data: lastEscrow } = await client.from('escrows').select('escrow_sequence').gte('created_at', new Date(currentYear, 0, 1).toISOString()).order('escrow_sequence', { ascending: false }).limit(1).maybeSingle();
+    let nextSeq = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
+
+    for (const { item, amountUsd, amountXrp } of itemAmountsXrp) {
+      const toAddress = walletByUser[item.counterparty_id];
+      const { data: counterparty } = await client.from('users').select('full_name, email').eq('id', item.counterparty_id).single();
+      let xrplTxHash: string;
+      try {
+        xrplTxHash = await xrplEscrowService.createEscrow({
+          fromAddress: businessWallet.xrpl_address,
+          toAddress,
+          amountXrp,
+          finishAfter,
+          walletSecret: decryptedSecret,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { success: false, message: `Failed to create XRPL escrow for team member: ${msg}`, error: 'XRPL escrow failed' };
+      }
+      const { data: escrow, error: escrowError } = await client
+        .from('escrows')
+        .insert({
+          user_id: userId,
+          counterparty_id: item.counterparty_id,
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
+          status: 'active',
+          xrpl_escrow_id: xrplTxHash,
+          description: `Payroll: ${payrollName}`,
+          transaction_type: 'payroll',
+          suite_context: 'business',
+          progress: 0,
+          escrow_sequence: nextSeq,
+          payer_name: payer?.full_name || null,
+          counterparty_name: counterparty?.full_name || null,
+        })
+        .select('id')
+        .single();
+      if (escrowError || !escrow) {
+        return { success: false, message: escrowError?.message || 'Failed to save escrow record', error: escrowError?.message };
+      }
+      await client.from('business_payroll_items').update({ escrow_id: escrow.id, amount_xrp: amountXrp, status: 'released' }).eq('id', item.id);
+      nextSeq += 1;
+    }
+    return { success: true, message: 'Escrows created' };
   }
 
   async listPayrolls(userId: string, page: number = 1, pageSize: number = 20): Promise<BusinessPayrollListResponse> {
@@ -250,38 +403,9 @@ export class BusinessSuitePayrollsService {
     const { data: payroll, error: payrollError } = await client.from('business_payrolls').select('*').eq('id', payrollId).eq('business_id', businessId).single();
     if (payrollError || !payroll) return { success: false, message: 'Payroll not found', error: 'Not found' };
     if (payroll.status === 'released') return { success: false, message: 'Payroll already released', error: 'Already released' };
-    const { data: items } = await client.from('business_payroll_items').select('*').eq('payroll_id', payrollId).eq('status', 'pending');
-    if (!items?.length) return { success: false, message: 'No pending items to release', error: 'No items' };
-    const currentYear = new Date().getFullYear();
-    const { data: lastEscrow } = await client.from('escrows').select('escrow_sequence').gte('created_at', new Date(currentYear, 0, 1).toISOString()).order('escrow_sequence', { ascending: false }).limit(1).maybeSingle();
-    let nextSeq = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
-    const { data: payer } = await client.from('users').select('full_name, email').eq('id', userId).single();
-    for (const item of items) {
-      const { data: counterparty } = await client.from('users').select('full_name, email').eq('id', item.counterparty_id).single();
-      const amountUsd = parseFloat(String(item.amount_usd));
-      const amountXrp = 0;
-      const { data: escrow, error: escrowError } = await client
-        .from('escrows')
-        .insert({
-          user_id: userId,
-          counterparty_id: item.counterparty_id,
-          amount_xrp: amountXrp,
-          amount_usd: amountUsd,
-          status: 'pending',
-          description: `Payroll: ${payroll.name}`,
-          transaction_type: 'payroll',
-          suite_context: 'business',
-          progress: 0,
-          escrow_sequence: nextSeq,
-          payer_name: payer?.full_name || null,
-          counterparty_name: counterparty?.full_name || null,
-        })
-        .select('id')
-        .single();
-      if (escrowError || !escrow) return { success: false, message: escrowError?.message || 'Failed to create escrow', error: escrowError?.message };
-      await client.from('business_payroll_items').update({ escrow_id: escrow.id, status: 'released' }).eq('id', item.id);
-      nextSeq += 1;
-    }
+    const releaseDate = payroll.release_date ? String(payroll.release_date).split('T')[0] : null;
+    const created = await this.createEscrowsForPayroll(client, userId, payrollId, payroll.name, releaseDate);
+    if (!created.success) return { success: false, message: created.message, error: created.error };
     await client.from('business_payrolls').update({ status: 'released' }).eq('id', payrollId);
     return { success: true, message: 'Payroll released' };
   }
