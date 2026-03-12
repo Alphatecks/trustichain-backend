@@ -98,6 +98,15 @@ router.post('/suppliers/check', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/company-name?email=
+ * @desc    Get company (business) name for the account with this email. Returns { success, message, data: { businessName } }.
+ * @access  Private (business suite only)
+ */
+router.get('/company-name', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getCompanyNameByEmail(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/suppliers
  * @desc    Add supplier (body: name, walletAddress?, country?, kycStatus?, contractType?, tags?). Fails with 404 if supplier not registered.
  * @access  Private (business suite only)

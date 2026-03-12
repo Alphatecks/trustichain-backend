@@ -5,6 +5,7 @@ import { businessSuiteTeamsService } from '../services/businessSuite/businessSui
 import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
 import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
+import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
 import { storageService } from '../services/storage/storage.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
@@ -286,6 +287,24 @@ export class BusinessSuiteController {
     const result = await businessSuiteSuppliersService.checkSupplierRegistered(userId, name);
     if (!result.success) res.status(403).json(result);
     else res.status(200).json(result);
+  }
+
+  /**
+   * Get company (business) name for the account with the given email.
+   * GET /api/business-suite/company-name?email=
+   */
+  async getCompanyNameByEmail(req: Request, res: Response): Promise<void> {
+    const email = (req.query.email as string) ?? (req.body?.email as string) ?? '';
+    const result = await lookupService.getBusinessNameByEmail(email);
+    if (!result.success) {
+      res.status(400).json({ success: false, message: result.message, error: result.error });
+      return;
+    }
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result.data,
+    });
   }
 
   /** Get business suite KYC (uses business_suite_kyc table). GET /api/business-suite/kyc */
