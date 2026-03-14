@@ -265,7 +265,7 @@ export class BusinessSuiteSuppliersService {
 
   /**
    * Supplier transaction history for the Supplier transaction history UI.
-   * Returns completed business escrows that involve a supplier (counterparty matched to supplier by name).
+   * Returns only rows from business_supplier_transactions (payments to/from suppliers), not payroll.
    * GET /api/business-suite/suppliers/transactions?page=1&pageSize=20&month=YYYY-MM&status=Successful
    */
   async getSupplierTransactionHistory(
@@ -285,11 +285,9 @@ export class BusinessSuiteSuppliersService {
     const client = supabaseAdmin!;
 
     let query = client
-      .from('escrows')
-      .select('id, counterparty_id, amount_xrp, amount_usd, status, created_at', { count: 'exact' })
-      .eq('user_id', userId)
-      .eq('suite_context', 'business')
-      .eq('status', 'completed')
+      .from('business_supplier_transactions')
+      .select('id, supplier_id, amount_xrp, amount_usd, status, type, created_at', { count: 'exact' })
+      .eq('business_id', businessId)
       .order('created_at', { ascending: false });
 
     if (params.month) {
@@ -300,50 +298,49 @@ export class BusinessSuiteSuppliersService {
         query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
       }
     }
+    if (params.status) {
+      query = query.eq('status', params.status);
+    }
 
     const from = (page - 1) * pageSize;
-    const { data: escrowRows, error: escrowError, count } = await query.range(from, from + pageSize - 1);
-    if (escrowError) {
-      return { success: false, message: escrowError.message || 'Failed to fetch supplier transactions', error: escrowError.message };
+    const { data: rows, error, count } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch supplier transactions', error: error.message };
     }
-    const list = escrowRows || [];
-    const counterpartyIds = [...new Set(list.map((r: { counterparty_id: string | null }) => r.counterparty_id).filter(Boolean))] as string[];
-
-    const { data: users } = counterpartyIds.length > 0
-      ? await client.from('users').select('id, full_name').in('id', counterpartyIds)
+    const list = rows || [];
+    const supplierIds = [...new Set(list.map((r: { supplier_id: string }) => r.supplier_id))];
+    const { data: suppliers } = supplierIds.length > 0
+      ? await client.from('business_suppliers').select('id, name').in('id', supplierIds)
       : { data: [] };
-    const userMap = (users || []).reduce<Record<string, string>>((acc, u: { id: string; full_name: string | null }) => {
-      acc[u.id] = u.full_name || '—';
+    const supplierMap = (suppliers || []).reduce<Record<string, string>>((acc, s: { id: string; name: string }) => {
+      acc[s.id] = s.name || '—';
       return acc;
     }, {});
 
-    function formatTransactionId(escrowId: string): string {
-      const hex = escrowId.replace(/-/g, '');
-      if (hex.length <= 12) return escrowId;
+    function formatTransactionId(txId: string): string {
+      const hex = txId.replace(/-/g, '');
+      if (hex.length <= 12) return txId;
       return `${hex.slice(0, 6)}...${hex.slice(-6)}`;
     }
 
     const items: SupplierTransactionListItem[] = list.map((row: {
       id: string;
-      counterparty_id: string | null;
+      supplier_id: string;
       amount_xrp: string | number | null;
       amount_usd: string | number;
+      status: string;
+      type: string;
       created_at: string;
-    }) => {
-      const supplierName = row.counterparty_id ? (userMap[row.counterparty_id] || row.counterparty_id) : '—';
-      const amountUsd = parseFloat(String(row.amount_usd));
-      const amountXrp = row.amount_xrp != null ? parseFloat(String(row.amount_xrp)) : null;
-      return {
-        id: row.id,
-        transactionId: formatTransactionId(row.id),
-        supplierName,
-        amountXrp,
-        amountUsd,
-        status: 'Successful',
-        type: 'Received' as const,
-        createdAt: row.created_at,
-      };
-    });
+    }) => ({
+      id: row.id,
+      transactionId: formatTransactionId(row.id),
+      supplierName: supplierMap[row.supplier_id] ?? '—',
+      amountXrp: row.amount_xrp != null ? parseFloat(String(row.amount_xrp)) : null,
+      amountUsd: parseFloat(String(row.amount_usd)),
+      status: row.status || 'Successful',
+      type: (row.type === 'Sent' ? 'Sent' : 'Received') as 'Received' | 'Sent',
+      createdAt: row.created_at,
+    }));
 
     const total = count ?? 0;
     return {
