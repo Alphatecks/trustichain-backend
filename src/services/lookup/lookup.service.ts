@@ -12,6 +12,13 @@ export interface BusinessNameByEmailResult {
   error?: string;
 }
 
+export interface BusinessEmailByNameResult {
+  success: boolean;
+  message: string;
+  data?: { businessEmail: string | null };
+  error?: string;
+}
+
 export class LookupService {
   /**
    * Get business (company) name for the user account associated with the given email.
@@ -97,6 +104,74 @@ export class LookupService {
       };
     } catch (err) {
       console.error('[Lookup] getBusinessNameByEmail: unexpected error', { email: trimmed, err });
+      return {
+        success: false,
+        message: 'An unexpected error occurred',
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * Get business (owner) email for a registered business by company name.
+   * Match is case-insensitive on company_name; returns the owner user's email.
+   */
+  async getBusinessEmailByName(businessName: string): Promise<BusinessEmailByNameResult> {
+    const client = supabaseAdmin;
+    if (!client) {
+      return {
+        success: false,
+        message: 'Lookup unavailable',
+        error: 'Server configuration error',
+      };
+    }
+
+    const trimmed = (businessName ?? '').trim();
+    if (!trimmed) {
+      return {
+        success: false,
+        message: 'Business name is required',
+        error: 'Missing business name',
+      };
+    }
+
+    try {
+      const { data: businesses } = await client
+        .from('businesses')
+        .select('id, owner_user_id, company_name')
+        .not('company_name', 'is', null);
+      const biz = (businesses || []).find(
+        (b) => b.company_name && b.company_name.trim().toLowerCase() === trimmed.toLowerCase()
+      );
+      if (!biz?.owner_user_id) {
+        return {
+          success: true,
+          message: 'No business found with that name',
+          data: { businessEmail: null },
+        };
+      }
+
+      const { data: user, error: userError } = await client
+        .from('users')
+        .select('email')
+        .eq('id', biz.owner_user_id)
+        .maybeSingle();
+
+      if (userError) {
+        return {
+          success: false,
+          message: 'Failed to lookup user',
+          error: userError.message,
+        };
+      }
+
+      return {
+        success: true,
+        message: user?.email ? 'Business email retrieved' : 'No email for this business',
+        data: { businessEmail: user?.email ?? null },
+      };
+    } catch (err) {
+      console.error('[Lookup] getBusinessEmailByName: unexpected error', { businessName: trimmed, err });
       return {
         success: false,
         message: 'An unexpected error occurred',

@@ -34,6 +34,39 @@ export class LookupController {
       });
     }
   }
+
+  /**
+   * GET /api/lookup/business-email?businessName=...
+   * Returns the business (owner) email for the registered business with the given company name, if any.
+   */
+  async getBusinessEmailByName(req: Request, res: Response): Promise<void> {
+    try {
+      const businessName = (req.query.businessName as string) ?? (req.query.business_name as string) ?? (req.body?.business_name as string) ?? '';
+      const result = await lookupService.getBusinessEmailByName(businessName);
+
+      if (!result.success) {
+        res.status(400).json({
+          success: false,
+          message: result.message,
+          error: result.error,
+        });
+        return;
+      }
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } catch (error) {
+      console.error('LookupController.getBusinessEmailByName error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'An unexpected error occurred',
+        error: error instanceof Error ? error.message : 'Internal server error',
+      });
+    }
+  }
 }
 
 export const lookupController = new LookupController();

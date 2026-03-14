@@ -14,4 +14,14 @@ router.get('/business-name', asyncHandler(async (req, res) => {
   await lookupController.getBusinessNameByEmail(req, res);
 }));
 
+/**
+ * @route   GET /api/lookup/business-email
+ * @query   businessName - company/business name
+ * @desc    Get business (owner) email for the registered business with this name. Returns { success, message, data: { businessEmail } }.
+ * @access  Public
+ */
+router.get('/business-email', asyncHandler(async (req, res) => {
+  await lookupController.getBusinessEmailByName(req, res);
+}));
+
 export default router;
