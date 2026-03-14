@@ -15,7 +15,7 @@ export interface BusinessNameByEmailResult {
 export interface BusinessEmailByNameResult {
   success: boolean;
   message: string;
-  data?: { businessEmail: string | null };
+  data?: { businessEmail: string | null; hasBusinessEmail: boolean };
   error?: string;
 }
 
@@ -113,8 +113,9 @@ export class LookupService {
   }
 
   /**
-   * Get business (owner) email for a registered business by company name.
-   * Match is case-insensitive on company_name; returns the owner user's email.
+   * Get business email for a registered business by company name.
+   * Returns businesses.business_email when set. If business exists but business_email is not set,
+   * returns businessEmail: null and message that this business email is not set.
    */
   async getBusinessEmailByName(businessName: string): Promise<BusinessEmailByNameResult> {
     const client = supabaseAdmin;
@@ -138,37 +139,34 @@ export class LookupService {
     try {
       const { data: businesses } = await client
         .from('businesses')
-        .select('id, owner_user_id, company_name')
+        .select('id, owner_user_id, company_name, business_email')
         .not('company_name', 'is', null);
       const biz = (businesses || []).find(
         (b) => b.company_name && b.company_name.trim().toLowerCase() === trimmed.toLowerCase()
       );
-      if (!biz?.owner_user_id) {
+      if (!biz) {
         return {
           success: true,
           message: 'No business found with that name',
-          data: { businessEmail: null },
+          data: { businessEmail: null, hasBusinessEmail: false },
         };
       }
 
-      const { data: user, error: userError } = await client
-        .from('users')
-        .select('email')
-        .eq('id', biz.owner_user_id)
-        .maybeSingle();
+      const businessEmailSet = biz.business_email != null && String(biz.business_email).trim().length > 0;
+      const businessEmail = businessEmailSet ? String(biz.business_email).trim() : null;
 
-      if (userError) {
+      if (!businessEmailSet) {
         return {
-          success: false,
-          message: 'Failed to lookup user',
-          error: userError.message,
+          success: true,
+          message: 'This business email is not set',
+          data: { businessEmail: null, hasBusinessEmail: false },
         };
       }
 
       return {
         success: true,
-        message: user?.email ? 'Business email retrieved' : 'No email for this business',
-        data: { businessEmail: user?.email ?? null },
+        message: 'Business email retrieved',
+        data: { businessEmail, hasBusinessEmail: true },
       };
     } catch (err) {
       console.error('[Lookup] getBusinessEmailByName: unexpected error', { businessName: trimmed, err });
