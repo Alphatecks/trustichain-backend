@@ -18,6 +18,8 @@ import type {
   BusinessSuiteSupplyOrSubscriptionItem,
   BusinessSuiteUpcomingSupplyResponse,
   BusinessSuiteSubscriptionListResponse,
+  SupplyContractEscrowedToMeItem,
+  SupplyContractsEscrowedToMeResponse,
 } from '../../types/api/businessSuiteDashboard.types';
 
 const ESCROW_STATUS_TO_ACTIVITY: Record<string, BusinessSuiteActivityStatus> = {
@@ -414,6 +416,56 @@ export class BusinessSuiteDashboardService {
       success: true,
       message: 'Subscription list retrieved',
       data: { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 },
+    };
+  }
+
+  /**
+   * Supply contracts escrowed to the current business (for "View new supply contract" modal on balance card).
+   * Only visible to the counterparty: when Business B contracts Business A and escrows funds, only Business A sees these.
+   * Business B does not see this list from this endpoint.
+   */
+  async getSupplyContractsEscrowedToMe(userId: string): Promise<SupplyContractsEscrowedToMeResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const { data: rows, error } = await client
+      .from('escrows')
+      .select('id, amount_xrp, amount_usd, status, created_at')
+      .eq('counterparty_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .order('created_at', { ascending: true });
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch supply contracts', error: error.message };
+    }
+    const list = rows || [];
+    const byYear = new Map<number, number>();
+    const items: SupplyContractEscrowedToMeItem[] = list.map((row: {
+      id: string;
+      amount_xrp: string | number | null;
+      amount_usd: string | number;
+      status: string;
+      created_at: string;
+    }) => {
+      const year = new Date(row.created_at).getUTCFullYear();
+      const seq = (byYear.get(year) ?? 0) + 1;
+      byYear.set(year, seq);
+      const contractId = `SUPP-${year}-${String(seq).padStart(3, '0')}`;
+      return {
+        escrowId: row.id,
+        contractId,
+        amountUsd: parseFloat(String(row.amount_usd)) || 0,
+        amountXrp: row.amount_xrp != null ? parseFloat(String(row.amount_xrp)) : null,
+        status: row.status || 'pending',
+        createdAt: row.created_at,
+      };
+    });
+    return {
+      success: true,
+      message: 'Supply contracts escrowed to you',
+      data: { items },
     };
   }
 }

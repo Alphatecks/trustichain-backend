@@ -80,6 +80,15 @@ router.get('/dashboard/subscription', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   GET /api/business-suite/supply-contracts/escrowed-to-me
+ * @desc    Supply contracts escrowed to the current business (for balance card modal). Only visible to counterparty (Business A).
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/escrowed-to-me', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplyContractsEscrowedToMe(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/suppliers/details
  * @desc    Supplier details list for UI cards (supplierId, progressPercentage, statusDetail, amount, dueDate).
  * @access  Private (business suite only)

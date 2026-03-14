@@ -122,3 +122,22 @@ export interface BusinessSuiteSubscriptionListResponse {
   };
   error?: string;
 }
+
+/** Supply contract escrowed to the current business (counterparty view). Only visible to Business A when Business B has escrowed to them. */
+export interface SupplyContractEscrowedToMeItem {
+  escrowId: string;
+  contractId: string;
+  amountUsd: number;
+  amountXrp: number | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface SupplyContractsEscrowedToMeResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: SupplyContractEscrowedToMeItem[];
+  };
+  error?: string;
+}
