@@ -20,3 +20,35 @@ export interface SupplierDetailsResponse {
   };
   error?: string;
 }
+
+/** Single row for Supplier transaction history table: transactionId, supplierName, amount (XRP + USD), status, type */
+export interface SupplierTransactionListItem {
+  id: string;
+  transactionId: string;
+  supplierName: string;
+  amountXrp: number | null;
+  amountUsd: number;
+  status: string;
+  type: 'Received' | 'Sent';
+  createdAt: string;
+}
+
+export interface SupplierTransactionHistoryParams {
+  page?: number;
+  pageSize?: number;
+  month?: string;
+  status?: string;
+}
+
+export interface SupplierTransactionHistoryResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: SupplierTransactionListItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  error?: string;
+}

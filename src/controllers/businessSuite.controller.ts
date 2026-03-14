@@ -280,6 +280,23 @@ export class BusinessSuiteController {
     else res.status(403).json(result);
   }
 
+  /** Supplier transaction history (table: transactionId, supplierName, amount, status, type). GET /api/business-suite/suppliers/transactions */
+  async getSupplierTransactionHistory(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const page = req.query.page != null ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : undefined;
+    const month = req.query.month as string | undefined;
+    const status = req.query.status as string | undefined;
+    const result = await businessSuiteSuppliersService.getSupplierTransactionHistory(userId, {
+      page,
+      pageSize,
+      month,
+      status,
+    });
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
   /** Check if supplier (business) name is registered. POST /api/business-suite/suppliers/check */
   async checkSupplierRegistered(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;

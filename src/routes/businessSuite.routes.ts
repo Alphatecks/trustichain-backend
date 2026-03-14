@@ -89,6 +89,15 @@ router.get('/suppliers/details', authenticate, asyncHandler(async (req, res) => 
 }));
 
 /**
+ * @route   GET /api/business-suite/suppliers/transactions
+ * @desc    Supplier transaction history (transactionId, supplierName, amount XRP/USD, status, type). Query: page, pageSize, month (YYYY-MM), status
+ * @access  Private (business suite only)
+ */
+router.get('/suppliers/transactions', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplierTransactionHistory(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/suppliers/check
  * @desc    Check if a supplier (business) name is registered. Body: { name }. Returns { registered: boolean, message }.
  * @access  Private (business suite only)
