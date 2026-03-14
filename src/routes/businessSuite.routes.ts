@@ -134,6 +134,24 @@ router.post('/suppliers/check', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/business-email/status
+ * @desc    Check if the business account has a business email. Returns { hasBusinessEmail, businessEmail }. Demand this before flows that require it.
+ * @access  Private (authenticated)
+ */
+router.get('/business-email/status', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getBusinessEmailStatus(req, res);
+}));
+
+/**
+ * @route   PATCH /api/business-suite/business-email
+ * @desc    Set or update business contact email. Body: { businessEmail }.
+ * @access  Private (business suite)
+ */
+router.patch('/business-email', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.setBusinessEmail(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/company-name?email=
  * @desc    Get company (business) name for the account with this email. Returns { success, message, data: { businessName } }.
  * @access  Private (business suite only)

@@ -218,6 +218,61 @@ export class BusinessSuiteService {
   }
 
   /**
+   * Check if the business account has a business email. Use this to demand business email before flows that require it.
+   * hasBusinessEmail is true only when businesses.business_email is set (dedicated business contact email).
+   * businessEmail returns that value, or owner user email as fallback for display.
+   */
+  async getBusinessEmailStatus(
+    userId: string
+  ): Promise<{ success: boolean; message: string; hasBusinessEmail: boolean; businessEmail: string | null; error?: string }> {
+    const client = supabaseAdmin;
+    if (!client) {
+      return { success: false, message: 'Server error', hasBusinessEmail: false, businessEmail: null, error: 'No admin client' };
+    }
+    const { data: biz } = await client.from('businesses').select('business_email').eq('owner_user_id', userId).maybeSingle();
+    const businessEmailSet = biz?.business_email != null && String(biz.business_email).trim().length > 0;
+    const { data: user } = await client.from('users').select('email').eq('id', userId).maybeSingle();
+    const ownerEmail = user?.email != null && String(user.email).trim().length > 0 ? String(user.email).trim() : null;
+    const displayEmail = businessEmailSet ? String(biz!.business_email).trim() : ownerEmail;
+    return {
+      success: true,
+      message: businessEmailSet ? 'Business email is set' : 'Business email is required. Set it via PATCH /business-email.',
+      hasBusinessEmail: businessEmailSet,
+      businessEmail: displayEmail,
+    };
+  }
+
+  /**
+   * Set or update the business contact email. Call this to satisfy "business email required".
+   */
+  async setBusinessEmail(
+    userId: string,
+    businessEmail: string
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    const client = supabaseAdmin;
+    if (!client) {
+      return { success: false, message: 'Server error', error: 'No admin client' };
+    }
+    const trimmed = (businessEmail ?? '').trim().toLowerCase();
+    if (!trimmed) {
+      return { success: false, message: 'Business email is required', error: 'Missing business email' };
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmed)) {
+      return { success: false, message: 'Invalid email format', error: 'Invalid email' };
+    }
+    const { data: biz } = await client.from('businesses').select('id').eq('owner_user_id', userId).maybeSingle();
+    if (!biz) {
+      return { success: false, message: 'No business found for this account', error: 'No business' };
+    }
+    const { error } = await client.from('businesses').update({ business_email: trimmed }).eq('id', biz.id);
+    if (error) {
+      return { success: false, message: error.message || 'Failed to update business email', error: error.message };
+    }
+    return { success: true, message: 'Business email updated' };
+  }
+
+  /**
    * Check whether the user has business suite access and whether they have a PIN set (for frontend to show set vs verify).
    * isBusinessSuite is true when account_type is business_suite/enterprise OR business_suite_kyc is Approved.
    */

@@ -363,6 +363,29 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Check if the business account has a business email. GET /api/business-suite/business-email/status
+   */
+  async getBusinessEmailStatus(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteService.getBusinessEmailStatus(userId);
+    if (result.success) res.status(200).json(result);
+    else res.status(500).json(result);
+  }
+
+  /**
+   * Set or update business contact email. PATCH /api/business-suite/business-email (body: { businessEmail })
+   */
+  async setBusinessEmail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const businessEmail = (req.body?.businessEmail ?? req.body?.business_email ?? req.query.businessEmail ?? req.query.business_email) as string | undefined;
+    const result = await businessSuiteService.setBusinessEmail(userId, businessEmail ?? '');
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Missing business email' || result.error === 'Invalid email') res.status(400).json(result);
+    else if (result.error === 'No business') res.status(403).json(result);
+    else res.status(400).json(result);
+  }
+
+  /**
    * Get company (business) name for the account with the given email.
    * GET /api/business-suite/company-name?email=
    */
