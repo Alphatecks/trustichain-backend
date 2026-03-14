@@ -13,4 +13,5 @@ export type TransactionType =
   | 'freelance'
   | 'product_purchase'
   | 'real_estate'
+  | 'supply'
   | 'custom';

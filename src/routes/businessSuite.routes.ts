@@ -89,6 +89,24 @@ router.get('/supply-contracts/escrowed-to-me', authenticate, asyncHandler(async 
 }));
 
 /**
+ * @route   POST /api/business-suite/supply-contracts
+ * @desc    Create supplier contract (Contract Info + Payment Terms from modal). Body: supplierName, supplierWalletAddress, contractTitle, deliveryMethod, disputeWindow, paymentAmount, currency, escrowType, releaseCondition, contractDocumentUrls (optional), etc.
+ * @access  Private (business suite only)
+ */
+router.post('/supply-contracts', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createSupplierContract(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/supply-contracts/documents/upload
+ * @desc    Upload a contract document (Invoice, Agreement, Delivery Terms). Multipart field: document. Returns fileUrl to pass in contractDocumentUrls when creating the contract.
+ * @access  Private (business suite only)
+ */
+router.post('/supply-contracts/documents/upload', authenticate, upload.single('document'), asyncHandler(async (req, res) => {
+  await businessSuiteController.uploadSupplyContractDocument(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/suppliers/details
  * @desc    Supplier details list for UI cards (supplierId, progressPercentage, statusDetail, amount, dueDate).
  * @access  Private (business suite only)

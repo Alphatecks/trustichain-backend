@@ -4,6 +4,7 @@ import { businessSuiteDashboardService } from '../services/businessSuite/busines
 import { businessSuiteTeamsService } from '../services/businessSuite/businessSuiteTeams.service';
 import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
 import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
+import { businessSuiteSupplyContractsService } from '../services/businessSuite/businessSuiteSupplyContracts.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
 import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
@@ -271,6 +272,50 @@ export class BusinessSuiteController {
     const result = await businessSuiteDashboardService.getSupplyContractsEscrowedToMe(userId);
     if (result.success) res.status(200).json(result);
     else res.status(403).json(result);
+  }
+
+  /**
+   * Create supplier contract (Contract Info + Payment Terms). POST /api/business-suite/supply-contracts
+   */
+  async createSupplierContract(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteSupplyContractsService.createSupplierContract(userId, req.body || {});
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'Supplier not registered') res.status(404).json(result);
+    else if (result.error === 'Missing supplier name' || result.error === 'Invalid wallet address' || result.error === 'Invalid payment amount') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Upload a contract document (Invoice, Agreement, Delivery Terms) for supply contracts. POST /api/business-suite/supply-contracts/documents/upload
+   */
+  async uploadSupplyContractDocument(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error });
+      return;
+    }
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ success: false, message: 'No file provided. Send multipart form with field "document".' });
+      return;
+    }
+    const result = await storageService.uploadSupplyContractDocument(userId, file);
+    if (result.success && result.data) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: {
+          fileUrl: result.data.fileUrl,
+          fileName: result.data.fileName,
+          fileSize: result.data.fileSize,
+          fileType: result.data.fileType,
+        },
+      });
+    } else {
+      res.status(400).json({ success: false, message: result.message ?? 'Upload failed', error: result.error });
+    }
   }
 
   /** Create new supplier. POST /api/business-suite/suppliers */

@@ -141,3 +141,43 @@ export interface SupplyContractsEscrowedToMeResponse {
   };
   error?: string;
 }
+
+/** Step 1: Contract Info (Create Supplier Contract modal) */
+export type DeliveryMethod = 'Physical Goods' | 'Digital Delivery' | 'Service';
+export type DisputeWindow = '7 days' | '14 days' | '21 days' | '30 days';
+
+/** Step 2: Payment Terms */
+export type SupplierContractEscrowType = 'Full Payment' | 'Milestone Payment';
+export type ReleaseCondition = 'Buyer confirms delivery' | 'Time based' | 'Milestones';
+
+export interface CreateSupplierContractRequest {
+  /** Step 1 - Contract Info */
+  supplierName: string;
+  supplierWalletAddress: string;
+  supplierEmail?: string;
+  contractTitle: string;
+  deliveryDeadline?: string;
+  contractDescription?: string;
+  deliveryMethod: DeliveryMethod;
+  disputeWindow: DisputeWindow;
+  /** Step 2 - Payment Terms */
+  paymentAmount: number;
+  currency: 'USD' | 'XRP' | 'USDT';
+  escrowType: SupplierContractEscrowType;
+  releaseCondition: ReleaseCondition;
+  /** Optional: document URLs from POST /supply-contracts/documents/upload (Invoice, Agreement, Delivery Terms) */
+  contractDocumentUrls?: string[];
+}
+
+export interface CreateSupplierContractResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    escrowId: string;
+    contractId: string;
+    amountUsd: number;
+    amountXrp: number | null;
+    status: string;
+  };
+  error?: string;
+}

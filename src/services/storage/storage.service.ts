@@ -375,6 +375,64 @@ export class StorageService {
   }
 
   /**
+   * Upload supply contract document (Invoice, Agreement, Delivery Terms). PDF or image.
+   * Path: supply-contract-docs/{userId}/...
+   */
+  async uploadSupplyContractDocument(
+    userId: string,
+    file: Express.Multer.File
+  ): Promise<UploadFileResult> {
+    try {
+      const validation = this.validateFile(file);
+      if (!validation.valid) {
+        return {
+          success: false,
+          message: validation.error || 'File validation failed',
+          error: validation.error || 'File validation failed',
+        };
+      }
+      await this.ensureBucketExists();
+      const adminClient = supabaseAdmin || supabase;
+      if (!adminClient) {
+        return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
+      }
+      const filePath = `supply-contract-docs/${this.generateFilePath(userId, file.originalname)}`;
+      const { data, error: uploadError } = await adminClient.storage
+        .from(this.BUCKET_NAME)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+      if (uploadError || !data) {
+        return {
+          success: false,
+          message: uploadError?.message || 'Failed to upload document',
+          error: uploadError?.message || 'Upload failed',
+        };
+      }
+      const { data: urlData } = adminClient.storage.from(this.BUCKET_NAME).getPublicUrl(data.path);
+      const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
+      return {
+        success: true,
+        message: 'Contract document uploaded successfully',
+        data: {
+          fileUrl,
+          filePath: data.path,
+          fileName: file.originalname,
+          fileSize: file.size,
+          fileType: file.mimetype,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to upload document',
+        error: error instanceof Error ? error.message : 'Failed to upload document',
+      };
+    }
+  }
+
+  /**
    * Normalize stored URL or path to a path within our bucket for createSignedUrl (no full URL, no leading bucket name).
    * Handles: "dispute-evidence/path", full Supabase storage URLs (including encoded), or plain paths.
    */
