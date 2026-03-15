@@ -3,6 +3,7 @@
  * Create Supplier Contract (modal steps 1–2): contract info + payment terms → escrow with transaction_type = 'supply'.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
 import { escrowService } from '../escrow/escrow.service';
@@ -19,6 +20,50 @@ const RELEASE_CONDITION_TO_TYPE: Record<ReleaseCondition, ReleaseType> = {
   Milestones: 'Milestones',
   'Automatic release after delivery': 'Time based', // Same as Time based; backend job will auto-release when expected_release_date is reached
 };
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CONTRACT_ID_REGEX = /^(?:SUPP|SC)-(\d{4})-(\d+)$/i;
+
+/** Resolve escrow identifier (UUID or SUPP-YYYY-NNN / SC-YYYY-NNN) to escrow UUID for creator (user_id = userId). */
+async function resolveSupplyContractEscrowId(
+  client: SupabaseClient,
+  identifier: string,
+  userId: string
+): Promise<string | null> {
+  if (!client) return null;
+  const trimmed = identifier.trim();
+  if (UUID_REGEX.test(trimmed)) {
+    const { data } = await client
+      .from('escrows')
+      .select('id')
+      .eq('id', trimmed)
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .maybeSingle();
+    return data?.id ?? null;
+  }
+  const match = trimmed.match(CONTRACT_ID_REGEX);
+  if (!match) return null;
+  const [, yearStr, seqStr] = match;
+  const year = parseInt(yearStr!, 10);
+  const seq = parseInt(seqStr!, 10);
+  if (!year || !seq || seq < 1) return null;
+  const start = `${year}-01-01T00:00:00.000Z`;
+  const end = `${year + 1}-01-01T00:00:00.000Z`;
+  const { data: rows } = await client
+    .from('escrows')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('suite_context', 'business')
+    .eq('transaction_type', 'supply')
+    .gte('created_at', start)
+    .lt('created_at', end)
+    .order('created_at', { ascending: true });
+  const list = rows || [];
+  const row = list[seq - 1];
+  return row?.id ?? null;
+}
 
 export class BusinessSuiteSupplyContractsService {
   /**
@@ -169,12 +214,17 @@ export class BusinessSuiteSupplyContractsService {
    */
   async updateSupplyContractDocuments(
     userId: string,
-    escrowId: string,
+    escrowIdParam: string,
     body: { contractDocumentUrls?: string[]; append?: boolean }
   ): Promise<{ success: boolean; message: string; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const escrowId = await resolveSupplyContractEscrowId(client, escrowIdParam, userId);
+    if (!escrowId) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
     }
     const bodyAny = body as unknown as Record<string, unknown>;
     const raw =
@@ -184,7 +234,6 @@ export class BusinessSuiteSupplyContractsService {
     const newUrls = Array.isArray(raw)
       ? raw.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
       : [];
-    const client = supabaseAdmin!;
     if (body.append) {
       const { data: escrow, error: fetchErr } = await client
         .from('escrows')
