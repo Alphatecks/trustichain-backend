@@ -214,7 +214,7 @@ export class BusinessSuiteSuppliersService {
   }
 
   /**
-   * Supplier details list for the Supplier details UI (cards with donut, SUPP-YYYY-NNN, due date/%, amount).
+   * Supplier contract details list from created supply escrows (cards with donut, SUPP-YYYY-NNN, due date/%, amount).
    * GET /api/business-suite/suppliers/details
    */
   async getSupplierDetails(userId: string): Promise<SupplierDetailsResponse> {
@@ -222,29 +222,35 @@ export class BusinessSuiteSuppliersService {
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
-    const businessId = await businessSuiteService.getBusinessId(userId);
-    if (!businessId) {
-      return { success: false, message: 'No registered business for this account', error: 'No business' };
-    }
     const client = supabaseAdmin!;
     const { data: rows, error } = await client
-      .from('business_suppliers')
-      .select('id, name, due_date, amount_usd, progress, created_at')
-      .eq('business_id', businessId)
+      .from('escrows')
+      .select('id, amount_usd, progress, expected_completion_date, expected_release_date, created_at')
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
       .order('created_at', { ascending: true });
     if (error) {
-      return { success: false, message: error.message || 'Failed to fetch supplier details', error: error.message };
+      return { success: false, message: error.message || 'Failed to fetch supplier contract details', error: error.message };
     }
     const list = rows || [];
     const byYear = new Map<number, number>();
-    const items: SupplierDetailItem[] = list.map((row: { id: string; created_at: string; due_date: string | null; amount_usd: string | number | null; progress: number | null }) => {
+    const items: SupplierDetailItem[] = list.map((row: {
+      id: string;
+      created_at: string;
+      expected_completion_date: string | null;
+      expected_release_date: string | null;
+      amount_usd: string | number;
+      progress: number | null;
+    }) => {
       const year = new Date(row.created_at).getUTCFullYear();
       const seq = (byYear.get(year) ?? 0) + 1;
       byYear.set(year, seq);
       const supplierId = `SUPP-${year}-${String(seq).padStart(3, '0')}`;
       const progressPct = row.progress != null ? Math.min(100, Math.max(0, Number(row.progress))) : 0;
-      const statusDetail = row.due_date
-        ? `Due date: ${formatDueDateShort(row.due_date)}`
+      const dueDateIso = row.expected_completion_date || row.expected_release_date || null;
+      const statusDetail = dueDateIso
+        ? `Due date: ${formatDueDateShort(dueDateIso)}`
         : `${progressPct}%`;
       const amount = row.amount_usd != null ? parseFloat(String(row.amount_usd)) : 0;
       return {
@@ -253,12 +259,12 @@ export class BusinessSuiteSuppliersService {
         progressPercentage: progressPct,
         statusDetail,
         amount,
-        dueDate: row.due_date || null,
+        dueDate: dueDateIso,
       };
     });
     return {
       success: true,
-      message: 'Supplier details retrieved',
+      message: 'Supplier contract details retrieved',
       data: { items },
     };
   }
