@@ -3135,19 +3135,29 @@ export class WalletService {
         this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch(() => {});
       }
 
-      // Get transactions
-      const { data: transactions, error: txError } = await adminClient
+      // Exclude transactions linked to business/supply escrows (they belong in supplier transaction history, not personal)
+      const { data: businessEscrows } = await adminClient
+        .from('escrows')
+        .select('id')
+        .eq('suite_context', 'business');
+      const businessEscrowIds = (businessEscrows || []).map((r: { id: string }) => r.id);
+
+      let txQuery = adminClient
         .from('transactions')
         .select('*')
         .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
-
-      // Get total count
-      const { count } = await adminClient
+        .order('created_at', { ascending: false });
+      let countQuery = adminClient
         .from('transactions')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId);
+      if (businessEscrowIds.length > 0) {
+        txQuery = txQuery.or(`escrow_id.is.null,escrow_id.not.in.(${businessEscrowIds.join(',')})`);
+        countQuery = countQuery.or(`escrow_id.is.null,escrow_id.not.in.(${businessEscrowIds.join(',')})`);
+      }
+
+      const { data: transactions, error: txError } = await txQuery.range(offset, offset + limit - 1);
+      const { count } = await countQuery;
 
       if (txError) {
         return {
