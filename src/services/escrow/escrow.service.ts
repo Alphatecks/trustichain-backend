@@ -2907,6 +2907,53 @@ export class EscrowService {
   }
 
   /**
+   * Auto-release supply escrows that have "Automatic release after delivery" and expected_release_date has passed.
+   * Call from cron or scheduled job. Uses owner's credentials (releaseEscrow(ownerId, escrowId)).
+   */
+  async runAutoReleaseForSupplyEscrows(): Promise<{
+    success: boolean;
+    message: string;
+    data?: { processed: number; released: number; failed: number; errors: string[] };
+    error?: string;
+  }> {
+    const adminClient = supabaseAdmin || supabase;
+    if (!adminClient) {
+      return { success: false, message: 'Database not configured', error: 'Database not configured' };
+    }
+    const now = new Date().toISOString();
+    const { data: rows, error: fetchError } = await adminClient
+      .from('escrows')
+      .select('id, user_id')
+      .eq('transaction_type', 'supply')
+      .eq('suite_context', 'business')
+      .eq('release_conditions', 'Automatic release after delivery')
+      .in('status', ['pending', 'active'])
+      .not('expected_release_date', 'is', null)
+      .lte('expected_release_date', now);
+    if (fetchError) {
+      return {
+        success: false,
+        message: fetchError.message || 'Failed to fetch eligible escrows',
+        error: fetchError.message,
+      };
+    }
+    const list = rows || [];
+    let released = 0;
+    const errors: string[] = [];
+    for (const row of list) {
+      const result = await this.releaseEscrow(row.user_id, row.id);
+      const actuallyReleased = result.success && result.data && !(result.data as any).requiresSigning;
+      if (actuallyReleased) released++;
+      else if (!result.success && result.error) errors.push(`${row.id}: ${result.error}`);
+    }
+    return {
+      success: true,
+      message: `Processed ${list.length} escrow(s), released ${released}, failed ${list.length - released}`,
+      data: { processed: list.length, released, failed: list.length - released, errors },
+    };
+  }
+
+  /**
    * Get XUMM payload status for escrow release and complete the release if signed
    * Similar to getXUMMPayloadStatus for deposits
    */

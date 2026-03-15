@@ -17,6 +17,7 @@ const RELEASE_CONDITION_TO_TYPE: Record<ReleaseCondition, ReleaseType> = {
   'Buyer confirms delivery': 'Manual Release',
   'Time based': 'Time based',
   Milestones: 'Milestones',
+  'Automatic release after delivery': 'Time based', // Same as Time based; backend job will auto-release when expected_release_date is reached
 };
 
 export class BusinessSuiteSupplyContractsService {
@@ -90,7 +91,7 @@ export class BusinessSuiteSupplyContractsService {
       counterpartyEmail: body.supplierEmail?.trim() || undefined,
       releaseType,
       expectedCompletionDate: body.deliveryDeadline ? parseDeliveryDeadline(body.deliveryDeadline) : undefined,
-      expectedReleaseDate: body.deliveryDeadline && releaseType === 'Time based' ? parseDeliveryDeadline(body.deliveryDeadline) : undefined,
+      expectedReleaseDate: body.deliveryDeadline && (releaseType === 'Time based' || body.releaseCondition === 'Automatic release after delivery') ? parseDeliveryDeadline(body.deliveryDeadline) : undefined,
       disputeResolutionPeriod: body.disputeWindow || undefined,
       releaseConditions: body.releaseCondition || undefined,
     };

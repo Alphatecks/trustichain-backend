@@ -189,7 +189,7 @@ export type DisputeWindow = '7 days' | '14 days' | '21 days' | '30 days';
 
 /** Step 2: Payment Terms */
 export type SupplierContractEscrowType = 'Full Payment' | 'Milestone Payment';
-export type ReleaseCondition = 'Buyer confirms delivery' | 'Time based' | 'Milestones';
+export type ReleaseCondition = 'Buyer confirms delivery' | 'Time based' | 'Milestones' | 'Automatic release after delivery';
 
 export interface CreateSupplierContractRequest {
   /** Step 1 - Contract Info */
