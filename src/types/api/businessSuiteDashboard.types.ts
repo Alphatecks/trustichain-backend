@@ -123,15 +123,15 @@ export interface BusinessSuiteSubscriptionListResponse {
   error?: string;
 }
 
-/** Supplier contract overview stats for the three cards: Total supplier, Pending supplier, Total Supplier Amount */
+/** Supplier contract overview stats for the three cards: Total supplier (contracts), Pending supplier, Total Supplier Amount */
 export interface SupplierContractOverviewData {
-  /** Total number of supplier contracts (supply escrows) created by this business */
-  totalSupplier: number;
+  /** Total number of supplier contracts created by this business (supply escrows count) */
+  totalSupplierContracts: number;
   /** USD amount currently locked in active/pending supply escrows (for "$X locked" secondary text) */
   lockedUsd: number;
   /** Pending supplier card: count of supply escrows in pending/active state */
   pendingCount: number;
-  /** Total supply contracts (same as totalSupplier; for "X/Total" display e.g. 25/100) */
+  /** Total created supplier contracts (for "X/Total" display e.g. 25/100) */
   pendingTotal: number;
   /** Trustiscore level for "Bronze" / "Silver" / "Gold" / "Platinum" display */
   tier: string;

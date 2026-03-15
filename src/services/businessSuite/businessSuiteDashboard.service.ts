@@ -421,7 +421,7 @@ export class BusinessSuiteDashboardService {
   }
 
   /**
-   * Supplier contract overview stats for the three cards: Total supplier ($ locked), Pending supplier (X/Total + tier), Total Supplier Amount.
+   * Supplier contract overview stats for the three cards: Total created supplier contracts ($ locked), Pending supplier (X/Total + tier), Total Supplier Amount.
    * GET /api/business-suite/supply-contracts/overview
    */
   async getSupplierContractOverview(userId: string): Promise<SupplierContractOverviewResponse> {
@@ -430,7 +430,13 @@ export class BusinessSuiteDashboardService {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
     const client = supabaseAdmin!;
-    const [supplyEscrowsResult, trustiscoreResult] = await Promise.all([
+    const [countResult, supplyEscrowsResult, trustiscoreResult] = await Promise.all([
+      client
+        .from('escrows')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('suite_context', 'business')
+        .eq('transaction_type', 'supply'),
       client
         .from('escrows')
         .select('id, amount_usd, status')
@@ -443,7 +449,7 @@ export class BusinessSuiteDashboardService {
       return { success: false, message: supplyEscrowsResult.error.message || 'Failed to fetch supply contracts', error: supplyEscrowsResult.error.message };
     }
     const rows = supplyEscrowsResult.data || [];
-    const totalSupplier = rows.length;
+    const totalSupplierContracts = countResult.count ?? rows.length;
     const pendingStatuses = ['pending', 'active'];
     const pendingRows = rows.filter((r: { status: string }) => pendingStatuses.includes(r.status));
     const pendingCount = pendingRows.length;
@@ -454,10 +460,10 @@ export class BusinessSuiteDashboardService {
       success: true,
       message: 'Supplier contract overview retrieved',
       data: {
-        totalSupplier,
+        totalSupplierContracts,
         lockedUsd: parseFloat(lockedUsd.toFixed(2)),
         pendingCount,
-        pendingTotal: totalSupplier,
+        pendingTotal: totalSupplierContracts,
         tier,
         totalSupplierAmount: parseFloat(totalSupplierAmount.toFixed(2)),
       },
