@@ -89,8 +89,17 @@ router.get('/supply-contracts/overview', authenticate, asyncHandler(async (req, 
 }));
 
 /**
+ * @route   GET /api/business-suite/supply-contracts/created-by-me
+ * @desc    Supply contracts created by this business (creator view). Use for supply status list with release button. Visible only to the business that created the escrow.
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/created-by-me', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplyContractsCreatedByMe(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/escrowed-to-me
- * @desc    Supply contracts escrowed to the current business (for balance card modal). Only visible to counterparty (Business A).
+ * @desc    Supply contracts escrowed to the current business (supplier view, e.g. balance card incoming). Only visible to counterparty.
  * @access  Private (business suite only)
  */
 router.get('/supply-contracts/escrowed-to-me', authenticate, asyncHandler(async (req, res) => {

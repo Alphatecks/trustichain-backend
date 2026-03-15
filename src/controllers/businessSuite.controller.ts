@@ -279,6 +279,17 @@ export class BusinessSuiteController {
     else res.status(403).json(result);
   }
 
+  /**
+   * Supply contracts created by this business (creator view). Use for supply status list with release.
+   * GET /api/business-suite/supply-contracts/created-by-me
+   */
+  async getSupplyContractsCreatedByMe(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteDashboardService.getSupplyContractsCreatedByMe(userId);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
   async getSupplyContractsEscrowedToMe(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
     const result = await businessSuiteDashboardService.getSupplyContractsEscrowedToMe(userId);
@@ -287,7 +298,7 @@ export class BusinessSuiteController {
   }
 
   /**
-   * Release a supplier contract escrow (locked escrow). Counterparty or owner can release; manual or on/after release day.
+   * Release a supplier contract escrow (locked escrow). Creator (owner) or counterparty can release; manual or on/after release day.
    * POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/release
    */
   async releaseSupplyContractEscrow(req: Request, res: Response): Promise<void> {

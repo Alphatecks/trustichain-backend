@@ -173,6 +173,16 @@ export interface SupplyContractsEscrowedToMeResponse {
   error?: string;
 }
 
+/** Supply contracts created by this business (creator view). Same item shape; use this for supply status list with release. */
+export interface SupplyContractsCreatedByMeResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: SupplyContractEscrowedToMeItem[];
+  };
+  error?: string;
+}
+
 /** Step 1: Contract Info (Create Supplier Contract modal) */
 export type DeliveryMethod = 'Physical Goods' | 'Digital Delivery' | 'Service';
 export type DisputeWindow = '7 days' | '14 days' | '21 days' | '30 days';
