@@ -531,6 +531,7 @@ export class BusinessSuiteDashboardService {
   /**
    * Supply contracts escrowed to the current business (supplier view, e.g. balance card "incoming").
    * Only visible to the counterparty: when Business B contracts Business A and escrows funds, only Business A sees these.
+   * Excludes released/completed and cancelled escrows so the list only shows contracts still awaiting release.
    */
   async getSupplyContractsEscrowedToMe(userId: string): Promise<SupplyContractsEscrowedToMeResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
@@ -544,6 +545,7 @@ export class BusinessSuiteDashboardService {
       .eq('counterparty_id', userId)
       .eq('suite_context', 'business')
       .eq('transaction_type', 'supply')
+      .in('status', ['pending', 'active'])
       .order('created_at', { ascending: true });
     if (error) {
       return { success: false, message: error.message || 'Failed to fetch supply contracts', error: error.message };
