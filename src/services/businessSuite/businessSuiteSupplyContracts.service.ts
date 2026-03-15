@@ -106,10 +106,11 @@ export class BusinessSuiteSupplyContractsService {
     }
 
     const escrowId = result.data.escrowId;
+    const bodyAny = body as unknown as Record<string, unknown>;
     const rawDocs =
       body.contractDocumentUrls ??
-      (body as Record<string, unknown>).contract_document_urls ??
-      (body as Record<string, unknown>).documentUrls;
+      bodyAny.contract_document_urls ??
+      bodyAny.documentUrls;
     const documentUrls = Array.isArray(rawDocs)
       ? rawDocs.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
       : typeof rawDocs === 'string' && rawDocs.trim()
@@ -175,10 +176,11 @@ export class BusinessSuiteSupplyContractsService {
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
+    const bodyAny = body as unknown as Record<string, unknown>;
     const raw =
       body.contractDocumentUrls ??
-      (body as Record<string, unknown>).contract_document_urls ??
-      (body as Record<string, unknown>).documentUrls;
+      bodyAny.contract_document_urls ??
+      bodyAny.documentUrls;
     const newUrls = Array.isArray(raw)
       ? raw.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
       : [];
