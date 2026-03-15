@@ -188,6 +188,15 @@ router.post('/supply-contracts/documents/upload', authenticate, upload.single('d
 }));
 
 /**
+ * @route   GET /api/business-suite/supply-contracts/documents/signed-url
+ * @desc    Get a signed URL to view a supply contract document (bucket is private). Query: url=<encoded-document-url>. Returns { signedUrl, expiresIn }.
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/documents/signed-url', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplyContractDocumentSignedUrl(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/suppliers/details
  * @desc    Supplier details list for UI cards (supplierId, progressPercentage, statusDetail, amount, dueDate).
  * @access  Private (business suite only)

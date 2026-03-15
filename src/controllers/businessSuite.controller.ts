@@ -424,6 +424,45 @@ export class BusinessSuiteController {
     }
   }
 
+  /**
+   * Get a signed URL to view a supply contract document (bucket is private; stored public URL 404s).
+   * GET /api/business-suite/supply-contracts/documents/signed-url?url=<encoded-document-url>
+   */
+  async getSupplyContractDocumentSignedUrl(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: 'Business suite is not enabled for this account', error: access.error });
+      return;
+    }
+    const rawUrl = typeof req.query?.url === 'string' ? req.query.url.trim() : '';
+    if (!rawUrl) {
+      res.status(400).json({ success: false, message: 'Query parameter "url" is required', error: 'Missing url' });
+      return;
+    }
+    let decoded = rawUrl;
+    try {
+      decoded = decodeURIComponent(rawUrl);
+    } catch {
+      // use rawUrl
+    }
+    if (!decoded.includes('supply-contract-docs') && !decoded.startsWith('supply-contract-docs')) {
+      res.status(400).json({ success: false, message: 'Invalid document URL for supply contract', error: 'Invalid url' });
+      return;
+    }
+    const expiresIn = 3600;
+    const signedUrl = await storageService.getSignedUrlForSupplyContractDocument(decoded, expiresIn);
+    if (!signedUrl) {
+      res.status(404).json({ success: false, message: 'Could not generate view link for this document', error: 'Not found' });
+      return;
+    }
+    res.status(200).json({
+      success: true,
+      message: 'Signed URL generated',
+      data: { signedUrl, expiresIn },
+    });
+  }
+
   /** Create new supplier. POST /api/business-suite/suppliers */
   async createSupplier(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;

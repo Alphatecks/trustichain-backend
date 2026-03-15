@@ -505,6 +505,17 @@ export class StorageService {
   }
 
   /**
+   * Resolve stored supply contract document URL (or path) to a signed URL for viewing.
+   * Bucket is private – the stored public URL 404s; use this to get a temporary signed URL.
+   */
+  async getSignedUrlForSupplyContractDocument(storedUrlOrPath: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
+    if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
+    const path = this.normalizeStoredPathToBucketPath(storedUrlOrPath);
+    if (!path) return null;
+    return this.getSignedUrl(path, expiresIn);
+  }
+
+  /**
    * Generate signed URL for private file access
    */
   async getSignedUrl(filePath: string, expiresIn: number = 3600): Promise<string | null> {
