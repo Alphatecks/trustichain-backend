@@ -90,7 +90,7 @@ router.get('/supply-contracts/overview', authenticate, asyncHandler(async (req, 
 
 /**
  * @route   GET /api/business-suite/supply-contracts/created-by-me
- * @desc    Supply contracts created by this business (creator only). Use for supply status list with release. Supplier gets empty list.
+ * @desc    View supply status: contracts created by this business (contractor/buyer). Status + release button. Contractor only.
  * @access  Private (business suite only)
  */
 router.get('/supply-contracts/created-by-me', authenticate, asyncHandler(async (req, res) => {
@@ -99,11 +99,11 @@ router.get('/supply-contracts/created-by-me', authenticate, asyncHandler(async (
 
 /**
  * @route   GET /api/business-suite/supply-contracts/escrowed-to-me
- * @desc    Same as created-by-me: supply contracts created by this business (creator view). Supply status + release visible only to creator, not supplier.
+ * @desc    View new supply contract: contracts escrowed to this business (supplier/receiver). Supplier only.
  * @access  Private (business suite only)
  */
 router.get('/supply-contracts/escrowed-to-me', authenticate, asyncHandler(async (req, res) => {
-  await businessSuiteController.getSupplyContractsCreatedByMe(req, res);
+  await businessSuiteController.getSupplyContractsEscrowedToMe(req, res);
 }));
 
 /**
