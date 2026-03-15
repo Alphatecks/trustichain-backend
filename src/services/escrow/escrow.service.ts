@@ -3,6 +3,7 @@
  * Handles escrow operations and statistics
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { CreateEscrowRequest, CreateEscrowResponse, Escrow, EscrowCounterpartyParty, EscrowPayerParty, GetEscrowListRequest, Milestone, ReleaseType } from '../../types/api/escrow.types';
 import type { TransactionType } from '../../types/api/transaction.types';
@@ -2745,6 +2746,13 @@ export class EscrowService {
               : `Escrow release: ${escrow.description || 'No description'} | XRPL TX: ${finishTxHash}`,
           });
 
+        // Populate supplier transaction history for business supply escrows (both buyer and supplier see it)
+        try {
+          await this.recordSupplyCompletionInSupplierHistory(adminClient, updatedEscrow ?? escrow);
+        } catch (supplyHistoryError) {
+          console.warn('[Escrow Release] recordSupplyCompletionInSupplierHistory failed (non-fatal):', supplyHistoryError);
+        }
+
         // Update wallet balances for both parties
         if (updatedEscrow) {
           // Update sender's wallet balance
@@ -2904,6 +2912,217 @@ export class EscrowService {
         error: error instanceof Error ? error.message : 'Failed to release escrow',
       };
     }
+  }
+
+  /**
+   * Record a completed business supply escrow in business_supplier_transactions so both buyer and supplier
+   * see it in Supplier transaction history. Idempotent (skips if rows for this escrow_id already exist).
+   */
+  private async recordSupplyCompletionInSupplierHistory(
+    client: SupabaseClient,
+    escrow: {
+      id: string;
+      user_id: string;
+      counterparty_id: string | null;
+      amount_xrp: string | number;
+      amount_usd: string | number;
+      transaction_type?: string | null;
+      suite_context?: string | null;
+      counterparty_name?: string | null;
+      payer_name?: string | null;
+    }
+  ): Promise<void> {
+    if (!client) return;
+    if (escrow.transaction_type !== 'supply' || escrow.suite_context !== 'business') return;
+    if (!escrow.counterparty_id) return;
+
+    const escrowId = escrow.id;
+    const amountUsd = parseFloat(String(escrow.amount_usd));
+    const amountXrp = parseFloat(String(escrow.amount_xrp));
+
+    const { data: existing } = await client
+      .from('business_supplier_transactions')
+      .select('id')
+      .eq('escrow_id', escrowId)
+      .limit(1);
+    if (existing && existing.length > 0) return;
+
+    const { data: buyerBiz } = await client
+      .from('businesses')
+      .select('id')
+      .eq('owner_user_id', escrow.user_id)
+      .maybeSingle();
+    const { data: supplierBiz } = await client
+      .from('businesses')
+      .select('id')
+      .eq('owner_user_id', escrow.counterparty_id)
+      .maybeSingle();
+
+    if (!buyerBiz?.id && !supplierBiz?.id) return;
+
+    const { data: businessesForName } = await client
+      .from('businesses')
+      .select('owner_user_id, company_name')
+      .in('owner_user_id', [escrow.user_id, escrow.counterparty_id]);
+    const companyNameByUserId = (businessesForName || []).reduce(
+      (acc: Record<string, string>, b: { owner_user_id: string; company_name: string | null }) => {
+        if (b.company_name) acc[b.owner_user_id] = b.company_name;
+        return acc;
+      },
+      {} as Record<string, string>
+    );
+
+    const counterpartyName =
+      (escrow.counterparty_name && escrow.counterparty_name.trim()) ||
+      companyNameByUserId[escrow.counterparty_id] ||
+      'Supplier';
+    const payerName =
+      (escrow.payer_name && escrow.payer_name.trim()) ||
+      companyNameByUserId[escrow.user_id] ||
+      'Buyer';
+
+    const findOrCreateSupplierRow = async (
+      businessId: string,
+      ownerUserId: string,
+      name: string
+    ): Promise<string | null> => {
+      const normalized = name.trim().toLowerCase();
+      const { data: allRows } = await client
+        .from('business_suppliers')
+        .select('id, name')
+        .eq('business_id', businessId);
+      const match = (allRows || []).find(
+        (r: { id: string; name: string }) => r.name && r.name.trim().toLowerCase() === normalized
+      );
+      if (match) return match.id;
+      const { data: inserted, error } = await client
+        .from('business_suppliers')
+        .insert({
+          business_id: businessId,
+          user_id: ownerUserId,
+          name: name.trim() || 'Unknown',
+        })
+        .select('id')
+        .single();
+      if (error) {
+        console.warn('[Escrow] recordSupplyCompletionInSupplierHistory: could not create business_suppliers row', {
+          businessId,
+          error: error.message,
+        });
+        return null;
+      }
+      return inserted?.id ?? null;
+    };
+
+    const rowsToInsert: Array<{
+      business_id: string;
+      supplier_id: string;
+      amount_xrp: number | null;
+      amount_usd: number;
+      status: string;
+      type: 'Sent' | 'Received';
+      escrow_id: string;
+    }> = [];
+
+    if (buyerBiz?.id) {
+      const buyerSupplierId = await findOrCreateSupplierRow(
+        buyerBiz.id,
+        escrow.user_id,
+        counterpartyName
+      );
+      if (buyerSupplierId) {
+        rowsToInsert.push({
+          business_id: buyerBiz.id,
+          supplier_id: buyerSupplierId,
+          amount_xrp: Number.isFinite(amountXrp) ? amountXrp : null,
+          amount_usd: amountUsd,
+          status: 'Successful',
+          type: 'Sent',
+          escrow_id: escrowId,
+        });
+      }
+    }
+
+    if (supplierBiz?.id) {
+      const supplierCounterpartyId = await findOrCreateSupplierRow(
+        supplierBiz.id,
+        escrow.counterparty_id,
+        payerName
+      );
+      if (supplierCounterpartyId) {
+        rowsToInsert.push({
+          business_id: supplierBiz.id,
+          supplier_id: supplierCounterpartyId,
+          amount_xrp: Number.isFinite(amountXrp) ? amountXrp : null,
+          amount_usd: amountUsd,
+          status: 'Successful',
+          type: 'Received',
+          escrow_id: escrowId,
+        });
+      }
+    }
+
+    if (rowsToInsert.length > 0) {
+      const { error } = await client.from('business_supplier_transactions').insert(rowsToInsert);
+      if (error) {
+        console.warn('[Escrow] recordSupplyCompletionInSupplierHistory: insert failed', {
+          escrowId,
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  /**
+   * Backfill business_supplier_transactions for completed business supply escrows that never got history rows.
+   * Idempotent (recordSupplyCompletionInSupplierHistory skips when rows exist). Call from cron or admin once.
+   */
+  async backfillSupplySupplierTransactionHistory(): Promise<{
+    success: boolean;
+    message: string;
+    data?: { processed: number; inserted: number; errors: string[] };
+    error?: string;
+  }> {
+    const adminClient = supabaseAdmin || supabase;
+    if (!adminClient) {
+      return { success: false, message: 'Database not configured', error: 'Database not configured' };
+    }
+    const { data: rows, error: fetchError } = await adminClient
+      .from('escrows')
+      .select('id, user_id, counterparty_id, amount_xrp, amount_usd, transaction_type, suite_context, counterparty_name, payer_name')
+      .eq('transaction_type', 'supply')
+      .eq('suite_context', 'business')
+      .eq('status', 'completed');
+    if (fetchError) {
+      return {
+        success: false,
+        message: fetchError.message || 'Failed to fetch completed supply escrows',
+        error: fetchError.message,
+      };
+    }
+    const list = rows || [];
+    let inserted = 0;
+    const errors: string[] = [];
+    for (const escrow of list) {
+      try {
+        const { data: existing } = await adminClient
+          .from('business_supplier_transactions')
+          .select('id')
+          .eq('escrow_id', escrow.id)
+          .limit(1);
+        if (existing && existing.length > 0) continue;
+        await this.recordSupplyCompletionInSupplierHistory(adminClient, escrow);
+        inserted++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${escrow.id}: ${msg}`);
+      }
+    }
+    return {
+      success: true,
+      message: `Backfill completed: ${list.length} escrow(s) processed, ${inserted} new history row set(s) created`,
+      data: { processed: list.length, inserted, errors },
+    };
   }
 
   /**

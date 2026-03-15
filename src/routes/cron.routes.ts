@@ -48,4 +48,22 @@ router.post(
   })
 );
 
+/**
+ * @route   POST /api/cron/backfill-supplier-transactions
+ * @desc    Backfill business_supplier_transactions for completed business supply escrows that never got history rows. Idempotent. Requires CRON_SECRET.
+ * @access  X-Cron-Secret or Authorization: Bearer <CRON_SECRET>
+ */
+router.post(
+  '/backfill-supplier-transactions',
+  cronSecretAuth,
+  asyncHandler(async (_req: Request, res: Response) => {
+    const result = await escrowService.backfillSupplySupplierTransactionHistory();
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  })
+);
+
 export default router;
