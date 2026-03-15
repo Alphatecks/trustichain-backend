@@ -328,15 +328,13 @@ export class EscrowService {
       let counterpartyWalletAddress: string;
 
       if (request.counterpartyId) {
-        // If counterpartyId is provided, use it but still validate wallet address (counterparty personal wallet)
-        const { data: counterpartyWallet, error: walletError } = await adminClient
+        // If counterpartyId is provided, validate that the provided address is one of the counterparty's wallets (personal or business)
+        const { data: counterpartyWallets, error: walletError } = await adminClient
           .from('wallets')
           .select('xrpl_address, user_id')
-          .eq('user_id', request.counterpartyId)
-          .eq('suite_context', 'personal')
-          .maybeSingle();
+          .eq('user_id', request.counterpartyId);
 
-        if (walletError || !counterpartyWallet) {
+        if (walletError || !counterpartyWallets?.length) {
           return {
             success: false,
             message: 'Counterparty wallet not found',
@@ -344,17 +342,18 @@ export class EscrowService {
           };
         }
 
-        // Validate that the provided wallet address matches the counterparty's wallet
-        if (counterpartyWallet.xrpl_address !== request.counterpartyXrpWalletAddress) {
+        const providedAddress = request.counterpartyXrpWalletAddress.trim();
+        const matchingWallet = counterpartyWallets.find((w: { xrpl_address: string }) => w.xrpl_address === providedAddress);
+        if (!matchingWallet) {
           return {
             success: false,
-            message: 'Provided counterparty wallet address does not match the counterparty user',
+            message: 'Provided counterparty wallet address does not match the counterparty user. Use the address from their connected personal or business wallet.',
             error: 'Provided counterparty wallet address does not match the counterparty user',
           };
         }
 
         counterpartyUserId = request.counterpartyId;
-        counterpartyWalletAddress = counterpartyWallet.xrpl_address;
+        counterpartyWalletAddress = matchingWallet.xrpl_address;
       } else {
         // Look up counterparty by wallet address
         const { data: counterpartyWallet, error: walletLookupError } = await adminClient
