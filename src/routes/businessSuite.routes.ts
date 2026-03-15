@@ -89,6 +89,24 @@ router.get('/supply-contracts/overview', authenticate, asyncHandler(async (req, 
 }));
 
 /**
+ * @route   GET /api/business-suite/supply-contracts/for-supplier
+ * @desc    View new supply contract – supplier only. Contracts escrowed to this business (counterparty). Call this for the supplier view.
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/for-supplier', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplyContractsEscrowedToMe(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/supply-contracts/for-contractor
+ * @desc    View supply status – contractor only. Contracts created by this business (creator). Call this for the contractor view.
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/for-contractor', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplyContractsCreatedByMe(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/created-by-me
  * @desc    View supply status: contracts created by this business (contractor/buyer). Status + release button. Contractor only.
  * @access  Private (business suite only)
