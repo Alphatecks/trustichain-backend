@@ -106,9 +106,15 @@ export class BusinessSuiteSupplyContractsService {
     }
 
     const escrowId = result.data.escrowId;
-    const documentUrls = Array.isArray(body.contractDocumentUrls)
-      ? body.contractDocumentUrls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
-      : [];
+    const rawDocs =
+      body.contractDocumentUrls ??
+      (body as Record<string, unknown>).contract_document_urls ??
+      (body as Record<string, unknown>).documentUrls;
+    const documentUrls = Array.isArray(rawDocs)
+      ? rawDocs.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+      : typeof rawDocs === 'string' && rawDocs.trim()
+        ? [rawDocs.trim()]
+        : [];
     const { error: updateError } = await client
       .from('escrows')
       .update({
@@ -154,6 +160,69 @@ export class BusinessSuiteSupplyContractsService {
         status: result.data.status ?? 'pending',
       },
     };
+  }
+
+  /**
+   * Set or append contract document URLs for a supply contract (creator only).
+   * Use to fix contracts created without documents or to add more documents.
+   */
+  async updateSupplyContractDocuments(
+    userId: string,
+    escrowId: string,
+    body: { contractDocumentUrls?: string[]; append?: boolean }
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const raw =
+      body.contractDocumentUrls ??
+      (body as Record<string, unknown>).contract_document_urls ??
+      (body as Record<string, unknown>).documentUrls;
+    const newUrls = Array.isArray(raw)
+      ? raw.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+      : [];
+    const client = supabaseAdmin!;
+    if (body.append) {
+      const { data: escrow, error: fetchErr } = await client
+        .from('escrows')
+        .select('contract_document_urls')
+        .eq('id', escrowId)
+        .eq('user_id', userId)
+        .eq('suite_context', 'business')
+        .eq('transaction_type', 'supply')
+        .maybeSingle();
+      if (fetchErr || !escrow) {
+        return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+      }
+      let existing: string[] = [];
+      if (Array.isArray(escrow.contract_document_urls)) {
+        existing = escrow.contract_document_urls.filter((u): u is string => typeof u === 'string');
+      } else if (typeof escrow.contract_document_urls === 'string' && escrow.contract_document_urls.trim()) {
+        const s = escrow.contract_document_urls.trim();
+        const inner = s.startsWith('{') && s.endsWith('}') ? s.slice(1, -1) : s;
+        existing = inner ? inner.split(',').map((u) => u.trim().replace(/^"|"$/g, '')).filter(Boolean) : [];
+      }
+      const combined = [...existing, ...newUrls];
+      const { error } = await client
+        .from('escrows')
+        .update({ contract_document_urls: combined.length > 0 ? combined : null })
+        .eq('id', escrowId)
+        .eq('user_id', userId);
+      if (error) {
+        return { success: false, message: error.message || 'Failed to update documents', error: error.message };
+      }
+    } else {
+      const { error } = await client
+        .from('escrows')
+        .update({ contract_document_urls: newUrls.length > 0 ? newUrls : null })
+        .eq('id', escrowId)
+        .eq('user_id', userId);
+      if (error) {
+        return { success: false, message: error.message || 'Failed to update documents', error: error.message };
+      }
+    }
+    return { success: true, message: 'Contract documents updated' };
   }
 }
 

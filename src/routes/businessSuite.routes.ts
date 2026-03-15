@@ -125,6 +125,15 @@ router.get('/supply-contracts/created-by-me/:escrowId', authenticate, asyncHandl
 }));
 
 /**
+ * @route   PATCH /api/business-suite/supply-contracts/created-by-me/:escrowId/documents
+ * @desc    Set or append contract document URLs (contractor only). Body: { contractDocumentUrls: string[], append?: boolean }.
+ * @access  Private (business suite only)
+ */
+router.patch('/supply-contracts/created-by-me/:escrowId/documents', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.updateSupplyContractDocuments(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/escrowed-to-me
  * @desc    View new supply contract: contracts escrowed to this business (supplier/receiver). Supplier only.
  * @access  Private (business suite only)

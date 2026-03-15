@@ -376,6 +376,23 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Set or append contract document URLs for a supply contract (contractor only).
+   * PATCH /api/business-suite/supply-contracts/created-by-me/:escrowId/documents
+   */
+  async updateSupplyContractDocuments(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const result = await businessSuiteSupplyContractsService.updateSupplyContractDocuments(userId, escrowId, req.body || {});
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(400).json(result);
+  }
+
+  /**
    * Upload a contract document (Invoice, Agreement, Delivery Terms) for supply contracts. POST /api/business-suite/supply-contracts/documents/upload
    */
   async uploadSupplyContractDocument(req: Request, res: Response): Promise<void> {

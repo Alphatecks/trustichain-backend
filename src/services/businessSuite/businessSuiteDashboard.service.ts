@@ -40,6 +40,20 @@ function formatEscrowId(year: number, sequence: number): string {
   return `ESC-${year}-${sequence.toString().padStart(3, '0')}`;
 }
 
+/** Normalize contract_document_urls from DB (array or Postgres text[] string like "{url1,url2}"). */
+function normalizeContractDocumentUrls(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((u): u is string => typeof u === 'string' && u.length > 0);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const s = value.trim();
+    const inner = s.startsWith('{') && s.endsWith('}') ? s.slice(1, -1) : s;
+    if (!inner) return [];
+    return inner.split(',').map((u) => u.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  }
+  return [];
+}
+
 function formatActivityDate(iso: string): string {
   const d = new Date(iso);
   const day = d.getUTCDate();
@@ -514,9 +528,7 @@ export class BusinessSuiteDashboardService {
       const status = row.status || 'pending';
       const isLocked = status === 'pending' || status === 'active';
       const expectedReleaseDate = row.expected_release_date || row.expected_completion_date || null;
-      const contractDocumentUrls = Array.isArray(row.contract_document_urls)
-        ? row.contract_document_urls.filter((u): u is string => typeof u === 'string')
-        : [];
+      const contractDocumentUrls = normalizeContractDocumentUrls(row.contract_document_urls);
       return {
         escrowId: row.id,
         contractId,
@@ -596,9 +608,7 @@ export class BusinessSuiteDashboardService {
     const deliveryDeadline = escrow.expected_completion_date
       ? new Date(escrow.expected_completion_date).toISOString()
       : null;
-    const contractDocumentUrls = Array.isArray(escrow.contract_document_urls)
-      ? escrow.contract_document_urls.filter((u): u is string => typeof u === 'string')
-      : [];
+    const contractDocumentUrls = normalizeContractDocumentUrls(escrow.contract_document_urls);
 
     const data: SupplyContractDetailForContractor = {
       escrowId: escrow.id,
@@ -747,9 +757,7 @@ export class BusinessSuiteDashboardService {
     const deliveryDeadline = escrow.expected_completion_date
       ? new Date(escrow.expected_completion_date).toISOString()
       : null;
-    const documentsFromContractor = Array.isArray(escrow.contract_document_urls)
-      ? escrow.contract_document_urls.filter((u): u is string => typeof u === 'string')
-      : [];
+    const documentsFromContractor = normalizeContractDocumentUrls(escrow.contract_document_urls);
 
     const data: SupplyContractDetailForSupplier = {
       escrowId: escrow.id,
