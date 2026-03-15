@@ -98,6 +98,15 @@ router.get('/supply-contracts/escrowed-to-me', authenticate, asyncHandler(async 
 }));
 
 /**
+ * @route   POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/release
+ * @desc    Release a supplier contract escrow (locked funds). Counterparty or owner can release manually or on/after the release day set at creation.
+ * @access  Private (business suite only)
+ */
+router.post('/supply-contracts/escrowed-to-me/:escrowId/release', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.releaseSupplyContractEscrow(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/supplier-disputes
  * @desc    File dispute for suppliers. Body: supplierReference (SUPP-YYYY-NNN or business name), reason, amount, currency, description, evidence? (optional array of { fileUrl, fileName, fileType?, fileSize? }).
  * @access  Private (business suite only)

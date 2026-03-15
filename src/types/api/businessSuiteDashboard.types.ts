@@ -149,10 +149,18 @@ export interface SupplierContractOverviewResponse {
 /** Supply contract escrowed to the current business (counterparty view). Only visible to Business A when Business B has escrowed to them. */
 export interface SupplyContractEscrowedToMeItem {
   escrowId: string;
+  /** Display ID e.g. SC-2024-001 (Supplier Contract) */
   contractId: string;
   amountUsd: number;
   amountXrp: number | null;
+  /** Raw escrow status: pending | active | completed | cancelled | disputed */
   status: string;
+  /** Display status for UI: Pending | Released (completed) */
+  statusDisplay: 'Pending' | 'Released';
+  /** Release date set at escrow creation (expected_release_date or expected_completion_date). For display and manual release. */
+  expectedReleaseDate: string | null;
+  /** True if escrow is locked and current user (counterparty or owner) can trigger release (manual or after release day). */
+  canRelease: boolean;
   createdAt: string;
 }
 

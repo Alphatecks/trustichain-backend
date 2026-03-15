@@ -10,6 +10,7 @@ import { businessSuiteKycService } from '../services/businessSuite/businessSuite
 import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
 import { storageService } from '../services/storage/storage.service';
+import { escrowService } from '../services/escrow/escrow.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
 
@@ -283,6 +284,26 @@ export class BusinessSuiteController {
     const result = await businessSuiteDashboardService.getSupplyContractsEscrowedToMe(userId);
     if (result.success) res.status(200).json(result);
     else res.status(403).json(result);
+  }
+
+  /**
+   * Release a supplier contract escrow (locked escrow). Counterparty or owner can release; manual or on/after release day.
+   * POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/release
+   */
+  async releaseSupplyContractEscrow(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
+    const result = await escrowService.releaseEscrow(userId, escrowId, notes);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Escrow not found or access denied') res.status(404).json(result);
+    else if (result.error === 'Escrow is already completed') res.status(400).json(result);
+    else if (result.error === 'Cannot release a cancelled escrow') res.status(400).json(result);
+    else res.status(400).json(result);
   }
 
   /**
