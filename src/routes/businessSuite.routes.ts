@@ -116,6 +116,15 @@ router.get('/supply-contracts/created-by-me', authenticate, asyncHandler(async (
 }));
 
 /**
+ * @route   GET /api/business-suite/supply-contracts/created-by-me/:escrowId
+ * @desc    Single supply contract detail for contractor modal (includes contract documents uploaded at creation).
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/created-by-me/:escrowId', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplyContractCreatedByMeDetail(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/escrowed-to-me
  * @desc    View new supply contract: contracts escrowed to this business (supplier/receiver). Supplier only.
  * @access  Private (business suite only)

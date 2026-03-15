@@ -109,7 +109,7 @@ export class BusinessSuiteSupplyContractsService {
     const documentUrls = Array.isArray(body.contractDocumentUrls)
       ? body.contractDocumentUrls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
       : [];
-    await client
+    const { error: updateError } = await client
       .from('escrows')
       .update({
         contract_title: body.contractTitle?.trim() || null,
@@ -117,6 +117,14 @@ export class BusinessSuiteSupplyContractsService {
         contract_document_urls: documentUrls.length > 0 ? documentUrls : null,
       })
       .eq('id', escrowId);
+    if (updateError) {
+      console.error('[CreateSupplierContract] Failed to update escrow with contract metadata:', updateError);
+      return {
+        success: false,
+        message: updateError.message || 'Failed to save contract details',
+        error: 'Update failed',
+      };
+    }
 
     const { data: escrow } = await client
       .from('escrows')

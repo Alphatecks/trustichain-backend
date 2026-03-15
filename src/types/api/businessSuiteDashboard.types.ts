@@ -162,6 +162,8 @@ export interface SupplyContractEscrowedToMeItem {
   /** True if escrow is locked and current user (counterparty or owner) can trigger release (manual or after release day). */
   canRelease: boolean;
   createdAt: string;
+  /** Contract document URLs (contractor-uploaded). Present on created-by-me list and detail. */
+  contractDocumentUrls?: string[];
 }
 
 export interface SupplyContractsEscrowedToMeResponse {
@@ -207,6 +209,36 @@ export interface SupplyContractDetailForSupplierResponse {
   success: boolean;
   message: string;
   data?: SupplyContractDetailForSupplier;
+  error?: string;
+}
+
+/** Single supply contract detail for contractor modal (creator view; includes uploaded documents). */
+export interface SupplyContractDetailForContractor {
+  escrowId: string;
+  contractId: string;
+  supplierName: string | null;
+  amountUsd: number;
+  amountXrp: number | null;
+  currency: string;
+  status: string;
+  fundsVerifiedInEscrow: boolean;
+  deliveryDeadline: string | null;
+  releaseCondition: string | null;
+  escrowType: string | null;
+  disputeWindow: string | null;
+  contractTitle: string | null;
+  deliveryMethod: string | null;
+  /** Document URLs uploaded by contractor when creating the contract. */
+  contractDocumentUrls: string[];
+  canRelease: boolean;
+  expectedReleaseDate: string | null;
+  createdAt: string;
+}
+
+export interface SupplyContractDetailForContractorResponse {
+  success: boolean;
+  message: string;
+  data?: SupplyContractDetailForContractor;
   error?: string;
 }
 

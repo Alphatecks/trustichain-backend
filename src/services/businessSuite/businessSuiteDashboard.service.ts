@@ -22,6 +22,8 @@ import type {
   SupplyContractsEscrowedToMeResponse,
   SupplyContractDetailForSupplier,
   SupplyContractDetailForSupplierResponse,
+  SupplyContractDetailForContractor,
+  SupplyContractDetailForContractorResponse,
   SupplyContractsCreatedByMeResponse,
   SupplierContractOverviewResponse,
 } from '../../types/api/businessSuiteDashboard.types';
@@ -485,7 +487,7 @@ export class BusinessSuiteDashboardService {
     const client = supabaseAdmin!;
     const { data: rows, error } = await client
       .from('escrows')
-      .select('id, amount_xrp, amount_usd, status, expected_release_date, expected_completion_date, created_at')
+      .select('id, amount_xrp, amount_usd, status, expected_release_date, expected_completion_date, created_at, contract_document_urls')
       .eq('user_id', userId)
       .eq('suite_context', 'business')
       .eq('transaction_type', 'supply')
@@ -503,6 +505,7 @@ export class BusinessSuiteDashboardService {
       expected_release_date: string | null;
       expected_completion_date: string | null;
       created_at: string;
+      contract_document_urls?: string[] | null;
     }) => {
       const year = new Date(row.created_at).getUTCFullYear();
       const seq = (byYear.get(year) ?? 0) + 1;
@@ -511,6 +514,9 @@ export class BusinessSuiteDashboardService {
       const status = row.status || 'pending';
       const isLocked = status === 'pending' || status === 'active';
       const expectedReleaseDate = row.expected_release_date || row.expected_completion_date || null;
+      const contractDocumentUrls = Array.isArray(row.contract_document_urls)
+        ? row.contract_document_urls.filter((u): u is string => typeof u === 'string')
+        : [];
       return {
         escrowId: row.id,
         contractId,
@@ -521,12 +527,104 @@ export class BusinessSuiteDashboardService {
         expectedReleaseDate,
         canRelease: isLocked,
         createdAt: row.created_at,
+        contractDocumentUrls: contractDocumentUrls.length > 0 ? contractDocumentUrls : undefined,
       };
     });
     return {
       success: true,
       message: 'Supply contracts created by you',
       data: { items },
+    };
+  }
+
+  /**
+   * Single supply contract detail for contractor modal (creator view). Includes contract documents uploaded at creation.
+   * GET /api/business-suite/supply-contracts/created-by-me/:escrowId
+   */
+  async getSupplyContractCreatedByMeDetail(
+    userId: string,
+    escrowId: string
+  ): Promise<SupplyContractDetailForContractorResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const { data: escrow, error } = await client
+      .from('escrows')
+      .select(
+        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, counterparty_name'
+      )
+      .eq('id', escrowId)
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .maybeSingle();
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch contract', error: error.message };
+    }
+    if (!escrow) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
+
+    const created = new Date(escrow.created_at);
+    const year = created.getUTCFullYear();
+    const { count } = await client
+      .from('escrows')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .gte('created_at', `${year}-01-01T00:00:00.000Z`)
+      .lte('created_at', escrow.created_at);
+    const seq = count ?? 1;
+    const contractId = `SC-${year}-${String(seq).padStart(3, '0')}`;
+
+    let supplierName: string | null = (escrow.counterparty_name && escrow.counterparty_name.trim()) || null;
+    if (!supplierName && escrow.counterparty_id) {
+      const { data: biz } = await client
+        .from('businesses')
+        .select('company_name')
+        .eq('owner_user_id', escrow.counterparty_id)
+        .maybeSingle();
+      if (biz?.company_name) supplierName = biz.company_name;
+    }
+
+    const status = escrow.status || 'pending';
+    const isLocked = status === 'pending' || status === 'active';
+
+    const deliveryDeadline = escrow.expected_completion_date
+      ? new Date(escrow.expected_completion_date).toISOString()
+      : null;
+    const contractDocumentUrls = Array.isArray(escrow.contract_document_urls)
+      ? escrow.contract_document_urls.filter((u): u is string => typeof u === 'string')
+      : [];
+
+    const data: SupplyContractDetailForContractor = {
+      escrowId: escrow.id,
+      contractId,
+      supplierName,
+      amountUsd: parseFloat(String(escrow.amount_usd)) || 0,
+      amountXrp: escrow.amount_xrp != null ? parseFloat(String(escrow.amount_xrp)) : null,
+      currency: 'USDT',
+      status,
+      fundsVerifiedInEscrow: status === 'active',
+      deliveryDeadline,
+      releaseCondition: escrow.release_conditions || null,
+      escrowType: escrow.release_type || null,
+      disputeWindow: escrow.dispute_resolution_period || null,
+      contractTitle: escrow.contract_title || null,
+      deliveryMethod: escrow.delivery_method || null,
+      contractDocumentUrls,
+      canRelease: isLocked,
+      expectedReleaseDate: escrow.expected_release_date || escrow.expected_completion_date || null,
+      createdAt: escrow.created_at,
+    };
+
+    return {
+      success: true,
+      message: 'Supply contract detail retrieved',
+      data,
     };
   }
 

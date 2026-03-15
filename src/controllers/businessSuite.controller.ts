@@ -290,6 +290,23 @@ export class BusinessSuiteController {
     else res.status(403).json(result);
   }
 
+  /**
+   * Single supply contract detail for contractor modal (includes contract documents).
+   * GET /api/business-suite/supply-contracts/created-by-me/:escrowId
+   */
+  async getSupplyContractCreatedByMeDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const result = await businessSuiteDashboardService.getSupplyContractCreatedByMeDetail(userId, escrowId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
   async getSupplyContractsEscrowedToMe(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
     const result = await businessSuiteDashboardService.getSupplyContractsEscrowedToMe(userId);
