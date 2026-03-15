@@ -5,6 +5,7 @@ import { businessSuiteTeamsService } from '../services/businessSuite/businessSui
 import { businessSuitePayrollsService } from '../services/businessSuite/businessSuitePayrolls.service';
 import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
 import { businessSuiteSupplyContractsService } from '../services/businessSuite/businessSuiteSupplyContracts.service';
+import { businessSuiteSupplierDisputesService } from '../services/businessSuite/businessSuiteSupplierDisputes.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
 import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
@@ -271,6 +272,18 @@ export class BusinessSuiteController {
     const userId = req.userId!;
     const result = await businessSuiteDashboardService.getSupplyContractsEscrowedToMe(userId);
     if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * File dispute for suppliers. POST /api/business-suite/supplier-disputes
+   */
+  async fileSupplierDispute(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteSupplierDisputesService.fileSupplierDispute(userId, req.body || {});
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'Missing supplier reference' || result.error === 'Missing reason' || result.error === 'Missing description' || result.error === 'Invalid amount') res.status(400).json(result);
+    else if (result.error === 'Supplier not found' || result.error === 'Escrow not found' || result.error === 'Payer wallet not found' || result.error === 'Respondent wallet not found') res.status(404).json(result);
     else res.status(403).json(result);
   }
 

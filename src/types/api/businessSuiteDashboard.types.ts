@@ -181,3 +181,20 @@ export interface CreateSupplierContractResponse {
   };
   error?: string;
 }
+
+/** File dispute for suppliers modal: supplier reference (ID or name), reason, amount, currency, description, optional evidence */
+export interface FileSupplierDisputeRequest {
+  supplierReference: string;
+  reason: string;
+  amount: number;
+  currency: 'USD' | 'XRP';
+  description: string;
+  evidence?: Array<{ fileUrl: string; fileName: string; fileType?: string; fileSize?: number }>;
+}
+
+export interface FileSupplierDisputeResponse {
+  success: boolean;
+  message: string;
+  data?: { disputeId: string; caseId: string };
+  error?: string;
+}
