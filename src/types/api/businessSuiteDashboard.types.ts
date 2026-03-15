@@ -173,6 +173,43 @@ export interface SupplyContractsEscrowedToMeResponse {
   error?: string;
 }
 
+/** Single supply contract detail for supplier modal (Escrow contract + Evidence/Documents + actions). */
+export interface SupplyContractDetailForSupplier {
+  escrowId: string;
+  contractId: string;
+  buyer: string | null;
+  amountUsd: number;
+  amountXrp: number | null;
+  currency: string;
+  status: string;
+  fundsVerifiedInEscrow: boolean;
+  timeline: {
+    escrowCreated: boolean;
+    fundsDeposited: boolean;
+    contractAccepted: boolean;
+    awaitingDelivery: boolean;
+    paymentRelease: boolean;
+  };
+  deliveryDeadline: string | null;
+  releaseCondition: string | null;
+  escrowType: string | null;
+  disputeWindow: string | null;
+  contractTitle: string | null;
+  deliveryMethod: string | null;
+  /** Documents sent by contractor (buyer) when creating the contract. */
+  documentsFromContractor: string[];
+  canRelease: boolean;
+  expectedReleaseDate: string | null;
+  createdAt: string;
+}
+
+export interface SupplyContractDetailForSupplierResponse {
+  success: boolean;
+  message: string;
+  data?: SupplyContractDetailForSupplier;
+  error?: string;
+}
+
 /** Supply contracts created by this business (creator view). Same item shape; use this for supply status list with release. */
 export interface SupplyContractsCreatedByMeResponse {
   success: boolean;

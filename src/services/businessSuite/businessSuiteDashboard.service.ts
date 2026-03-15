@@ -20,6 +20,8 @@ import type {
   BusinessSuiteSubscriptionListResponse,
   SupplyContractEscrowedToMeItem,
   SupplyContractsEscrowedToMeResponse,
+  SupplyContractDetailForSupplier,
+  SupplyContractDetailForSupplierResponse,
   SupplyContractsCreatedByMeResponse,
   SupplierContractOverviewResponse,
 } from '../../types/api/businessSuiteDashboard.types';
@@ -584,6 +586,105 @@ export class BusinessSuiteDashboardService {
       success: true,
       message: 'Supply contracts escrowed to you',
       data: { items },
+    };
+  }
+
+  /**
+   * Single supply contract detail for the supplier modal (Escrow contract + terms + documents from contractor).
+   * GET /api/business-suite/supply-contracts/escrowed-to-me/:escrowId
+   */
+  async getSupplyContractEscrowedToMeDetail(
+    userId: string,
+    escrowId: string
+  ): Promise<SupplyContractDetailForSupplierResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const { data: escrow, error } = await client
+      .from('escrows')
+      .select(
+        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, payer_name'
+      )
+      .eq('id', escrowId)
+      .eq('counterparty_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .maybeSingle();
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch contract', error: error.message };
+    }
+    if (!escrow) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
+
+    const created = new Date(escrow.created_at);
+    const year = created.getUTCFullYear();
+    const { count } = await client
+      .from('escrows')
+      .select('id', { count: 'exact', head: true })
+      .eq('counterparty_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .gte('created_at', `${year}-01-01T00:00:00.000Z`)
+      .lte('created_at', escrow.created_at);
+    const seq = count ?? 1;
+    const contractId = `SC-${year}-${String(seq).padStart(3, '0')}`;
+
+    let buyer: string | null = (escrow.payer_name && escrow.payer_name.trim()) || null;
+    if (!buyer && escrow.user_id) {
+      const { data: biz } = await client
+        .from('businesses')
+        .select('company_name')
+        .eq('owner_user_id', escrow.user_id)
+        .maybeSingle();
+      if (biz?.company_name) buyer = biz.company_name;
+    }
+
+    const status = escrow.status || 'pending';
+    const isLocked = status === 'pending' || status === 'active';
+    const isCompleted = status === 'completed';
+
+    const deliveryDeadline = escrow.expected_completion_date
+      ? new Date(escrow.expected_completion_date).toISOString()
+      : null;
+    const documentsFromContractor = Array.isArray(escrow.contract_document_urls)
+      ? escrow.contract_document_urls.filter((u): u is string => typeof u === 'string')
+      : [];
+
+    const data: SupplyContractDetailForSupplier = {
+      escrowId: escrow.id,
+      contractId,
+      buyer,
+      amountUsd: parseFloat(String(escrow.amount_usd)) || 0,
+      amountXrp: escrow.amount_xrp != null ? parseFloat(String(escrow.amount_xrp)) : null,
+      currency: 'USDT',
+      status,
+      fundsVerifiedInEscrow: status === 'active',
+      timeline: {
+        escrowCreated: true,
+        fundsDeposited: status === 'active' || status === 'completed',
+        contractAccepted: true,
+        awaitingDelivery: !isCompleted,
+        paymentRelease: isCompleted,
+      },
+      deliveryDeadline,
+      releaseCondition: escrow.release_conditions || null,
+      escrowType: escrow.release_type || null,
+      disputeWindow: escrow.dispute_resolution_period || null,
+      contractTitle: escrow.contract_title || null,
+      deliveryMethod: escrow.delivery_method || null,
+      documentsFromContractor,
+      canRelease: isLocked,
+      expectedReleaseDate: escrow.expected_release_date || escrow.expected_completion_date || null,
+      createdAt: escrow.created_at,
+    };
+
+    return {
+      success: true,
+      message: 'Supply contract detail retrieved',
+      data,
     };
   }
 }

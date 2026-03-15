@@ -298,6 +298,23 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Single supply contract detail for supplier modal (Escrow contract + terms + documents from contractor).
+   * GET /api/business-suite/supply-contracts/escrowed-to-me/:escrowId
+   */
+  async getSupplyContractEscrowedToMeDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const result = await businessSuiteDashboardService.getSupplyContractEscrowedToMeDetail(userId, escrowId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Release a supplier contract escrow (locked escrow). Creator (owner) or counterparty can release; manual or on/after release day.
    * POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/release
    */
