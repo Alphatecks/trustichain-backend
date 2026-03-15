@@ -268,6 +268,16 @@ export class BusinessSuiteController {
    * Supply contracts escrowed to the current business (modal on balance card). Only visible to the counterparty (Business A).
    * GET /api/business-suite/supply-contracts/escrowed-to-me
    */
+  /**
+   * Supplier contract overview stats (Total supplier, Pending supplier, Total Supplier Amount). GET /api/business-suite/supply-contracts/overview
+   */
+  async getSupplierContractOverview(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteDashboardService.getSupplierContractOverview(userId);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
   async getSupplyContractsEscrowedToMe(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
     const result = await businessSuiteDashboardService.getSupplyContractsEscrowedToMe(userId);

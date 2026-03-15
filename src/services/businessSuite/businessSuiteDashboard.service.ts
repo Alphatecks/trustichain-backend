@@ -20,6 +20,7 @@ import type {
   BusinessSuiteSubscriptionListResponse,
   SupplyContractEscrowedToMeItem,
   SupplyContractsEscrowedToMeResponse,
+  SupplierContractOverviewResponse,
 } from '../../types/api/businessSuiteDashboard.types';
 
 const ESCROW_STATUS_TO_ACTIVITY: Record<string, BusinessSuiteActivityStatus> = {
@@ -416,6 +417,50 @@ export class BusinessSuiteDashboardService {
       success: true,
       message: 'Subscription list retrieved',
       data: { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 },
+    };
+  }
+
+  /**
+   * Supplier contract overview stats for the three cards: Total supplier ($ locked), Pending supplier (X/Total + tier), Total Supplier Amount.
+   * GET /api/business-suite/supply-contracts/overview
+   */
+  async getSupplierContractOverview(userId: string): Promise<SupplierContractOverviewResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const [supplyEscrowsResult, trustiscoreResult] = await Promise.all([
+      client
+        .from('escrows')
+        .select('id, amount_usd, status')
+        .eq('user_id', userId)
+        .eq('suite_context', 'business')
+        .eq('transaction_type', 'supply'),
+      trustiscoreService.getTrustiscore(userId),
+    ]);
+    if (supplyEscrowsResult.error) {
+      return { success: false, message: supplyEscrowsResult.error.message || 'Failed to fetch supply contracts', error: supplyEscrowsResult.error.message };
+    }
+    const rows = supplyEscrowsResult.data || [];
+    const totalSupplier = rows.length;
+    const pendingStatuses = ['pending', 'active'];
+    const pendingRows = rows.filter((r: { status: string }) => pendingStatuses.includes(r.status));
+    const pendingCount = pendingRows.length;
+    const lockedUsd = pendingRows.reduce((sum: number, r: { amount_usd: string | number }) => sum + parseFloat(String(r.amount_usd)), 0);
+    const totalSupplierAmount = rows.reduce((sum: number, r: { amount_usd: string | number }) => sum + parseFloat(String(r.amount_usd)), 0);
+    const tier = trustiscoreResult.success && trustiscoreResult.data?.level ? trustiscoreResult.data.level : 'Bronze';
+    return {
+      success: true,
+      message: 'Supplier contract overview retrieved',
+      data: {
+        totalSupplier,
+        lockedUsd: parseFloat(lockedUsd.toFixed(2)),
+        pendingCount,
+        pendingTotal: totalSupplier,
+        tier,
+        totalSupplierAmount: parseFloat(totalSupplierAmount.toFixed(2)),
+      },
     };
   }
 

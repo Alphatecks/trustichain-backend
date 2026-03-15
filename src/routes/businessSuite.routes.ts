@@ -80,6 +80,15 @@ router.get('/dashboard/subscription', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   GET /api/business-suite/supply-contracts/overview
+ * @desc    Supplier contract overview stats: totalSupplier, lockedUsd, pendingCount, pendingTotal, tier, totalSupplierAmount (for the three cards UI).
+ * @access  Private (business suite only)
+ */
+router.get('/supply-contracts/overview', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSupplierContractOverview(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/escrowed-to-me
  * @desc    Supply contracts escrowed to the current business (for balance card modal). Only visible to counterparty (Business A).
  * @access  Private (business suite only)
