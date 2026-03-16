@@ -203,6 +203,10 @@ export interface SupplyContractDetailForSupplier {
   canRelease: boolean;
   expectedReleaseDate: string | null;
   createdAt: string;
+  /** When the supplier marked as delivered (ISO string or null). */
+  deliveryMarkedAt: string | null;
+  /** When the supplier requested buyer confirmation (ISO string or null). */
+  buyerConfirmationRequestedAt: string | null;
 }
 
 export interface SupplyContractDetailForSupplierResponse {

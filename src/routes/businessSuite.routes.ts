@@ -152,6 +152,24 @@ router.get('/supply-contracts/escrowed-to-me/:escrowId', authenticate, asyncHand
 }));
 
 /**
+ * @route   POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/mark-delivered
+ * @desc    Mark supply contract as delivered (supplier action).
+ * @access  Private (business suite only)
+ */
+router.post('/supply-contracts/escrowed-to-me/:escrowId/mark-delivered', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.markSupplyContractDelivered(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/request-buyer-confirmation
+ * @desc    Request buyer confirmation; sends email to buyer (supplier action).
+ * @access  Private (business suite only)
+ */
+router.post('/supply-contracts/escrowed-to-me/:escrowId/request-buyer-confirmation', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.requestSupplyContractBuyerConfirmation(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/release
  * @desc    Release a supplier contract escrow (locked funds). Counterparty or owner can release manually or on/after the release day set at creation.
  * @access  Private (business suite only)

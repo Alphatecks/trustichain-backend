@@ -1025,6 +1025,76 @@ export class EmailService {
       return { success: false, error: errorMessage };
     }
   }
+
+  /**
+   * Send "request buyer confirmation" email to the buyer (supply contract: supplier has marked delivered and requested confirmation).
+   */
+  async sendSupplyContractBuyerConfirmationRequest(
+    buyerEmail: string,
+    buyerName: string,
+    supplierName: string,
+    contractTitle: string | null,
+    contractId: string,
+    dashboardOrContractLink: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend || !process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = !resend
+          ? 'Resend API key not configured. Please set RESEND_API_KEY environment variable.'
+          : 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      console.log(`Attempting to send supply contract buyer confirmation request to: ${buyerEmail}`);
+
+      const logoBase64 = this.getLogoBase64();
+      const titleDisplay = contractTitle && contractTitle.trim() ? contractTitle.trim() : `Contract ${contractId}`;
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: buyerEmail,
+        subject: `Confirm Delivery – ${titleDisplay} – ${contractId}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Confirm Delivery</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Confirm Delivery – ${titleDisplay}</h1>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${buyerName},</p>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;"><strong>${supplierName}</strong> has marked the supply contract as delivered and is requesting your confirmation.</p>
+            <p style="font-size: 16px; color: #333; margin: 20px 0;">Contract: <strong>${contractId}</strong></p>
+            <div style="background-color: #e8f4fd; border-radius: 8px; padding: 20px; margin: 30px 0;">
+              <p style="font-size: 14px; color: #333; margin: 0;">Please log in to your Business Suite and confirm delivery so the escrow can be released when applicable.</p>
+            </div>
+            <p style="text-align: center; margin: 30px 0;">
+              <a href="${dashboardOrContractLink}" style="background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">View contract & confirm</a>
+            </p>
+            <p style="font-size: 14px; color: #666; margin: 20px 0;">If you did not expect this email, please ignore it or contact support.</p>
+            <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,<br/>Team TrustiChain</p>
+          </body>
+          </html>
+        `,
+        text: `Dear ${buyerName},\n\n${supplierName} has marked the supply contract as delivered and is requesting your confirmation.\n\nContract: ${contractId}\n\nPlease log in and confirm delivery: ${dashboardOrContractLink}\n\n© ${new Date().getFullYear()} TrustiChain.`,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+      console.log('Supply contract buyer confirmation request email sent:', { id: data?.id, to: buyerEmail });
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send buyer confirmation request email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
 }
 
 export const emailService = new EmailService();

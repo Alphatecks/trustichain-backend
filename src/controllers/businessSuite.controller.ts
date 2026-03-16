@@ -315,6 +315,38 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Mark supply contract as delivered (supplier). POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/mark-delivered
+   */
+  async markSupplyContractDelivered(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const result = await businessSuiteDashboardService.markSupplyContractDelivered(userId, escrowId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Request buyer confirmation (supplier). Sends email to buyer. POST .../escrowed-to-me/:escrowId/request-buyer-confirmation
+   */
+  async requestSupplyContractBuyerConfirmation(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const result = await businessSuiteDashboardService.requestSupplyContractBuyerConfirmation(userId, escrowId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Single supply contract detail for supplier modal (Escrow contract + terms + documents from contractor).
    * GET /api/business-suite/supply-contracts/escrowed-to-me/:escrowId
    */
@@ -446,7 +478,9 @@ export class BusinessSuiteController {
     } catch {
       // use rawUrl
     }
-    if (!decoded.includes('supply-contract-docs') && !decoded.startsWith('supply-contract-docs')) {
+    // Allow any URL/path that references our storage bucket (supply docs and other contract docs live there)
+    const bucketName = 'dispute-evidence';
+    if (!decoded.includes(bucketName) && !decoded.startsWith('supply-contract-docs')) {
       res.status(400).json({ success: false, message: 'Invalid document URL for supply contract', error: 'Invalid url' });
       return;
     }

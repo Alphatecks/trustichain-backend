@@ -3,10 +3,12 @@
  * Summary and activity list for the business suite dashboard (requires business_suite/enterprise or approved business_suite_kyc).
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
 import { walletService } from '../wallet/wallet.service';
 import { trustiscoreService } from '../trustiscore/trustiscore.service';
+import { emailService } from '../email.service';
 import type {
   BusinessSuiteDashboardSummaryResponse,
   BusinessSuiteActivityListResponse,
@@ -38,6 +40,49 @@ const ESCROW_STATUS_TO_ACTIVITY: Record<string, BusinessSuiteActivityStatus> = {
 
 function formatEscrowId(year: number, sequence: number): string {
   return `ESC-${year}-${sequence.toString().padStart(3, '0')}`;
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CONTRACT_ID_REGEX = /^(?:SUPP|SC)-(\d{4})-(\d+)$/i;
+
+/** Resolve escrow identifier (UUID or SUPP-YYYY-NNN / SC-YYYY-NNN) to escrow UUID for counterparty (supplier). */
+async function resolveSupplyContractEscrowIdForCounterparty(
+  client: SupabaseClient,
+  identifier: string,
+  counterpartyUserId: string
+): Promise<string | null> {
+  const trimmed = identifier.trim();
+  if (UUID_REGEX.test(trimmed)) {
+    const { data } = await client
+      .from('escrows')
+      .select('id')
+      .eq('id', trimmed)
+      .eq('counterparty_id', counterpartyUserId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .maybeSingle();
+    return (data as { id: string } | null)?.id ?? null;
+  }
+  const match = trimmed.match(CONTRACT_ID_REGEX);
+  if (!match) return null;
+  const [, yearStr, seqStr] = match;
+  const year = parseInt(yearStr!, 10);
+  const seq = parseInt(seqStr!, 10);
+  if (!year || !seq || seq < 1) return null;
+  const start = `${year}-01-01T00:00:00.000Z`;
+  const end = `${year + 1}-01-01T00:00:00.000Z`;
+  const { data: rows } = await client
+    .from('escrows')
+    .select('id')
+    .eq('counterparty_id', counterpartyUserId)
+    .eq('suite_context', 'business')
+    .eq('transaction_type', 'supply')
+    .gte('created_at', start)
+    .lt('created_at', end)
+    .order('created_at', { ascending: true });
+  const list = (rows || []) as { id: string }[];
+  const row = list[seq - 1];
+  return row?.id ?? null;
 }
 
 /** Normalize contract_document_urls from DB (array or Postgres text[] string like "{url1,url2}"). */
@@ -703,17 +748,21 @@ export class BusinessSuiteDashboardService {
    */
   async getSupplyContractEscrowedToMeDetail(
     userId: string,
-    escrowId: string
+    escrowIdParam: string
   ): Promise<SupplyContractDetailForSupplierResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
     const client = supabaseAdmin!;
+    const escrowId = await resolveSupplyContractEscrowIdForCounterparty(client, escrowIdParam, userId);
+    if (!escrowId) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
     const { data: escrow, error } = await client
       .from('escrows')
       .select(
-        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, payer_name'
+        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, payer_name, delivery_marked_at, buyer_confirmation_requested_at'
       )
       .eq('id', escrowId)
       .eq('counterparty_id', userId)
@@ -785,6 +834,8 @@ export class BusinessSuiteDashboardService {
       canRelease: isLocked,
       expectedReleaseDate: escrow.expected_release_date || escrow.expected_completion_date || null,
       createdAt: escrow.created_at,
+      deliveryMarkedAt: (escrow as { delivery_marked_at?: string | null }).delivery_marked_at ?? null,
+      buyerConfirmationRequestedAt: (escrow as { buyer_confirmation_requested_at?: string | null }).buyer_confirmation_requested_at ?? null,
     };
 
     return {
@@ -792,6 +843,111 @@ export class BusinessSuiteDashboardService {
       message: 'Supply contract detail retrieved',
       data,
     };
+  }
+
+  /**
+   * Mark supply contract as delivered (supplier action). POST .../escrowed-to-me/:escrowId/mark-delivered
+   */
+  async markSupplyContractDelivered(
+    userId: string,
+    escrowIdParam: string
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const escrowId = await resolveSupplyContractEscrowIdForCounterparty(client, escrowIdParam, userId);
+    if (!escrowId) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
+    const { error } = await client
+      .from('escrows')
+      .update({
+        delivery_marked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', escrowId)
+      .eq('counterparty_id', userId);
+    if (error) {
+      return { success: false, message: error.message || 'Failed to update', error: error.message };
+    }
+    return { success: true, message: 'Contract marked as delivered' };
+  }
+
+  /**
+   * Request buyer confirmation (supplier action). Sends email to buyer and sets buyer_confirmation_requested_at.
+   * POST .../escrowed-to-me/:escrowId/request-buyer-confirmation
+   */
+  async requestSupplyContractBuyerConfirmation(
+    userId: string,
+    escrowIdParam: string
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const client = supabaseAdmin!;
+    const escrowId = await resolveSupplyContractEscrowIdForCounterparty(client, escrowIdParam, userId);
+    if (!escrowId) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
+    const { data: escrow, error: fetchErr } = await client
+      .from('escrows')
+      .select('id, user_id, counterparty_id, contract_title, payer_name, counterparty_name, created_at')
+      .eq('id', escrowId)
+      .eq('counterparty_id', userId)
+      .maybeSingle();
+    if (fetchErr || !escrow) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
+    const now = new Date().toISOString();
+    const { error: updateErr } = await client
+      .from('escrows')
+      .update({
+        buyer_confirmation_requested_at: now,
+        updated_at: now,
+      })
+      .eq('id', escrowId)
+      .eq('counterparty_id', userId);
+    if (updateErr) {
+      return { success: false, message: updateErr.message || 'Failed to update', error: updateErr.message };
+    }
+    const createdAt = (escrow as { created_at: string }).created_at;
+    const year = new Date(createdAt).getUTCFullYear();
+    const { count } = await client
+      .from('escrows')
+      .select('id', { count: 'exact', head: true })
+      .eq('counterparty_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .gte('created_at', `${year}-01-01T00:00:00.000Z`)
+      .lte('created_at', createdAt);
+    const seq = count ?? 1;
+    const contractId = `SC-${year}-${String(seq).padStart(3, '0')}`;
+    const contractTitle = (escrow as { contract_title?: string | null }).contract_title ?? null;
+    const supplierName = (escrow as { counterparty_name?: string | null }).counterparty_name || 'Supplier';
+    const buyerUserId = (escrow as { user_id: string }).user_id;
+    const { data: buyerUser } = await client
+      .from('users')
+      .select('email, full_name')
+      .eq('id', buyerUserId)
+      .maybeSingle();
+    const buyerEmail = (buyerUser as { email?: string } | null)?.email;
+    const buyerName = (buyerUser as { full_name?: string } | null)?.full_name || (escrow as { payer_name?: string | null }).payer_name || 'Buyer';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const dashboardOrContractLink = `${frontendUrl}/dashboard`;
+    if (buyerEmail) {
+      await emailService.sendSupplyContractBuyerConfirmationRequest(
+        buyerEmail,
+        buyerName,
+        supplierName,
+        contractTitle,
+        contractId,
+        dashboardOrContractLink
+      ).catch((e) => console.error('[RequestBuyerConfirmation] Email failed:', e));
+    }
+    return { success: true, message: 'Buyer confirmation requested; email sent to buyer' };
   }
 }
 
