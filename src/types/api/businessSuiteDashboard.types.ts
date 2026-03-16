@@ -162,6 +162,8 @@ export interface SupplyContractEscrowedToMeItem {
   /** True if escrow is locked and current user (counterparty or owner) can trigger release (manual or after release day). */
   canRelease: boolean;
   createdAt: string;
+  /** When the supplier marked this supply as delivered (ISO string or null). Use to show "Delivered" vs "Pending" badge. */
+  deliveryMarkedAt: string | null;
   /** Contract document URLs (contractor-uploaded). Present on created-by-me list and detail. */
   contractDocumentUrls?: string[];
 }

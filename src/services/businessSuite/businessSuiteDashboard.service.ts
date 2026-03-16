@@ -699,7 +699,7 @@ export class BusinessSuiteDashboardService {
     const client = supabaseAdmin!;
     const { data: rows, error } = await client
       .from('escrows')
-      .select('id, amount_xrp, amount_usd, status, expected_release_date, expected_completion_date, created_at')
+      .select('id, amount_xrp, amount_usd, status, expected_release_date, expected_completion_date, created_at, delivery_marked_at')
       .eq('counterparty_id', userId)
       .eq('suite_context', 'business')
       .eq('transaction_type', 'supply')
@@ -718,6 +718,7 @@ export class BusinessSuiteDashboardService {
       expected_release_date: string | null;
       expected_completion_date: string | null;
       created_at: string;
+      delivery_marked_at?: string | null;
     }) => {
       const year = new Date(row.created_at).getUTCFullYear();
       const seq = (byYear.get(year) ?? 0) + 1;
@@ -736,6 +737,7 @@ export class BusinessSuiteDashboardService {
         expectedReleaseDate,
         canRelease: isLocked,
         createdAt: row.created_at,
+        deliveryMarkedAt: row.delivery_marked_at ?? null,
       };
     });
     return {
