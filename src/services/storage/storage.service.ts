@@ -50,6 +50,15 @@ const ALLOWED_MIME_TYPES = [
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
+/** Supabase Storage rejects some MIME types (e.g. image/heic). Map to a type it accepts while keeping the file. */
+function getStorageContentType(mimetype: string): string {
+  const lower = (mimetype || '').toLowerCase();
+  if (lower === 'image/heic' || lower === 'image/heif') {
+    return 'application/octet-stream';
+  }
+  return mimetype || 'application/octet-stream';
+}
+
 export interface UploadFileResult {
   success: boolean;
   message: string;
@@ -177,7 +186,7 @@ export class StorageService {
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
         .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
+          contentType: getStorageContentType(file.mimetype),
           upsert: false, // Don't overwrite existing files
         });
 
@@ -256,7 +265,7 @@ export class StorageService {
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
         .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
+          contentType: getStorageContentType(file.mimetype),
           upsert: false,
         });
       if (uploadError || !data) {
@@ -354,7 +363,7 @@ export class StorageService {
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
         .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
+          contentType: getStorageContentType(file.mimetype),
           upsert: true,
         });
       if (uploadError || !data) {
@@ -411,7 +420,7 @@ export class StorageService {
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
         .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
+          contentType: getStorageContentType(file.mimetype),
           upsert: false,
         });
       if (uploadError || !data) {
@@ -468,7 +477,7 @@ export class StorageService {
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
         .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
+          contentType: getStorageContentType(file.mimetype),
           upsert: false,
         });
       if (uploadError || !data) {
@@ -527,7 +536,7 @@ export class StorageService {
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
         .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
+          contentType: getStorageContentType(file.mimetype),
           upsert: false,
         });
       if (uploadError || !data) {
