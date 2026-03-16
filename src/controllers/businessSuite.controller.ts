@@ -387,13 +387,18 @@ export class BusinessSuiteController {
    */
   async releaseSupplyContractEscrow(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const escrowId = req.params.escrowId;
-    if (!escrowId) {
+    const escrowIdParam = req.params.escrowId;
+    if (!escrowIdParam) {
       res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
       return;
     }
+    const resolvedId = await businessSuiteDashboardService.getResolvedEscrowIdForRelease(escrowIdParam, userId);
+    if (!resolvedId) {
+      res.status(404).json({ success: false, message: 'Contract not found or access denied', error: 'Not found' });
+      return;
+    }
     const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
-    const result = await escrowService.releaseEscrow(userId, escrowId, notes);
+    const result = await escrowService.releaseEscrow(userId, resolvedId, notes);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'Escrow not found or access denied') res.status(404).json(result);
     else if (result.error === 'Escrow is already completed') res.status(400).json(result);

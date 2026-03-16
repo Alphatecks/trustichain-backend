@@ -86,6 +86,60 @@ async function resolveSupplyContractEscrowIdForCounterparty(
   return row?.id ?? null;
 }
 
+/** Resolve escrow identifier (UUID or SUPP-YYYY-NNN / SC-YYYY-NNN) to escrow UUID for creator (user_id = userId). */
+async function resolveSupplyContractEscrowIdForCreator(
+  client: SupabaseClient,
+  identifier: string,
+  creatorUserId: string
+): Promise<string | null> {
+  const trimmed = identifier.trim();
+  if (UUID_REGEX.test(trimmed)) {
+    const { data } = await client
+      .from('escrows')
+      .select('id')
+      .eq('id', trimmed)
+      .eq('user_id', creatorUserId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .maybeSingle();
+    return (data as { id: string } | null)?.id ?? null;
+  }
+  const match = trimmed.match(CONTRACT_ID_REGEX);
+  if (!match) return null;
+  const [, yearStr, seqStr] = match;
+  const year = parseInt(yearStr!, 10);
+  const seq = parseInt(seqStr!, 10);
+  if (!year || !seq || seq < 1) return null;
+  const start = `${year}-01-01T00:00:00.000Z`;
+  const end = `${year + 1}-01-01T00:00:00.000Z`;
+  const { data: rows } = await client
+    .from('escrows')
+    .select('id')
+    .eq('user_id', creatorUserId)
+    .eq('suite_context', 'business')
+    .eq('transaction_type', 'supply')
+    .gte('created_at', start)
+    .lt('created_at', end)
+    .order('created_at', { ascending: true });
+  const list = (rows || []) as { id: string }[];
+  const row = list[seq - 1];
+  return row?.id ?? null;
+}
+
+/**
+ * Resolve escrow identifier (UUID or SUPP-YYYY-NNN / SC-YYYY-NNN) to escrow UUID for use in release.
+ * Tries counterparty (supplier) first, then creator (contractor), so release works from either view.
+ */
+async function resolveSupplyContractEscrowIdForRelease(
+  client: SupabaseClient,
+  identifier: string,
+  userId: string
+): Promise<string | null> {
+  const forCounterparty = await resolveSupplyContractEscrowIdForCounterparty(client, identifier, userId);
+  if (forCounterparty) return forCounterparty;
+  return resolveSupplyContractEscrowIdForCreator(client, identifier, userId);
+}
+
 /** Normalize contract_document_urls from DB (array or Postgres text[] string like "{url1,url2}"). */
 function normalizeContractDocumentUrls(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -603,13 +657,17 @@ export class BusinessSuiteDashboardService {
    */
   async getSupplyContractCreatedByMeDetail(
     userId: string,
-    escrowId: string
+    escrowIdParam: string
   ): Promise<SupplyContractDetailForContractorResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
     const client = supabaseAdmin!;
+    const escrowId = await resolveSupplyContractEscrowIdForCreator(client, escrowIdParam, userId);
+    if (!escrowId) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
     const { data: escrow, error } = await client
       .from('escrows')
       .select(
@@ -860,6 +918,15 @@ export class BusinessSuiteDashboardService {
       message: 'Supply contract detail retrieved',
       data,
     };
+  }
+
+  /**
+   * Resolve escrow identifier (UUID or SUPP/SC-YYYY-NNN) to UUID for release. Tries counterparty then creator.
+   * Use before calling escrowService.releaseEscrow so contract ids don't hit the DB as uuid.
+   */
+  async getResolvedEscrowIdForRelease(escrowIdParam: string, userId: string): Promise<string | null> {
+    const client = supabaseAdmin!;
+    return resolveSupplyContractEscrowIdForRelease(client, escrowIdParam, userId);
   }
 
   /**
