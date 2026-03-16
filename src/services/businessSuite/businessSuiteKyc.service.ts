@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
+import { storageService } from '../storage/storage.service';
 import { businessSuiteService } from './businessSuite.service';
 
 const APPROVAL_WORKFLOWS = ['single', 'dual', 'multi'];
@@ -77,6 +78,12 @@ function mapRowToResponse(row: any): BusinessSuiteKycResponse {
   };
 }
 
+/** Resolve stored company logo URL to a signed URL for display (bucket is private). */
+async function resolveCompanyLogoForDisplay(storedUrl: string | null): Promise<string | null> {
+  if (!storedUrl?.trim()) return null;
+  return storageService.getSignedUrlForCompanyLogo(storedUrl.trim(), 3600) ?? null;
+}
+
 export class BusinessSuiteKycService {
   /**
    * Get current business suite KYC for the user. GET /api/business-suite/kyc
@@ -104,24 +111,30 @@ export class BusinessSuiteKycService {
       if (fallback.data.status === 'In review') {
         return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
       }
-      return { success: true, message: 'KYC retrieved', data: mapRowToResponse(fallback.data) };
+      const data = mapRowToResponse(fallback.data);
+      data.companyLogoUrl = await resolveCompanyLogoForDisplay(data.companyLogoUrl);
+      return { success: true, message: 'KYC retrieved', data };
     }
     if (!row) {
       const { data: legacyRow } = await client.from('business_suite_kyc').select('*').eq('user_id', userId).maybeSingle();
       if (legacyRow) {
         await businessSuiteService.ensureBusinessRowSynced(userId).catch(() => {});
-        if (legacyRow.status === 'In review') {
-          return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
-        }
-        return { success: true, message: 'KYC retrieved', data: mapRowToResponse(legacyRow) };
+      if (legacyRow.status === 'In review') {
+        return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
       }
-      return { success: true, message: 'No KYC record yet', data: undefined };
+      const dataLegacy = mapRowToResponse(legacyRow);
+      dataLegacy.companyLogoUrl = await resolveCompanyLogoForDisplay(dataLegacy.companyLogoUrl);
+      return { success: true, message: 'KYC retrieved', data: dataLegacy };
     }
-    if (row.status === 'In review') {
-      return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
-    }
-    return { success: true, message: 'KYC retrieved', data: mapRowToResponse(row) };
+    return { success: true, message: 'No KYC record yet', data: undefined };
   }
+  if (row.status === 'In review') {
+    return { success: false, message: 'Account is under review; access is temporarily suspended.', error: 'Account under review' };
+  }
+  const data = mapRowToResponse(row);
+  data.companyLogoUrl = await resolveCompanyLogoForDisplay(data.companyLogoUrl);
+  return { success: true, message: 'KYC retrieved', data };
+}
 
   /**
    * Submit or update business suite KYC. POST /api/business-suite/kyc
@@ -219,10 +232,12 @@ export class BusinessSuiteKycService {
         { onConflict: 'user_id' }
       );
 
+    const responseData = mapRowToResponse(resultRow);
+    responseData.companyLogoUrl = await resolveCompanyLogoForDisplay(responseData.companyLogoUrl);
     return {
       success: true,
       message: existingBiz ? 'KYC updated and submitted for review' : 'KYC submitted for review',
-      data: mapRowToResponse(resultRow),
+      data: responseData,
     };
   }
 }
