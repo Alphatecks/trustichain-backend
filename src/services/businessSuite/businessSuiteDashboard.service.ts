@@ -547,7 +547,7 @@ export class BusinessSuiteDashboardService {
     const client = supabaseAdmin!;
     const { data: rows, error } = await client
       .from('escrows')
-      .select('id, amount_xrp, amount_usd, status, expected_release_date, expected_completion_date, created_at, contract_document_urls')
+      .select('id, amount_xrp, amount_usd, status, expected_release_date, expected_completion_date, created_at, contract_document_urls, delivery_marked_at')
       .eq('user_id', userId)
       .eq('suite_context', 'business')
       .eq('transaction_type', 'supply')
@@ -566,6 +566,7 @@ export class BusinessSuiteDashboardService {
       expected_completion_date: string | null;
       created_at: string;
       contract_document_urls?: string[] | null;
+      delivery_marked_at?: string | null;
     }) => {
       const year = new Date(row.created_at).getUTCFullYear();
       const seq = (byYear.get(year) ?? 0) + 1;
@@ -585,6 +586,7 @@ export class BusinessSuiteDashboardService {
         expectedReleaseDate,
         canRelease: isLocked,
         createdAt: row.created_at,
+        deliveryMarkedAt: row.delivery_marked_at ?? null,
         contractDocumentUrls: contractDocumentUrls.length > 0 ? contractDocumentUrls : undefined,
       };
     });
@@ -650,6 +652,7 @@ export class BusinessSuiteDashboardService {
 
     const status = escrow.status || 'pending';
     const isLocked = status === 'pending' || status === 'active';
+    const isCompleted = status === 'completed';
 
     const deliveryDeadline = escrow.expected_completion_date
       ? new Date(escrow.expected_completion_date).toISOString()
@@ -666,6 +669,13 @@ export class BusinessSuiteDashboardService {
       currency: 'USDT',
       status,
       fundsVerifiedInEscrow: status === 'active',
+      timeline: {
+        escrowCreated: true,
+        fundsDeposited: status === 'active' || isCompleted,
+        contractAccepted: true,
+        awaitingDelivery: !isCompleted,
+        paymentRelease: isCompleted,
+      },
       deliveryDeadline,
       releaseCondition: escrow.release_conditions || null,
       escrowType: escrow.release_type || null,

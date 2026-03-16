@@ -220,7 +220,7 @@ export interface SupplyContractDetailForSupplierResponse {
   error?: string;
 }
 
-/** Single supply contract detail for contractor modal (creator view; includes uploaded documents). */
+/** Single supply contract detail for contractor modal (creator view; includes uploaded documents and supplier evidence). */
 export interface SupplyContractDetailForContractor {
   escrowId: string;
   contractId: string;
@@ -230,6 +230,14 @@ export interface SupplyContractDetailForContractor {
   currency: string;
   status: string;
   fundsVerifiedInEscrow: boolean;
+  /** For CONTRACT TIMELINE: Escrow Created, Funds Deposited, Contract Accepted, Awaiting Delivery, Payment Release. */
+  timeline: {
+    escrowCreated: boolean;
+    fundsDeposited: boolean;
+    contractAccepted: boolean;
+    awaitingDelivery: boolean;
+    paymentRelease: boolean;
+  };
   deliveryDeadline: string | null;
   releaseCondition: string | null;
   escrowType: string | null;
@@ -238,7 +246,7 @@ export interface SupplyContractDetailForContractor {
   deliveryMethod: string | null;
   /** Document URLs uploaded by contractor when creating the contract. */
   contractDocumentUrls: string[];
-  /** Proof-of-completion document URLs uploaded by the supplier. */
+  /** Evidence/documents uploaded by the supplier (proof of completion). Use for EVIDENCE / DOCUMENTS section. */
   proofOfCompletionDocumentUrls: string[];
   canRelease: boolean;
   expectedReleaseDate: string | null;
