@@ -60,7 +60,8 @@ export class StorageService {
   /**
    * Validate file before upload
    */
-  private validateFile(file: Express.Multer.File): { valid: boolean; error?: string } {
+  /** Minimal file shape used by uploadSupplyCompletionDocument (avoids multer type in services). */
+  private validateFile(file: Express.Multer.File | { buffer: Buffer; originalname: string; mimetype: string; size: number } | null | undefined): { valid: boolean; error?: string } {
     if (!file) {
       return { valid: false, error: 'No file provided' };
     }
@@ -415,6 +416,65 @@ export class StorageService {
       return {
         success: true,
         message: 'Contract document uploaded successfully',
+        data: {
+          fileUrl,
+          filePath: data.path,
+          fileName: file.originalname,
+          fileSize: file.size,
+          fileType: file.mimetype,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to upload document',
+        error: error instanceof Error ? error.message : 'Failed to upload document',
+      };
+    }
+  }
+
+  /**
+   * Upload supplier proof-of-completion document (supplier only, for a supply contract).
+   * Path: supply-completion-docs/{escrowId}/{userId}/...
+   */
+  async uploadSupplyCompletionDocument(
+    escrowId: string,
+    userId: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number }
+  ): Promise<UploadFileResult> {
+    try {
+      const validation = this.validateFile(file);
+      if (!validation.valid) {
+        return {
+          success: false,
+          message: validation.error || 'File validation failed',
+          error: validation.error || 'File validation failed',
+        };
+      }
+      await this.ensureBucketExists();
+      const adminClient = supabaseAdmin || supabase;
+      if (!adminClient) {
+        return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
+      }
+      const filePath = `supply-completion-docs/${escrowId}/${this.generateFilePath(userId, file.originalname)}`;
+      const { data, error: uploadError } = await adminClient.storage
+        .from(this.BUCKET_NAME)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+      if (uploadError || !data) {
+        return {
+          success: false,
+          message: uploadError?.message || 'Failed to upload document',
+          error: uploadError?.message || 'Upload failed',
+        };
+      }
+      const { data: urlData } = adminClient.storage.from(this.BUCKET_NAME).getPublicUrl(data.path);
+      const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
+      return {
+        success: true,
+        message: 'Proof of completion document uploaded successfully',
         data: {
           fileUrl,
           filePath: data.path,

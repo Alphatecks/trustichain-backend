@@ -207,6 +207,8 @@ export interface SupplyContractDetailForSupplier {
   deliveryMarkedAt: string | null;
   /** When the supplier requested buyer confirmation (ISO string or null). */
   buyerConfirmationRequestedAt: string | null;
+  /** URLs of proof-of-completion documents uploaded by the supplier. */
+  proofOfCompletionDocumentUrls: string[];
 }
 
 export interface SupplyContractDetailForSupplierResponse {
@@ -234,6 +236,8 @@ export interface SupplyContractDetailForContractor {
   deliveryMethod: string | null;
   /** Document URLs uploaded by contractor when creating the contract. */
   contractDocumentUrls: string[];
+  /** Proof-of-completion document URLs uploaded by the supplier. */
+  proofOfCompletionDocumentUrls: string[];
   canRelease: boolean;
   expectedReleaseDate: string | null;
   createdAt: string;

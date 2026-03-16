@@ -347,6 +347,24 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Upload proof-of-completion document (supplier). POST .../escrowed-to-me/:escrowId/documents/upload-completion
+   */
+  async uploadSupplierCompletionDocument(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const escrowId = req.params.escrowId;
+    const file = req.file;
+    if (!escrowId) {
+      res.status(400).json({ success: false, message: 'Escrow ID required', error: 'Missing escrowId' });
+      return;
+    }
+    const result = await businessSuiteDashboardService.uploadSupplierCompletionDocument(userId, escrowId, file);
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'Missing file') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Single supply contract detail for supplier modal (Escrow contract + terms + documents from contractor).
    * GET /api/business-suite/supply-contracts/escrowed-to-me/:escrowId
    */
@@ -480,7 +498,7 @@ export class BusinessSuiteController {
     }
     // Allow any URL/path that references our storage bucket (supply docs and other contract docs live there)
     const bucketName = 'dispute-evidence';
-    if (!decoded.includes(bucketName) && !decoded.startsWith('supply-contract-docs')) {
+    if (!decoded.includes(bucketName) && !decoded.startsWith('supply-contract-docs') && !decoded.includes('supply-completion-docs')) {
       res.status(400).json({ success: false, message: 'Invalid document URL for supply contract', error: 'Invalid url' });
       return;
     }

@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../config/supabase';
+import { storageService } from '../storage/storage.service';
 import { businessSuiteService } from './businessSuite.service';
 import { walletService } from '../wallet/wallet.service';
 import { trustiscoreService } from '../trustiscore/trustiscore.service';
@@ -610,7 +611,7 @@ export class BusinessSuiteDashboardService {
     const { data: escrow, error } = await client
       .from('escrows')
       .select(
-        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, counterparty_name'
+        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, counterparty_name, supplier_completion_document_urls'
       )
       .eq('id', escrowId)
       .eq('user_id', userId)
@@ -654,6 +655,7 @@ export class BusinessSuiteDashboardService {
       ? new Date(escrow.expected_completion_date).toISOString()
       : null;
     const contractDocumentUrls = normalizeContractDocumentUrls(escrow.contract_document_urls);
+    const proofOfCompletionDocumentUrls = normalizeContractDocumentUrls((escrow as { supplier_completion_document_urls?: string[] | null }).supplier_completion_document_urls);
 
     const data: SupplyContractDetailForContractor = {
       escrowId: escrow.id,
@@ -671,6 +673,7 @@ export class BusinessSuiteDashboardService {
       contractTitle: escrow.contract_title || null,
       deliveryMethod: escrow.delivery_method || null,
       contractDocumentUrls,
+      proofOfCompletionDocumentUrls,
       canRelease: isLocked,
       expectedReleaseDate: escrow.expected_release_date || escrow.expected_completion_date || null,
       createdAt: escrow.created_at,
@@ -762,7 +765,7 @@ export class BusinessSuiteDashboardService {
     const { data: escrow, error } = await client
       .from('escrows')
       .select(
-        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, payer_name, delivery_marked_at, buyer_confirmation_requested_at'
+        'id, user_id, counterparty_id, amount_xrp, amount_usd, status, created_at, expected_completion_date, expected_release_date, release_conditions, release_type, dispute_resolution_period, contract_title, delivery_method, contract_document_urls, payer_name, delivery_marked_at, buyer_confirmation_requested_at, supplier_completion_document_urls'
       )
       .eq('id', escrowId)
       .eq('counterparty_id', userId)
@@ -807,6 +810,7 @@ export class BusinessSuiteDashboardService {
       ? new Date(escrow.expected_completion_date).toISOString()
       : null;
     const documentsFromContractor = normalizeContractDocumentUrls(escrow.contract_document_urls);
+    const proofOfCompletionDocumentUrls = normalizeContractDocumentUrls((escrow as { supplier_completion_document_urls?: string[] | null }).supplier_completion_document_urls);
 
     const data: SupplyContractDetailForSupplier = {
       escrowId: escrow.id,
@@ -836,6 +840,7 @@ export class BusinessSuiteDashboardService {
       createdAt: escrow.created_at,
       deliveryMarkedAt: (escrow as { delivery_marked_at?: string | null }).delivery_marked_at ?? null,
       buyerConfirmationRequestedAt: (escrow as { buyer_confirmation_requested_at?: string | null }).buyer_confirmation_requested_at ?? null,
+      proofOfCompletionDocumentUrls,
     };
 
     return {
@@ -948,6 +953,60 @@ export class BusinessSuiteDashboardService {
       ).catch((e) => console.error('[RequestBuyerConfirmation] Email failed:', e));
     }
     return { success: true, message: 'Buyer confirmation requested; email sent to buyer' };
+  }
+
+  /**
+   * Upload proof-of-completion document (supplier action). Appends URL to escrow.supplier_completion_document_urls.
+   * POST .../escrowed-to-me/:escrowId/documents/upload-completion
+   */
+  async uploadSupplierCompletionDocument(
+    userId: string,
+    escrowIdParam: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number } | undefined
+  ): Promise<{ success: boolean; message: string; data?: { fileUrl: string }; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    if (!file || !file.buffer) {
+      return { success: false, message: 'No document file provided', error: 'Missing file' };
+    }
+    const client = supabaseAdmin!;
+    const escrowId = await resolveSupplyContractEscrowIdForCounterparty(client, escrowIdParam, userId);
+    if (!escrowId) {
+      return { success: false, message: 'Contract not found or access denied', error: 'Not found' };
+    }
+    const uploadResult = await storageService.uploadSupplyCompletionDocument(escrowId, userId, file);
+    if (!uploadResult.success || !uploadResult.data?.fileUrl) {
+      return {
+        success: false,
+        message: uploadResult.message || 'Upload failed',
+        error: uploadResult.error || uploadResult.message,
+      };
+    }
+    const fileUrl = uploadResult.data.fileUrl;
+    const { data: row } = await client
+      .from('escrows')
+      .select('supplier_completion_document_urls')
+      .eq('id', escrowId)
+      .eq('counterparty_id', userId)
+      .maybeSingle();
+    const existing: string[] = Array.isArray((row as { supplier_completion_document_urls?: string[] } | null)?.supplier_completion_document_urls)
+      ? (row as { supplier_completion_document_urls: string[] }).supplier_completion_document_urls.filter((u): u is string => typeof u === 'string')
+      : [];
+    const combined = [...existing, fileUrl];
+    const { error: updateErr } = await client
+      .from('escrows')
+      .update({
+        supplier_completion_document_urls: combined,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', escrowId)
+      .eq('counterparty_id', userId);
+    if (updateErr) {
+      return { success: false, message: updateErr.message || 'Failed to save document link', error: updateErr.message };
+    }
+    return { success: true, message: 'Proof of completion document uploaded', data: { fileUrl } };
   }
 }
 

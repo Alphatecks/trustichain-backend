@@ -170,6 +170,15 @@ router.post('/supply-contracts/escrowed-to-me/:escrowId/request-buyer-confirmati
 }));
 
 /**
+ * @route   POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/documents/upload-completion
+ * @desc    Upload a proof-of-completion document (supplier). Multipart field: document.
+ * @access  Private (business suite only)
+ */
+router.post('/supply-contracts/escrowed-to-me/:escrowId/documents/upload-completion', authenticate, upload.single('document'), asyncHandler(async (req, res) => {
+  await businessSuiteController.uploadSupplierCompletionDocument(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/supply-contracts/escrowed-to-me/:escrowId/release
  * @desc    Release a supplier contract escrow (locked funds). Counterparty or owner can release manually or on/after the release day set at creation.
  * @access  Private (business suite only)
