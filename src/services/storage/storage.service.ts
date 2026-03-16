@@ -3,19 +3,22 @@
  * Handles file uploads to Supabase Storage
  */
 
+import convert from 'heic-convert';
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
-// Image-only for company logo upload
-const IMAGE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+// Image-only for company logo upload (HEIC/HEIF are converted to JPEG in prepareFileForUpload)
+const IMAGE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
 
-// Business KYC documents: PDF or image (Identity, Address, Enhanced Due Diligence)
+// Business KYC documents: PDF or image (Identity, Address, Enhanced Due Diligence). HEIC/HEIF converted to JPEG in prepareFileForUpload
 const KYC_DOCUMENT_MIME_TYPES = [
   'image/jpeg',
   'image/jpg',
   'image/png',
   'image/gif',
   'image/webp',
+  'image/heic',
+  'image/heif',
   'application/pdf',
 ];
 
@@ -50,13 +53,10 @@ const ALLOWED_MIME_TYPES = [
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
-/** Supabase Storage rejects some MIME types (e.g. image/heic). Map to a type it accepts while keeping the file. */
-function getStorageContentType(mimetype: string): string {
-  const lower = (mimetype || '').toLowerCase();
-  if (lower === 'image/heic' || lower === 'image/heif') {
-    return 'application/octet-stream';
-  }
-  return mimetype || 'application/octet-stream';
+export interface PreparedFile {
+  buffer: Buffer;
+  contentType: string;
+  fileName: string;
 }
 
 export interface UploadFileResult {
@@ -100,6 +100,43 @@ export class StorageService {
     }
 
     return { valid: true };
+  }
+
+  /**
+   * Prepare file for upload: convert HEIC/HEIF to JPEG so Supabase Storage accepts it (it rejects image/heic and application/octet-stream).
+   */
+  private async prepareFileForUpload(
+    file: Express.Multer.File | { buffer: Buffer; originalname: string; mimetype: string; size: number }
+  ): Promise<PreparedFile> {
+    const lower = (file.mimetype || '').toLowerCase();
+    if (lower === 'image/heic' || lower === 'image/heif') {
+      try {
+        const arrayBuffer = file.buffer.buffer.slice(
+          file.buffer.byteOffset,
+          file.buffer.byteOffset + file.buffer.byteLength
+        );
+        const output = await convert({
+          buffer: arrayBuffer,
+          format: 'JPEG',
+          quality: 0.92,
+        });
+        const jpegBuffer = Buffer.isBuffer(output) ? output : Buffer.from(output as ArrayBuffer);
+        const baseName = file.originalname.replace(/\.[^.]+$/i, '') || 'image';
+        return {
+          buffer: jpegBuffer,
+          contentType: 'image/jpeg',
+          fileName: `${baseName}.jpg`,
+        };
+      } catch (err) {
+        console.error('HEIC conversion failed:', err);
+        throw new Error('HEIC conversion failed; file may be corrupted or unsupported.');
+      }
+    }
+    return {
+      buffer: file.buffer,
+      contentType: file.mimetype || 'application/octet-stream',
+      fileName: file.originalname,
+    };
   }
 
   /**
@@ -179,15 +216,14 @@ export class StorageService {
         };
       }
 
-      // Generate unique file path
-      const filePath = this.generateFilePath(userId, file.originalname);
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = this.generateFilePath(userId, prepared.fileName);
 
-      // Upload file to Supabase Storage
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
-        .upload(filePath, file.buffer, {
-          contentType: getStorageContentType(file.mimetype),
-          upsert: false, // Don't overwrite existing files
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
+          upsert: false,
         });
 
       if (uploadError || !data) {
@@ -199,14 +235,9 @@ export class StorageService {
         };
       }
 
-      // Get public URL (or signed URL for private buckets)
-      // For private buckets, we'll use the path and generate signed URLs when needed
       const { data: urlData } = adminClient.storage
         .from(this.BUCKET_NAME)
         .getPublicUrl(data.path);
-
-      // For private buckets, we return the path and can generate signed URLs later
-      // For now, we'll use the path as the identifier
       const fileUrl = urlData.publicUrl || `${this.BUCKET_NAME}/${data.path}`;
 
       return {
@@ -215,9 +246,9 @@ export class StorageService {
         data: {
           fileUrl,
           filePath: data.path,
-          fileName: file.originalname,
-          fileSize: file.size,
-          fileType: file.mimetype,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
         },
       };
     } catch (error) {
@@ -252,7 +283,7 @@ export class StorageService {
       if (!IMAGE_MIME_TYPES.includes(file.mimetype)) {
         return {
           success: false,
-          message: 'Only images are allowed (JPEG, PNG, GIF, WebP)',
+          message: 'Only images are allowed (JPEG, PNG, GIF, WebP, HEIC)',
           error: 'Invalid file type',
         };
       }
@@ -261,11 +292,12 @@ export class StorageService {
         return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
       }
       await this.ensureBucketExists();
-      const filePath = `business-suite-logos/${this.generateFilePath(userId, file.originalname)}`;
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = `business-suite-logos/${this.generateFilePath(userId, prepared.fileName)}`;
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
-        .upload(filePath, file.buffer, {
-          contentType: getStorageContentType(file.mimetype),
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
           upsert: false,
         });
       if (uploadError || !data) {
@@ -275,7 +307,6 @@ export class StorageService {
           error: uploadError?.message || 'Upload failed',
         };
       }
-      // Store bucket+path (bucket is private – use getSignedUrl when serving; do not store public URL)
       const fileUrl = `${this.BUCKET_NAME}/${data.path}`;
       return {
         success: true,
@@ -283,9 +314,9 @@ export class StorageService {
         data: {
           fileUrl,
           filePath: data.path,
-          fileName: file.originalname,
-          fileSize: file.size,
-          fileType: file.mimetype,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
         },
       };
     } catch (error) {
@@ -350,7 +381,7 @@ export class StorageService {
       if (!KYC_DOCUMENT_MIME_TYPES.includes(file.mimetype)) {
         return {
           success: false,
-          message: 'Only PDF or images are allowed (JPEG, PNG, GIF, WebP, PDF)',
+          message: 'Only PDF or images are allowed (JPEG, PNG, GIF, WebP, HEIC, PDF)',
           error: 'Invalid file type',
         };
       }
@@ -359,11 +390,12 @@ export class StorageService {
         return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
       }
       await this.ensureBucketExists();
-      const filePath = `business-kyc-docs/${userId}/${type}/${this.generateFilePath(userId, file.originalname)}`;
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = `business-kyc-docs/${userId}/${type}/${this.generateFilePath(userId, prepared.fileName)}`;
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
-        .upload(filePath, file.buffer, {
-          contentType: getStorageContentType(file.mimetype),
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
           upsert: true,
         });
       if (uploadError || !data) {
@@ -380,9 +412,9 @@ export class StorageService {
         data: {
           fileUrl,
           filePath: data.path,
-          fileName: file.originalname,
-          fileSize: file.size,
-          fileType: file.mimetype,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
         },
       };
     } catch (error) {
@@ -416,11 +448,12 @@ export class StorageService {
       if (!adminClient) {
         return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
       }
-      const filePath = `supply-contract-docs/${this.generateFilePath(userId, file.originalname)}`;
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = `supply-contract-docs/${this.generateFilePath(userId, prepared.fileName)}`;
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
-        .upload(filePath, file.buffer, {
-          contentType: getStorageContentType(file.mimetype),
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
           upsert: false,
         });
       if (uploadError || !data) {
@@ -438,9 +471,9 @@ export class StorageService {
         data: {
           fileUrl,
           filePath: data.path,
-          fileName: file.originalname,
-          fileSize: file.size,
-          fileType: file.mimetype,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
         },
       };
     } catch (error) {
@@ -473,11 +506,12 @@ export class StorageService {
       if (!adminClient) {
         return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
       }
-      const filePath = `payroll-dispute-evidence/${this.generateFilePath(userId, file.originalname)}`;
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = `payroll-dispute-evidence/${this.generateFilePath(userId, prepared.fileName)}`;
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
-        .upload(filePath, file.buffer, {
-          contentType: getStorageContentType(file.mimetype),
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
           upsert: false,
         });
       if (uploadError || !data) {
@@ -495,9 +529,9 @@ export class StorageService {
         data: {
           fileUrl,
           filePath: data.path,
-          fileName: file.originalname,
-          fileSize: file.size,
-          fileType: file.mimetype,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
         },
       };
     } catch (error) {
@@ -532,11 +566,12 @@ export class StorageService {
       if (!adminClient) {
         return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
       }
-      const filePath = `supply-completion-docs/${escrowId}/${this.generateFilePath(userId, file.originalname)}`;
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = `supply-completion-docs/${escrowId}/${this.generateFilePath(userId, prepared.fileName)}`;
       const { data, error: uploadError } = await adminClient.storage
         .from(this.BUCKET_NAME)
-        .upload(filePath, file.buffer, {
-          contentType: getStorageContentType(file.mimetype),
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
           upsert: false,
         });
       if (uploadError || !data) {
@@ -554,9 +589,9 @@ export class StorageService {
         data: {
           fileUrl,
           filePath: data.path,
-          fileName: file.originalname,
-          fileSize: file.size,
-          fileType: file.mimetype,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
         },
       };
     } catch (error) {
