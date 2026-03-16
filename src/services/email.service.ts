@@ -12,11 +12,22 @@ const resend = process.env.RESEND_API_KEY
 
 export class EmailService {
   /**
-   * Get logo as base64 data URI
+   * Get logo as base64 data URI. Resolves path from project root (works when run from dist/ or any cwd).
    */
   private getLogoBase64(): string {
     try {
-      const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+      // From dist/services/ or src/services/ go up to project root, then assets/logo.png
+      const projectRoot = path.join(__dirname, '..', '..');
+      const logoPath = path.join(projectRoot, 'assets', 'logo.png');
+      if (!fs.existsSync(logoPath)) {
+        const cwdPath = path.join(process.cwd(), 'assets', 'logo.png');
+        if (fs.existsSync(cwdPath)) {
+          const logoBuffer = fs.readFileSync(cwdPath);
+          return `data:image/png;base64,${logoBuffer.toString('base64')}`;
+        }
+        console.error('Logo file not found at', logoPath, 'or', cwdPath);
+        return '';
+      }
       const logoBuffer = fs.readFileSync(logoPath);
       return `data:image/png;base64,${logoBuffer.toString('base64')}`;
     } catch (error) {
