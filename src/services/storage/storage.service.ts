@@ -19,23 +19,33 @@ const KYC_DOCUMENT_MIME_TYPES = [
   'application/pdf',
 ];
 
-// Allowed file types for dispute evidence
+// Allowed file types for dispute evidence (payroll, supplier, and general uploads)
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/jpg',
   'image/png',
   'image/gif',
   'image/webp',
+  'image/heic',
+  'image/heif',
   'application/pdf',
-  'application/msword',
+  'application/msword', // .doc
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/rtf',
   'text/plain',
+  'text/csv',
+  'application/csv',
+  'application/vnd.ms-excel', // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.oasis.opendocument.text', // .odt
+  'application/vnd.oasis.opendocument.spreadsheet', // .ods
   'application/zip',
   'application/x-zip-compressed',
   'video/mp4',
   'video/quicktime',
   'audio/mpeg',
   'audio/wav',
+  'audio/x-wav',
 ];
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
