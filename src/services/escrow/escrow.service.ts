@@ -123,6 +123,7 @@ export class EscrowService {
       payer_email?: string | null;
       counterparty_email?: string | null;
       payer_name?: string | null;
+      counterparty_name?: string | null;
       amount_xrp: string;
       amount_usd: string;
     },
@@ -132,9 +133,15 @@ export class EscrowService {
     const adminClient = supabaseAdmin || supabase;
     const amountXrp = parseFloat(updatedEscrow.amount_xrp);
     const amountUsd = parseFloat(updatedEscrow.amount_usd);
-    const payerName = partyNames[updatedEscrow.user_id] || updatedEscrow.payer_name || 'User';
+    // Prefer escrow payer_name/counterparty_name (business names for supply) over partyNames (personal)
+    const payerName =
+      (updatedEscrow.payer_name && updatedEscrow.payer_name.trim()) ||
+      partyNames[updatedEscrow.user_id] ||
+      'User';
     const counterpartyName = updatedEscrow.counterparty_id
-      ? (partyNames[updatedEscrow.counterparty_id] || 'Counterparty')
+      ? ((updatedEscrow.counterparty_name && updatedEscrow.counterparty_name.trim()) ||
+          partyNames[updatedEscrow.counterparty_id] ||
+          'Counterparty')
       : undefined;
 
     let payerEmail = updatedEscrow.payer_email || undefined;
