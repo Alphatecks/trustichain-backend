@@ -197,6 +197,24 @@ router.post('/supplier-disputes', authenticate, asyncHandler(async (req, res) =>
 }));
 
 /**
+ * @route   POST /api/business-suite/payroll-disputes
+ * @desc    File payroll dispute. Body: payrollId (UUID), reason, amount, currency (default USD), description, evidence? (optional array of { fileUrl, fileName, fileType?, fileSize? }).
+ * @access  Private (business suite only)
+ */
+router.post('/payroll-disputes', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.filePayrollDispute(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/payroll-disputes/evidence/upload
+ * @desc    Upload one evidence file for payroll dispute. Multipart field: document. Returns { fileUrl, fileName } to add to evidence array when submitting dispute.
+ * @access  Private (business suite only)
+ */
+router.post('/payroll-disputes/evidence/upload', authenticate, upload.single('document'), asyncHandler(async (req, res) => {
+  await businessSuiteController.uploadPayrollDisputeEvidence(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/supply-contracts
  * @desc    Create supplier contract (Contract Info + Payment Terms from modal). Body: supplierName, supplierWalletAddress, contractTitle, deliveryMethod, disputeWindow, paymentAmount, currency, escrowType, releaseCondition, contractDocumentUrls (optional), etc.
  * @access  Private (business suite only)

@@ -172,3 +172,20 @@ export interface BusinessPayrollTransactionDetailResponse {
   data?: PayrollTransactionListItem & { counterpartyEmail: string; escrowId: string | null };
   error?: string;
 }
+
+/** File payroll dispute form: Payroll ID, reason, amount, currency, description, optional evidence. */
+export interface FilePayrollDisputeRequest {
+  payrollId: string;
+  reason: string;
+  amount: number;
+  currency?: string;
+  description: string;
+  evidence?: Array<{ fileUrl: string; fileName: string; fileType?: string; fileSize?: number }>;
+}
+
+export interface FilePayrollDisputeResponse {
+  success: boolean;
+  message: string;
+  data?: { disputeId: string };
+  error?: string;
+}

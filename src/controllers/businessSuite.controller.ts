@@ -6,6 +6,7 @@ import { businessSuitePayrollsService } from '../services/businessSuite/business
 import { businessSuiteSuppliersService } from '../services/businessSuite/businessSuiteSuppliers.service';
 import { businessSuiteSupplyContractsService } from '../services/businessSuite/businessSuiteSupplyContracts.service';
 import { businessSuiteSupplierDisputesService } from '../services/businessSuite/businessSuiteSupplierDisputes.service';
+import { businessSuitePayrollDisputesService } from '../services/businessSuite/businessSuitePayrollDisputes.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
 import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
@@ -763,8 +764,47 @@ export class BusinessSuiteController {
     if (!payrollId) { res.status(400).json({ success: false, message: 'Payroll ID required' }); return; }
     const result = await businessSuitePayrollsService.releasePayroll(userId, payrollId);
     if (result.success) res.status(200).json(result);
-    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'Payroll not found') res.status(404).json(result);
     else res.status(400).json(result);
+  }
+
+  /** File payroll dispute. POST /api/business-suite/payroll-disputes */
+  async filePayrollDispute(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuitePayrollDisputesService.filePayrollDispute(userId, (req.body || {}) as import('../types/api/businessSuitePayrolls.types').FilePayrollDisputeRequest);
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'Payroll not found' || result.error === 'Access denied') res.status(404).json(result);
+    else res.status(400).json(result);
+  }
+
+  /** Upload payroll dispute evidence file. POST /api/business-suite/payroll-disputes/evidence/upload. Multipart field: document. Returns { fileUrl, fileName } for evidence array. */
+  async uploadPayrollDisputeEvidence(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const access = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      res.status(403).json({ success: false, message: access.error ?? 'Business suite required', error: access.error });
+      return;
+    }
+    const file = req.file;
+    if (!file || !file.buffer) {
+      res.status(400).json({ success: false, message: 'No file provided. Send multipart form with field "document".', error: 'Missing file' });
+      return;
+    }
+    const result = await storageService.uploadPayrollDisputeEvidence(userId, file);
+    if (result.success && result.data) {
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: {
+          fileUrl: result.data.fileUrl,
+          fileName: result.data.fileName,
+          fileSize: result.data.fileSize,
+          fileType: result.data.fileType,
+        },
+      });
+    } else {
+      res.status(400).json({ success: false, message: result.message ?? 'Upload failed', error: result.error });
+    }
   }
 
   /** Business suite wallet balance (separate XRP wallet). GET /api/business-suite/wallet/balance */
