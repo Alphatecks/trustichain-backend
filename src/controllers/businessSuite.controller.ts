@@ -294,6 +294,18 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Create a new API key (Create New API Key modal). keySecret returned only once.
+   * POST /api/business-suite/api-keys
+   */
+  async createApiKey(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteApiKeysService.createApiKey(userId, req.body || {});
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'No business' || result.error === 'Validation') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Supply contracts created by this business (creator view). Use for supply status list with release.
    * GET /api/business-suite/supply-contracts/created-by-me
    */

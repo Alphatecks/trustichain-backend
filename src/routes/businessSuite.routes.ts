@@ -89,6 +89,15 @@ router.get('/supply-contracts/overview', authenticate, asyncHandler(async (req, 
 }));
 
 /**
+ * @route   POST /api/business-suite/api-keys
+ * @desc    Create new API key (Create New API Key modal). Body: keyLabel, environment, permission, allowedIpAddresses?, expirationDate?, rotateKeyAutomatically?, restrictToServices?. Returns keySecret once.
+ * @access  Private (business suite only)
+ */
+router.post('/api-keys', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createApiKey(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/api-keys/overview
  * @desc    API Keys page overview: totalActiveKeys, apiRequests, failedRequests, avgLatencyMs (with trends and period).
  * @access  Private (business suite only)
