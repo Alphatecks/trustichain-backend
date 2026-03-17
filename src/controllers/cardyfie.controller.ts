@@ -129,7 +129,11 @@ export class CardyfieController {
         }
         res.status(201).json(result);
       } else {
-        res.status(400).json(result);
+        res.status(400).json({
+          success: false,
+          message: 'Failed to create customer',
+          error: result.message ?? 'Unknown error',
+        });
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Internal server error';
