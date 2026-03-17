@@ -89,6 +89,15 @@ router.get('/supply-contracts/overview', authenticate, asyncHandler(async (req, 
 }));
 
 /**
+ * @route   GET /api/business-suite/api-keys/overview
+ * @desc    API Keys page overview: totalActiveKeys, apiRequests, failedRequests, avgLatencyMs (with trends and period).
+ * @access  Private (business suite only)
+ */
+router.get('/api-keys/overview', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getApiKeysOverview(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/for-supplier
  * @desc    View new supply contract – supplier only. Contracts escrowed to this business (counterparty). Call this for the supplier view.
  * @access  Private (business suite only)

@@ -8,6 +8,7 @@ import { businessSuiteSupplyContractsService } from '../services/businessSuite/b
 import { businessSuiteSupplierDisputesService } from '../services/businessSuite/businessSuiteSupplierDisputes.service';
 import { businessSuitePayrollDisputesService } from '../services/businessSuite/businessSuitePayrollDisputes.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
+import { businessSuiteApiKeysService } from '../services/businessSuite/businessSuiteApiKeys.service';
 import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
 import { storageService } from '../services/storage/storage.service';
@@ -277,6 +278,18 @@ export class BusinessSuiteController {
     const userId = req.userId!;
     const result = await businessSuiteDashboardService.getSupplierContractOverview(userId);
     if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * API Keys overview stats (Total Active Keys, API Requests, Failed Requests, Avg Latency).
+   * GET /api/business-suite/api-keys/overview
+   */
+  async getApiKeysOverview(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteApiKeysService.getApiKeysOverview(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
     else res.status(403).json(result);
   }
 
