@@ -15,6 +15,7 @@ import { storageService } from '../services/storage/storage.service';
 import { escrowService } from '../services/escrow/escrow.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
+import type { ListApiKeysQuery } from '../types/api/businessSuiteApiKeys.types';
 
 export class BusinessSuiteController {
   /**
@@ -311,11 +312,11 @@ export class BusinessSuiteController {
    */
   async listApiKeys(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const query = {
-      type: req.query.type as string | undefined,
-      month: req.query.month as string | undefined,
-      page: req.query.page as string | undefined,
-      pageSize: req.query.pageSize as string | undefined,
+    const query: ListApiKeysQuery = {
+      type: req.query.type as ListApiKeysQuery['type'],
+      month: typeof req.query.month === 'string' ? req.query.month : undefined,
+      page: req.query.page != null ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : undefined,
     };
     const result = await businessSuiteApiKeysService.listApiKeys(userId, query);
     if (result.success) res.status(200).json(result);
