@@ -16,11 +16,28 @@ import type {
   ApiKeyEnvironment,
   ApiKeyPermission,
   ApiKeyServiceScope,
+  ApiKeyType,
+  ListApiKeysQuery,
+  ListApiKeysResponse,
+  ApiKeyListItem,
+  GetApiKeyDetailResponse,
+  ApiKeyDetailItem,
+  UpdateApiKeyRequest,
+  UpdateApiKeyResponse,
+  RegenerateApiKeyResponse,
+  DeleteApiKeyResponse,
 } from '../../types/api/businessSuiteApiKeys.types';
 
 const ENVIRONMENTS: ApiKeyEnvironment[] = ['development', 'staging', 'production'];
 const PERMISSIONS: ApiKeyPermission[] = ['read', 'write', 'admin'];
 const SERVICE_SCOPES: ApiKeyServiceScope[] = ['payroll', 'escrow', 'supplier', 'transfer'];
+const KEY_TYPES: ApiKeyType[] = ['main', 'mobile', 'backend'];
+
+function permissionDisplay(p: ApiKeyPermission): string {
+  if (p === 'admin') return 'Full Access';
+  if (p === 'write') return 'Read / Write';
+  return 'Read only';
+}
 
 /** IPv4 or IPv4/CIDR (e.g. 192.168.1.1 or 10.0.0.0/24). */
 const IP_OR_CIDR_REGEX = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\/(?:3[0-2]|[12]?[0-9]))?$/;
@@ -230,6 +247,9 @@ export class BusinessSuiteApiKeysService {
     const rotateAutomatically = Boolean(body.rotateKeyAutomatically);
     const serviceScopes = normalizeServiceScopes(body.restrictToServices);
 
+    const keyType =
+      body.keyType && KEY_TYPES.includes(body.keyType) ? body.keyType : ('main' as ApiKeyType);
+
     const envPrefix = environment === 'production' ? 'live' : environment === 'staging' ? 'staging' : 'dev';
     const secretPart = crypto.randomBytes(32).toString('hex');
     const keySecret = `tch_${envPrefix}_${secretPart}`;
@@ -245,6 +265,7 @@ export class BusinessSuiteApiKeysService {
         key_prefix: keyPrefix,
         key_hash: keyHash,
         is_active: true,
+        key_type: keyType,
         environment,
         permission,
         allowed_ips: allowedIps,
@@ -279,6 +300,330 @@ export class BusinessSuiteApiKeysService {
         serviceScopes,
         createdAt: created.created_at,
       },
+    };
+  }
+
+  /**
+   * List API keys for the dashboard table. Filter by key type (All / Main / Mobile / Backend) and optional month.
+   * GET /api/business-suite/api-keys?type=main|mobile|backend|all&month=YYYY-MM&page=1&pageSize=20
+   */
+  async listApiKeys(userId: string, query: ListApiKeysQuery): Promise<ListApiKeysResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+    const typeFilter = query.type && query.type !== 'all' ? query.type : undefined;
+
+    let monthStart: string | null = null;
+    let monthEnd: string | null = null;
+    if (query.month && /^\d{4}-\d{2}$/.test(query.month)) {
+      const [y, m] = query.month.split('-').map(Number);
+      monthStart = new Date(Date.UTC(y, m - 1, 1)).toISOString();
+      monthEnd = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999)).toISOString();
+    }
+
+    const client = supabaseAdmin!;
+    let q = client
+      .from('api_keys')
+      .select('id, name, key_prefix, permission, is_active, last_used_at, created_at, key_type', { count: 'exact' })
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false });
+
+    if (typeFilter && KEY_TYPES.includes(typeFilter as ApiKeyType)) {
+      q = q.eq('key_type', typeFilter);
+    }
+    if (monthStart && monthEnd) {
+      q = q.gte('created_at', monthStart).lte('created_at', monthEnd);
+    }
+
+    const from = (page - 1) * pageSize;
+    const { data: rows, error, count } = await q.range(from, from + pageSize - 1);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to list API keys', error: error.message };
+    }
+
+    const list: ApiKeyListItem[] = (rows ?? []).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      name: (r.name as string) ?? '',
+      publicKey: (r.key_prefix as string) ?? '',
+      permission: (r.permission as ApiKeyPermission) ?? 'read',
+      permissionDisplay: permissionDisplay((r.permission as ApiKeyPermission) ?? 'read'),
+      status: (r.is_active as boolean) === true ? 'active' : 'inactive',
+      lastUsedAt: (r.last_used_at as string) ?? null,
+      createdAt: (r.created_at as string) ?? '',
+      keyType: ((r.key_type as ApiKeyType) ?? 'main') as ApiKeyType,
+    }));
+
+    return {
+      success: true,
+      message: 'API keys list retrieved',
+      data: {
+        keys: list,
+        total: count ?? list.length,
+        page,
+        pageSize,
+      },
+    };
+  }
+
+  /**
+   * Single API key detail (for detail view). No secret returned.
+   * GET /api/business-suite/api-keys/:id
+   */
+  async getApiKeyDetail(userId: string, keyId: string): Promise<GetApiKeyDetailResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const { data: row, error } = await client
+      .from('api_keys')
+      .select(
+        'id, name, key_prefix, permission, is_active, key_type, environment, last_used_at, created_at, updated_at, allowed_ips, expires_at, rotate_automatically, service_scopes'
+      )
+      .eq('id', keyId)
+      .eq('business_id', businessId)
+      .single();
+
+    if (error || !row) {
+      return { success: false, message: error?.message ?? 'API key not found', error: 'Not found' };
+    }
+
+    const r = row as Record<string, unknown>;
+    const item: ApiKeyDetailItem = {
+      id: r.id as string,
+      name: (r.name as string) ?? '',
+      publicKey: (r.key_prefix as string) ?? '',
+      permission: (r.permission as ApiKeyPermission) ?? 'read',
+      permissionDisplay: permissionDisplay((r.permission as ApiKeyPermission) ?? 'read'),
+      status: (r.is_active as boolean) === true ? 'active' : 'inactive',
+      keyType: ((r.key_type as ApiKeyType) ?? 'main') as ApiKeyType,
+      environment: (r.environment as ApiKeyEnvironment) ?? 'production',
+      lastUsedAt: (r.last_used_at as string) ?? null,
+      createdAt: (r.created_at as string) ?? '',
+      updatedAt: (r.updated_at as string) ?? '',
+      allowedIps: (r.allowed_ips as string[] | null) ?? null,
+      expiresAt: (r.expires_at as string | null) ?? null,
+      rotateAutomatically: Boolean(r.rotate_automatically),
+      serviceScopes: (r.service_scopes as ApiKeyServiceScope[] | null) ?? null,
+    };
+
+    return {
+      success: true,
+      message: 'API key detail retrieved',
+      data: item,
+    };
+  }
+
+  /**
+   * Update API key (Details modal: label, permissions, IPs, rotate toggle, disable).
+   * PATCH /api/business-suite/api-keys/:id
+   */
+  async updateApiKey(userId: string, keyId: string, body: UpdateApiKeyRequest): Promise<UpdateApiKeyResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const { data: existing } = await client
+      .from('api_keys')
+      .select('id')
+      .eq('id', keyId)
+      .eq('business_id', businessId)
+      .single();
+
+    if (!existing) {
+      return { success: false, message: 'API key not found', error: 'Not found' };
+    }
+
+    const updates: Record<string, unknown> = {};
+
+    if (body.name !== undefined) {
+      const name = typeof body.name === 'string' ? body.name.trim() : '';
+      if (name.length > 200) {
+        return { success: false, message: 'Key name must be at most 200 characters', error: 'Validation' };
+      }
+      updates.name = name;
+    }
+    if (body.permission !== undefined) {
+      if (!PERMISSIONS.includes(body.permission)) {
+        return { success: false, message: 'Permission must be one of: read, write, admin', error: 'Validation' };
+      }
+      updates.permission = body.permission;
+    }
+    if (body.serviceScopes !== undefined) {
+      updates.service_scopes = normalizeServiceScopes(body.serviceScopes ?? undefined);
+    }
+    if (body.allowedIps !== undefined) {
+      const allowedIps = body.allowedIps === null ? null : normalizeAllowedIps(body.allowedIps);
+      if (allowedIps != null) {
+        const invalid = allowedIps.find((ip) => !validateIpOrCidr(ip));
+        if (invalid) {
+          return { success: false, message: `Invalid IP or CIDR: ${invalid}`, error: 'Validation' };
+        }
+      }
+      updates.allowed_ips = allowedIps;
+    }
+    if (body.rotateAutomatically !== undefined) {
+      updates.rotate_automatically = Boolean(body.rotateAutomatically);
+    }
+    if (body.isActive !== undefined) {
+      updates.is_active = Boolean(body.isActive);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      const detail = await this.getApiKeyDetail(userId, keyId);
+      return detail.success ? { ...detail, message: 'No changes to apply' } : detail;
+    }
+
+    const { data: row, error } = await client
+      .from('api_keys')
+      .update(updates)
+      .eq('id', keyId)
+      .eq('business_id', businessId)
+      .select(
+        'id, name, key_prefix, permission, is_active, key_type, environment, last_used_at, created_at, updated_at, allowed_ips, expires_at, rotate_automatically, service_scopes'
+      )
+      .single();
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to update API key', error: error.message };
+    }
+    if (!row) {
+      return { success: false, message: 'Failed to update API key', error: 'No row returned' };
+    }
+
+    const r = row as Record<string, unknown>;
+    const item: ApiKeyDetailItem = {
+      id: r.id as string,
+      name: (r.name as string) ?? '',
+      publicKey: (r.key_prefix as string) ?? '',
+      permission: (r.permission as ApiKeyPermission) ?? 'read',
+      permissionDisplay: permissionDisplay((r.permission as ApiKeyPermission) ?? 'read'),
+      status: (r.is_active as boolean) === true ? 'active' : 'inactive',
+      keyType: ((r.key_type as ApiKeyType) ?? 'main') as ApiKeyType,
+      environment: (r.environment as ApiKeyEnvironment) ?? 'production',
+      lastUsedAt: (r.last_used_at as string) ?? null,
+      createdAt: (r.created_at as string) ?? '',
+      updatedAt: (r.updated_at as string) ?? '',
+      allowedIps: (r.allowed_ips as string[] | null) ?? null,
+      expiresAt: (r.expires_at as string | null) ?? null,
+      rotateAutomatically: Boolean(r.rotate_automatically),
+      serviceScopes: (r.service_scopes as ApiKeyServiceScope[] | null) ?? null,
+    };
+
+    return {
+      success: true,
+      message: 'API key updated',
+      data: item,
+    };
+  }
+
+  /**
+   * Regenerate API key secret. Old key invalidated; new keySecret returned once.
+   * POST /api/business-suite/api-keys/:id/regenerate
+   */
+  async regenerateApiKey(userId: string, keyId: string): Promise<RegenerateApiKeyResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const { data: existing } = await client
+      .from('api_keys')
+      .select('id, environment')
+      .eq('id', keyId)
+      .eq('business_id', businessId)
+      .single();
+
+    if (!existing) {
+      return { success: false, message: 'API key not found', error: 'Not found' };
+    }
+
+    const env = (existing as { environment: string }).environment ?? 'production';
+    const envPrefix = env === 'production' ? 'live' : env === 'staging' ? 'staging' : 'dev';
+    const secretPart = crypto.randomBytes(32).toString('hex');
+    const keySecret = `tch_${envPrefix}_${secretPart}`;
+    const keyPrefix = keySecret.slice(0, 12) + '...';
+    const keyHash = crypto.createHash('sha256').update(keySecret).digest('hex');
+
+    const { error } = await client
+      .from('api_keys')
+      .update({ key_prefix: keyPrefix, key_hash: keyHash })
+      .eq('id', keyId)
+      .eq('business_id', businessId);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to regenerate API key', error: error.message };
+    }
+
+    return {
+      success: true,
+      message: 'API key regenerated. Store the new key secret securely; it will not be shown again.',
+      data: {
+        keyId,
+        keySecret,
+        keyPrefix,
+      },
+    };
+  }
+
+  /**
+   * Delete API key. Permanently removes the key.
+   * DELETE /api/business-suite/api-keys/:id
+   */
+  async deleteApiKey(userId: string, keyId: string): Promise<DeleteApiKeyResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const { error } = await client
+      .from('api_keys')
+      .delete()
+      .eq('id', keyId)
+      .eq('business_id', businessId);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to delete API key', error: error.message };
+    }
+
+    return {
+      success: true,
+      message: 'API key deleted',
     };
   }
 }

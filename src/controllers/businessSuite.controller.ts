@@ -306,6 +306,92 @@ export class BusinessSuiteController {
   }
 
   /**
+   * List API keys for dashboard table. Query: type (all|main|mobile|backend), month (YYYY-MM), page, pageSize.
+   * GET /api/business-suite/api-keys
+   */
+  async listApiKeys(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const query = {
+      type: req.query.type as string | undefined,
+      month: req.query.month as string | undefined,
+      page: req.query.page as string | undefined,
+      pageSize: req.query.pageSize as string | undefined,
+    };
+    const result = await businessSuiteApiKeysService.listApiKeys(userId, query);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Single API key detail (no secret). GET /api/business-suite/api-keys/:id
+   */
+  async getApiKeyDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const keyId = req.params.id;
+    if (!keyId) {
+      res.status(400).json({ success: false, message: 'API key ID required', error: 'Missing id' });
+      return;
+    }
+    const result = await businessSuiteApiKeysService.getApiKeyDetail(userId, keyId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Update API key (Details modal: label, permissions, IPs, rotate, disable). PATCH /api/business-suite/api-keys/:id
+   */
+  async updateApiKey(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const keyId = req.params.id;
+    if (!keyId) {
+      res.status(400).json({ success: false, message: 'API key ID required', error: 'Missing id' });
+      return;
+    }
+    const result = await businessSuiteApiKeysService.updateApiKey(userId, keyId, req.body || {});
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business' || result.error === 'Validation') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Regenerate API key secret. New secret returned once. POST /api/business-suite/api-keys/:id/regenerate
+   */
+  async regenerateApiKey(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const keyId = req.params.id;
+    if (!keyId) {
+      res.status(400).json({ success: false, message: 'API key ID required', error: 'Missing id' });
+      return;
+    }
+    const result = await businessSuiteApiKeysService.regenerateApiKey(userId, keyId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Delete API key. DELETE /api/business-suite/api-keys/:id
+   */
+  async deleteApiKey(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const keyId = req.params.id;
+    if (!keyId) {
+      res.status(400).json({ success: false, message: 'API key ID required', error: 'Missing id' });
+      return;
+    }
+    const result = await businessSuiteApiKeysService.deleteApiKey(userId, keyId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Supply contracts created by this business (creator view). Use for supply status list with release.
    * GET /api/business-suite/supply-contracts/created-by-me
    */

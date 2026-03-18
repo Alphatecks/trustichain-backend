@@ -107,6 +107,51 @@ router.get('/api-keys/overview', authenticate, asyncHandler(async (req, res) => 
 }));
 
 /**
+ * @route   GET /api/business-suite/api-keys
+ * @desc    List API keys for dashboard table. Query: type (all|main|mobile|backend), month (YYYY-MM), page, pageSize.
+ * @access  Private (business suite only)
+ */
+router.get('/api-keys', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.listApiKeys(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/api-keys/:id
+ * @desc    Single API key detail (no secret). For detail view when clicking row action.
+ * @access  Private (business suite only)
+ */
+router.get('/api-keys/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getApiKeyDetail(req, res);
+}));
+
+/**
+ * @route   PATCH /api/business-suite/api-keys/:id
+ * @desc    Update API key (Details modal: name, permission, serviceScopes, allowedIps, rotateAutomatically, isActive).
+ * @access  Private (business suite only)
+ */
+router.patch('/api-keys/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.updateApiKey(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/api-keys/:id/regenerate
+ * @desc    Regenerate API key secret. Old key invalidated; new keySecret returned once.
+ * @access  Private (business suite only)
+ */
+router.post('/api-keys/:id/regenerate', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.regenerateApiKey(req, res);
+}));
+
+/**
+ * @route   DELETE /api/business-suite/api-keys/:id
+ * @desc    Delete API key permanently.
+ * @access  Private (business suite only)
+ */
+router.delete('/api-keys/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.deleteApiKey(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/for-supplier
  * @desc    View new supply contract – supplier only. Contracts escrowed to this business (counterparty). Call this for the supplier view.
  * @access  Private (business suite only)
