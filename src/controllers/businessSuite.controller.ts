@@ -19,6 +19,7 @@ import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/bu
 import type { ListApiKeysQuery } from '../types/api/businessSuiteApiKeys.types';
 import type { ListSandboxKeysQuery } from '../types/api/sandbox.types';
 import type { ListSandboxLogsQuery } from '../types/api/sandbox.types';
+import type { SandboxWebhookStatsResponse } from '../types/api/sandbox.types';
 
 export class BusinessSuiteController {
   /**
@@ -461,6 +462,19 @@ export class BusinessSuiteController {
     const result = await sandboxService.getSandboxKeyDetail(userId, keyId);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Webhook Stats cards.
+   * GET /api/business-suite/sandbox/webhook/stats
+   * GET /api/business-suite/sandbox/webhooks/stats
+   */
+  async getSandboxWebhookStats(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result: SandboxWebhookStatsResponse = await sandboxService.getSandboxWebhookStats(userId);
+    if (result.success) res.status(200).json(result);
     else if (result.error === 'No business') res.status(400).json(result);
     else res.status(403).json(result);
   }

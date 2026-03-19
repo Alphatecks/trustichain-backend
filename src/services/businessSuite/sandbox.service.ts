@@ -21,6 +21,8 @@ import type {
   SandboxTestEscrowResponse,
   ListSandboxLogsQuery,
   ListSandboxLogsResponse,
+  SandboxWebhookStatsResponse,
+  SandboxWebhookStatsData,
   SandboxSimulateResponse,
 } from '../../types/api/sandbox.types';
 
@@ -309,6 +311,103 @@ export class SandboxService {
         page,
         pageSize,
       },
+    };
+  }
+
+  /**
+   * GET /api/business-suite/sandbox/webhook/stats
+   * GET /api/business-suite/sandbox/webhooks/stats (alias)
+   *
+   * Stats source (sandbox tables):
+   * - Total/locked: sandbox_balances.locked_usd + sandbox_transactions.amount_usd (month)
+   * - Events sent: sandbox_transactions count (month)
+   * - Failed deliveries: sandbox_errors count (month)
+   * - Last event received: sandbox_transactions count (last 7 days)
+   */
+  async getSandboxWebhookStats(userId: string): Promise<SandboxWebhookStatsResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const now = new Date();
+    const thisMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const last7DaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const thisMonthStartIso = thisMonthStart.toISOString();
+    const last7DaysIso = last7DaysAgo.toISOString();
+
+    // Locked USD (secondary)
+    const { data: balanceRow } = await client
+      .from('sandbox_balances')
+      .select('locked_usd')
+      .eq('business_id', businessId)
+      .single();
+    const lockedUsd = balanceRow?.locked_usd != null ? Number(balanceRow.locked_usd) : 0;
+
+    // Events sent + total USD for the month
+    const { count: eventsSentMonth } = await client
+      .from('sandbox_transactions')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .gte('created_at', thisMonthStartIso);
+
+    const { data: txAmountRows } = await client
+      .from('sandbox_transactions')
+      .select('amount_usd')
+      .eq('business_id', businessId)
+      .gte('created_at', thisMonthStartIso);
+
+    const monthTxUsd = (txAmountRows ?? []).reduce((acc, r: Record<string, unknown>) => {
+      const amt = r.amount_usd != null ? Number(r.amount_usd) : 0;
+      return acc + (Number.isFinite(amt) ? amt : 0);
+    }, 0);
+
+    // Failed deliveries (month)
+    const { count: failedDeliveriesMonth } = await client
+      .from('sandbox_errors')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .gte('created_at', thisMonthStartIso);
+
+    // Last event received: last 7 days count (value card)
+    const { count: last7DaysReceived } = await client
+      .from('sandbox_transactions')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .gte('created_at', last7DaysIso);
+
+    const totalWebhooksUsd = monthTxUsd + lockedUsd;
+
+    const data: SandboxWebhookStatsData = {
+      totalWebhooks: {
+        value: totalWebhooksUsd,
+        secondary: lockedUsd > 0 ? `$${lockedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} locked` : undefined,
+      },
+      eventsSent: {
+        value: eventsSentMonth ?? 0,
+        secondary: 'This month',
+      },
+      failedDeliveries: {
+        value: failedDeliveriesMonth ?? 0,
+        secondary: 'This month',
+      },
+      lastEventReceived: {
+        value: last7DaysReceived ?? 0,
+        secondary: 'Last 7 days',
+      },
+    };
+
+    return {
+      success: true,
+      message: 'Webhook stats retrieved',
+      data,
     };
   }
 

@@ -197,6 +197,24 @@ router.get('/sandbox/keys/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/sandbox/webhook/stats
+ * @desc    Webhook page stats cards.
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/webhook/stats', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSandboxWebhookStats(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/sandbox/webhooks/stats (alias)
+ * @desc    Alias for webhook stats cards.
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/webhooks/stats', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSandboxWebhookStats(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/sandbox/logs
  * @desc    Sandbox Logs table. Query: status (OK|ERROR|all), page, pageSize.
  * @access  Private (business suite only)

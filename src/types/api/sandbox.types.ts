@@ -174,3 +174,22 @@ export interface ListSandboxLogsResponse {
   };
   error?: string;
 }
+
+export interface SandboxWebhookStatsCard {
+  value: number;
+  secondary?: string;
+}
+
+export interface SandboxWebhookStatsData {
+  totalWebhooks: SandboxWebhookStatsCard;
+  eventsSent: SandboxWebhookStatsCard;
+  failedDeliveries: SandboxWebhookStatsCard;
+  lastEventReceived: SandboxWebhookStatsCard;
+}
+
+export interface SandboxWebhookStatsResponse {
+  success: boolean;
+  message: string;
+  data?: SandboxWebhookStatsData;
+  error?: string;
+}
