@@ -193,3 +193,49 @@ export interface SandboxWebhookStatsResponse {
   data?: SandboxWebhookStatsData;
   error?: string;
 }
+
+export type SandboxWebhookLogStatus = 'Sent' | 'Failed';
+
+export interface SandboxWebhookLogEntry {
+  id: string;
+  event: string;
+  status: SandboxWebhookLogStatus;
+  createdAt: string;
+  time?: string;
+}
+
+export interface ListSandboxWebhookLogsQuery {
+  /** Sent|Failed|all */
+  status?: SandboxWebhookLogStatus | 'all';
+  /** monthly|yearly|all */
+  dateRange?: 'monthly' | 'yearly' | 'all';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListSandboxWebhookLogsResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    logs: SandboxWebhookLogEntry[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+  error?: string;
+}
+
+export interface SandboxWebhookLogDetailResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    id: string;
+    event: string;
+    status: SandboxWebhookLogStatus;
+    createdAt: string;
+    time?: string;
+    amountUsd?: number | null;
+    errorMessage?: string | null;
+  };
+  error?: string;
+}

@@ -23,6 +23,10 @@ import type {
   ListSandboxLogsResponse,
   SandboxWebhookStatsResponse,
   SandboxWebhookStatsData,
+  ListSandboxWebhookLogsQuery,
+  ListSandboxWebhookLogsResponse,
+  SandboxWebhookLogDetailResponse,
+  SandboxWebhookLogStatus,
   SandboxSimulateResponse,
 } from '../../types/api/sandbox.types';
 
@@ -312,6 +316,278 @@ export class SandboxService {
         pageSize,
       },
     };
+  }
+
+  /**
+   * Webhook Logs (Sandbox) – list unified deliveries.
+   *
+   * Source tables:
+   * - sandbox_transactions => status = Sent, event = transaction_type
+   * - sandbox_errors => status = Failed, event = message
+   */
+  async listSandboxWebhookLogs(
+    userId: string,
+    query: ListSandboxWebhookLogsQuery
+  ): Promise<ListSandboxWebhookLogsResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 10));
+    const status = query.status ?? 'all';
+    const dateRange = query.dateRange ?? 'monthly';
+
+    let startIso: string | null = null;
+    if (dateRange === 'monthly') {
+      const now = new Date();
+      startIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    } else if (dateRange === 'yearly') {
+      const now = new Date();
+      startIso = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString();
+    }
+
+    const client = supabaseAdmin!;
+    const offset = (page - 1) * pageSize;
+    const to = offset + pageSize - 1;
+
+    const mapTxRow = (r: Record<string, unknown>): { id: string; event: string; status: SandboxWebhookLogStatus; createdAt: string; time?: string } => ({
+      id: r.id as string,
+      event: (r.transaction_type as string) ?? 'Payment Received',
+      status: 'Sent',
+      createdAt: (r.created_at as string) ?? '',
+      time: r.created_at ? formatSandboxLogTime(r.created_at as string) : undefined,
+    });
+
+    const mapErrRow = (r: Record<string, unknown>): { id: string; event: string; status: SandboxWebhookLogStatus; createdAt: string; time?: string } => ({
+      id: r.id as string,
+      event: (r.message as string) ?? 'Delivery Failed',
+      status: 'Failed',
+      createdAt: (r.created_at as string) ?? '',
+      time: r.created_at ? formatSandboxLogTime(r.created_at as string) : undefined,
+    });
+
+    const fromFetchCount = page * pageSize;
+
+    // Sent only
+    if (status === 'Sent') {
+      let q = client
+        .from('sandbox_transactions')
+        .select('id, transaction_type, created_at', { count: 'exact' })
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false });
+      if (startIso) q = q.gte('created_at', startIso);
+      const { data: rows, error, count } = await q.range(offset, to);
+
+      if (error) {
+        return { success: false, message: error.message || 'Failed to list webhook logs', error: error.message };
+      }
+
+      const logs = (rows ?? []).map(mapTxRow);
+      return { success: true, message: 'Webhook logs retrieved', data: { logs, total: count ?? logs.length, page, pageSize } };
+    }
+
+    // Failed only
+    if (status === 'Failed') {
+      let q = client
+        .from('sandbox_errors')
+        .select('id, message, created_at', { count: 'exact' })
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false });
+      if (startIso) q = q.gte('created_at', startIso);
+      const { data: rows, error, count } = await q.range(offset, to);
+
+      if (error) {
+        return { success: false, message: error.message || 'Failed to list webhook logs', error: error.message };
+      }
+
+      const logs = (rows ?? []).map(mapErrRow);
+      return { success: true, message: 'Webhook logs retrieved', data: { logs, total: count ?? logs.length, page, pageSize } };
+    }
+
+    // all: merge OK + ERROR with pagination
+    const [{ count: totalSent }, { count: totalFailed }] = await Promise.all([
+      (async () => {
+        let q = client.from('sandbox_transactions').select('*', { count: 'exact', head: true }).eq('business_id', businessId);
+        if (startIso) q = q.gte('created_at', startIso);
+        const { count } = await q;
+        return { count };
+      })(),
+      (async () => {
+        let q = client.from('sandbox_errors').select('*', { count: 'exact', head: true }).eq('business_id', businessId);
+        if (startIso) q = q.gte('created_at', startIso);
+        const { count } = await q;
+        return { count };
+      })(),
+    ]);
+
+    const [{ data: txRows, error: txError }, { data: errRows, error: errError }] = await Promise.all([
+      (async () => {
+        let q = client
+          .from('sandbox_transactions')
+          .select('id, transaction_type, created_at')
+          .eq('business_id', businessId)
+          .order('created_at', { ascending: false });
+        if (startIso) q = q.gte('created_at', startIso);
+        return q.range(0, fromFetchCount - 1);
+      })(),
+      (async () => {
+        let q = client
+          .from('sandbox_errors')
+          .select('id, message, created_at')
+          .eq('business_id', businessId)
+          .order('created_at', { ascending: false });
+        if (startIso) q = q.gte('created_at', startIso);
+        return q.range(0, fromFetchCount - 1);
+      })(),
+    ]);
+
+    if (txError || errError) {
+      return {
+        success: false,
+        message: txError?.message || errError?.message || 'Failed to list webhook logs',
+        error: txError?.message || errError?.message,
+      };
+    }
+
+    const merged = [
+      ...(txRows ?? []).map(mapTxRow),
+      ...(errRows ?? []).map(mapErrRow),
+    ].filter((l) => !!l.createdAt);
+
+    merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const logs = merged.slice(offset, to + 1);
+
+    return {
+      success: true,
+      message: 'Webhook logs retrieved',
+      data: {
+        logs,
+        total: (totalSent ?? 0) + (totalFailed ?? 0),
+        page,
+        pageSize,
+      },
+    };
+  }
+
+  /**
+   * GET /api/business-suite/sandbox/webhook/logs/:id – row action.
+   */
+  async getSandboxWebhookLogDetail(userId: string, logId: string): Promise<SandboxWebhookLogDetailResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+
+    const { data: txRow, error: txError } = await client
+      .from('sandbox_transactions')
+      .select('id, transaction_type, amount_usd, created_at')
+      .eq('business_id', businessId)
+      .eq('id', logId)
+      .single();
+
+    if (!txError && txRow) {
+      const r = txRow as Record<string, unknown>;
+      return {
+        success: true,
+        message: 'Webhook log detail retrieved',
+        data: {
+          id: r.id as string,
+          event: (r.transaction_type as string) ?? 'Payment Received',
+          status: 'Sent',
+          createdAt: (r.created_at as string) ?? '',
+          time: r.created_at ? formatSandboxLogTime(r.created_at as string) : undefined,
+          amountUsd: r.amount_usd != null ? Number(r.amount_usd) : null,
+          errorMessage: null,
+        },
+      };
+    }
+
+    const { data: errRow, error: errError } = await client
+      .from('sandbox_errors')
+      .select('id, message, created_at')
+      .eq('business_id', businessId)
+      .eq('id', logId)
+      .single();
+
+    if (!errError && errRow) {
+      const r = errRow as Record<string, unknown>;
+      return {
+        success: true,
+        message: 'Webhook log detail retrieved',
+        data: {
+          id: r.id as string,
+          event: (r.message as string) ?? 'Delivery Failed',
+          status: 'Failed',
+          createdAt: (r.created_at as string) ?? '',
+          time: r.created_at ? formatSandboxLogTime(r.created_at as string) : undefined,
+          amountUsd: null,
+          errorMessage: (r.message as string) ?? null,
+        },
+      };
+    }
+
+    if (txError?.message || errError?.message) {
+      // Prefer a consistent "not found" response for UI.
+    }
+
+    return { success: false, message: 'Webhook log not found', error: 'Not found' };
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/webhook/logs/reset
+   * Clears webhook logs for the current business for the selected date range.
+   */
+  async resetSandboxWebhookLogs(
+    userId: string,
+    dateRange: 'monthly' | 'yearly' | 'all'
+  ): Promise<SandboxResetResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    let startIso: string | null = null;
+    if (dateRange === 'monthly') {
+      const now = new Date();
+      startIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    } else if (dateRange === 'yearly') {
+      const now = new Date();
+      startIso = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString();
+    }
+
+    if (startIso) {
+      await Promise.all([
+        client.from('sandbox_transactions').delete().eq('business_id', businessId).gte('created_at', startIso),
+        client.from('sandbox_errors').delete().eq('business_id', businessId).gte('created_at', startIso),
+      ]);
+    } else {
+      await Promise.all([
+        client.from('sandbox_transactions').delete().eq('business_id', businessId),
+        client.from('sandbox_errors').delete().eq('business_id', businessId),
+      ]);
+    }
+
+    return { success: true, message: 'Webhook logs reset successfully' };
   }
 
   /**

@@ -215,6 +215,33 @@ router.get('/sandbox/webhooks/stats', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   GET /api/business-suite/sandbox/webhook/logs
+ * @desc    Webhook logs table (Sent/Failed). Query: status (Sent|Failed|all), dateRange (monthly|yearly|all), page, pageSize.
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/webhook/logs', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.listSandboxWebhookLogs(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/sandbox/webhook/logs/:id
+ * @desc    Sandbox webhook log detail (row action).
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/webhook/logs/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSandboxWebhookLogDetail(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/webhook/logs/reset
+ * @desc    Clear webhook logs for dateRange (monthly|yearly|all). Body/query: dateRange.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/webhook/logs/reset', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.resetSandboxWebhookLogs(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/sandbox/logs
  * @desc    Sandbox Logs table. Query: status (OK|ERROR|all), page, pageSize.
  * @access  Private (business suite only)

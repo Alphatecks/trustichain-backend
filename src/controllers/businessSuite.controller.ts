@@ -20,6 +20,8 @@ import type { ListApiKeysQuery } from '../types/api/businessSuiteApiKeys.types';
 import type { ListSandboxKeysQuery } from '../types/api/sandbox.types';
 import type { ListSandboxLogsQuery } from '../types/api/sandbox.types';
 import type { SandboxWebhookStatsResponse } from '../types/api/sandbox.types';
+import type { ListSandboxWebhookLogsQuery } from '../types/api/sandbox.types';
+import type { SandboxWebhookLogDetailResponse } from '../types/api/sandbox.types';
 
 export class BusinessSuiteController {
   /**
@@ -474,6 +476,55 @@ export class BusinessSuiteController {
   async getSandboxWebhookStats(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
     const result: SandboxWebhookStatsResponse = await sandboxService.getSandboxWebhookStats(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Webhook Logs table (UI: WEBHOOK LOGS).
+   * GET /api/business-suite/sandbox/webhook/logs
+   */
+  async listSandboxWebhookLogs(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const query: ListSandboxWebhookLogsQuery = {
+      status: req.query.status as ListSandboxWebhookLogsQuery['status'],
+      dateRange: req.query.dateRange as ListSandboxWebhookLogsQuery['dateRange'],
+      page: req.query.page != null ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : undefined,
+    };
+    const result = await sandboxService.listSandboxWebhookLogs(userId, query);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Webhook Log row action (UI arrow button).
+   * GET /api/business-suite/sandbox/webhook/logs/:id
+   */
+  async getSandboxWebhookLogDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const logId = req.params.id;
+    if (!logId) {
+      res.status(400).json({ success: false, message: 'Webhook log ID required', error: 'Missing id' });
+      return;
+    }
+    const result: SandboxWebhookLogDetailResponse = await sandboxService.getSandboxWebhookLogDetail(userId, logId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Trash icon action: clear webhook logs for dateRange.
+   * POST /api/business-suite/sandbox/webhook/logs/reset
+   */
+  async resetSandboxWebhookLogs(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const dateRangeRaw = (typeof req.body?.dateRange === 'string' ? req.body.dateRange : undefined) ?? (typeof req.query.dateRange === 'string' ? req.query.dateRange : undefined);
+    const dateRange = dateRangeRaw === 'monthly' || dateRangeRaw === 'yearly' || dateRangeRaw === 'all' ? dateRangeRaw : 'monthly';
+    const result = await sandboxService.resetSandboxWebhookLogs(userId, dateRange);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'No business') res.status(400).json(result);
     else res.status(403).json(result);
