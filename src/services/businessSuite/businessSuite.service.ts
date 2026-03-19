@@ -273,6 +273,76 @@ export class BusinessSuiteService {
   }
 
   /**
+   * Get the webhook URL for the business (Update Webhook URL modal).
+   */
+  async getWebhookUrl(
+    userId: string
+  ): Promise<{ success: boolean; message: string; webhookUrl: string | null; error?: string }> {
+    const client = supabaseAdmin;
+    if (!client) {
+      return { success: false, message: 'Server error', webhookUrl: null, error: 'No admin client' };
+    }
+    const access = await this.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      return { success: false, message: access.error ?? 'Not business suite', webhookUrl: null, error: access.error };
+    }
+    const businessId = await this.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business found', webhookUrl: null, error: 'No business' };
+    }
+    const { data: biz, error } = await client
+      .from('businesses')
+      .select('webhook_url')
+      .eq('id', businessId)
+      .single();
+    if (error) {
+      return { success: false, message: error.message || 'Failed to get webhook URL', webhookUrl: null, error: error.message };
+    }
+    const url = biz?.webhook_url != null && String(biz.webhook_url).trim() ? String(biz.webhook_url).trim() : null;
+    return { success: true, message: 'Webhook URL retrieved', webhookUrl: url };
+  }
+
+  /**
+   * Set or clear the webhook URL. URL must be a publicly reachable HTTPS URL.
+   */
+  async updateWebhookUrl(
+    userId: string,
+    webhookUrl: string
+  ): Promise<{ success: boolean; message: string; error?: string }> {
+    const client = supabaseAdmin;
+    if (!client) {
+      return { success: false, message: 'Server error', error: 'No admin client' };
+    }
+    const access = await this.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      return { success: false, message: access.error ?? 'Not business suite', error: access.error };
+    }
+    const businessId = await this.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business found', error: 'No business' };
+    }
+    const trimmed = (webhookUrl ?? '').trim();
+    if (trimmed) {
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'https:') {
+          return { success: false, message: 'Make sure you use a publicly reachable HTTPS URL.', error: 'Invalid URL' };
+        }
+      } catch {
+        return { success: false, message: 'Invalid webhook URL format.', error: 'Invalid URL' };
+      }
+    }
+    const { error: updateError } = await client
+      .from('businesses')
+      .update({ webhook_url: trimmed || null })
+      .eq('id', businessId);
+    if (updateError) {
+      return { success: false, message: updateError.message || 'Failed to save webhook URL', error: updateError.message };
+    }
+    return { success: true, message: 'Webhook URL saved successfully' };
+  }
+
+  /**
    * Check whether the user has business suite access and whether they have a PIN set (for frontend to show set vs verify).
    * isBusinessSuite is true when account_type is business_suite/enterprise OR business_suite_kyc is Approved.
    */

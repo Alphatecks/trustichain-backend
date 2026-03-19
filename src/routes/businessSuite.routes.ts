@@ -503,6 +503,24 @@ router.patch('/business-email', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/webhook/url
+ * @desc    Get webhook URL for Update Webhook URL modal. Returns { webhookUrl }.
+ * @access  Private (business suite only)
+ */
+router.get('/webhook/url', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getWebhookUrl(req, res);
+}));
+
+/**
+ * @route   PATCH /api/business-suite/webhook/url
+ * @desc    Update webhook URL (Save URL). Body: { webhookUrl }. Must be publicly reachable HTTPS.
+ * @access  Private (business suite only)
+ */
+router.patch('/webhook/url', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.updateWebhookUrl(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/company-name?email=
  * @desc    Get company (business) name for the account with this email. Returns { success, message, data: { businessName } }.
  * @access  Private (business suite only)

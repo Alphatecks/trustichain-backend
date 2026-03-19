@@ -229,6 +229,15 @@ app.use('/api/business-suite', businessSuiteRoutes);
 app.use('/api/lookup', lookupRoutes);
 app.use('/api/cron', cronRoutes);
 
+// Incoming webhook receiver (e.g. when dashboard URL is set to this server: https://yourserver.com/webhooks/trustichain)
+app.post('/webhooks/trustichain', (req: Request, res: Response) => {
+  const payload = req.body;
+  if (process.env.NODE_ENV === 'development' && payload) {
+    console.log('[Webhook] TrustiChain payload:', JSON.stringify(payload).slice(0, 500));
+  }
+  res.status(200).json({ received: true, timestamp: new Date().toISOString() });
+});
+
 // 404 handler
 app.use((_req: Request, res: Response) => {
   res.status(404).json({

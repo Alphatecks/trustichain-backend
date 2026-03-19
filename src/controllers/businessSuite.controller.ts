@@ -922,6 +922,30 @@ export class BusinessSuiteController {
   }
 
   /**
+   * Get webhook URL for Update Webhook URL modal. GET /api/business-suite/webhook/url
+   */
+  async getWebhookUrl(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteService.getWebhookUrl(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(403).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Update webhook URL (Save URL). PATCH /api/business-suite/webhook/url (body: { webhookUrl })
+   */
+  async updateWebhookUrl(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const webhookUrl = (req.body?.webhookUrl ?? req.body?.webhook_url ?? '') as string;
+    const result = await businessSuiteService.updateWebhookUrl(userId, webhookUrl);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Invalid URL') res.status(400).json(result);
+    else if (result.error === 'No business') res.status(403).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
    * Get company (business) name for the account with the given email.
    * GET /api/business-suite/company-name?email=
    */
