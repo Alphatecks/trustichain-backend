@@ -9,6 +9,7 @@ import { businessSuiteSupplierDisputesService } from '../services/businessSuite/
 import { businessSuitePayrollDisputesService } from '../services/businessSuite/businessSuitePayrollDisputes.service';
 import { businessSuiteKycService } from '../services/businessSuite/businessSuiteKyc.service';
 import { businessSuiteApiKeysService } from '../services/businessSuite/businessSuiteApiKeys.service';
+import { sandboxService } from '../services/businessSuite/sandbox.service';
 import { lookupService } from '../services/lookup/lookup.service';
 import { walletService } from '../services/wallet/wallet.service';
 import { storageService } from '../services/storage/storage.service';
@@ -388,6 +389,42 @@ export class BusinessSuiteController {
     const result = await businessSuiteApiKeysService.deleteApiKey(userId, keyId);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Environment – stats for dashboard cards.
+   * GET /api/business-suite/sandbox/stats
+   */
+  async getSandboxStats(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.getSandboxStats(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Environment – reset sandbox data.
+   * POST /api/business-suite/sandbox/reset
+   */
+  async resetSandboxData(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.resetSandboxData(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Environment – create sandbox key. keySecret returned once.
+   * POST /api/business-suite/sandbox/keys
+   */
+  async createSandboxKey(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.createSandboxKey(userId, req.body || {});
+    if (result.success) res.status(201).json(result);
     else if (result.error === 'No business') res.status(400).json(result);
     else res.status(403).json(result);
   }

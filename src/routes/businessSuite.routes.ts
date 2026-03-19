@@ -152,6 +152,33 @@ router.delete('/api-keys/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/sandbox/stats
+ * @desc    Sandbox Environment dashboard: totalSandboxKeys, sandboxTransactions, errors24h, testWallets.
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/stats', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSandboxStats(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/reset
+ * @desc    Reset sandbox data (keys, balances, transactions, errors, test wallets).
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/reset', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.resetSandboxData(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/keys
+ * @desc    Create sandbox key. Body: name (optional). Returns keySecret once.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/keys', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createSandboxKey(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/for-supplier
  * @desc    View new supply contract – supplier only. Contracts escrowed to this business (counterparty). Call this for the supplier view.
  * @access  Private (business suite only)
