@@ -18,6 +18,7 @@ import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, Busi
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
 import type { ListApiKeysQuery } from '../types/api/businessSuiteApiKeys.types';
 import type { ListSandboxKeysQuery } from '../types/api/sandbox.types';
+import type { ListSandboxLogsQuery } from '../types/api/sandbox.types';
 
 export class BusinessSuiteController {
   /**
@@ -460,6 +461,23 @@ export class BusinessSuiteController {
     const result = await sandboxService.getSandboxKeyDetail(userId, keyId);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Logs table – unified OK/ERROR logs.
+   * GET /api/business-suite/sandbox/logs
+   */
+  async listSandboxLogs(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const query: ListSandboxLogsQuery = {
+      status: req.query.status as ListSandboxLogsQuery['status'],
+      page: req.query.page != null ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : undefined,
+    };
+    const result = await sandboxService.listSandboxLogs(userId, query);
+    if (result.success) res.status(200).json(result);
     else if (result.error === 'No business') res.status(400).json(result);
     else res.status(403).json(result);
   }

@@ -142,3 +142,35 @@ export interface SandboxSimulateResponse {
   data?: { eventId: string; copyValue: string };
   error?: string;
 }
+
+export type SandboxLogStatus = 'OK' | 'ERROR';
+
+export interface SandboxLogEntry {
+  id: string;
+  event: string;
+  status: SandboxLogStatus;
+  createdAt: string;
+  /**
+   * Convenience for UI (e.g. "12:04 PM"). Frontend can still format `createdAt`.
+   * Server locale is used for formatting.
+   */
+  time?: string;
+}
+
+export interface ListSandboxLogsQuery {
+  status?: 'OK' | 'ERROR' | 'all';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListSandboxLogsResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    logs: SandboxLogEntry[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+  error?: string;
+}

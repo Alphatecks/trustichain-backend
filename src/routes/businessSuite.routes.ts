@@ -197,6 +197,15 @@ router.get('/sandbox/keys/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/sandbox/logs
+ * @desc    Sandbox Logs table. Query: status (OK|ERROR|all), page, pageSize.
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/logs', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.listSandboxLogs(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/sandbox/test-wallet/generate
  * @desc    Testing Tools: Generate test wallet. Returns address for Copy.
  * @access  Private (business suite only)

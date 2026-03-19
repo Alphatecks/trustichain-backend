@@ -19,6 +19,8 @@ import type {
   SandboxKeyDetailResponse,
   SandboxTestWalletResponse,
   SandboxTestEscrowResponse,
+  ListSandboxLogsQuery,
+  ListSandboxLogsResponse,
   SandboxSimulateResponse,
 } from '../../types/api/sandbox.types';
 
@@ -62,6 +64,12 @@ function normalizePermissions(input: SandboxPermission[] | undefined): SandboxPe
 function trendPercent(current: number, previous: number): number {
   if (previous === 0) return current > 0 ? 100 : 0;
   return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+function formatSandboxLogTime(createdAtIso: string): string {
+  const d = new Date(createdAtIso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
 export class SandboxService {
@@ -166,6 +174,141 @@ export class SandboxService {
       success: true,
       message: 'Sandbox stats retrieved',
       data,
+    };
+  }
+
+  /**
+   * GET /api/business-suite/sandbox/logs – Unified logs for "Sandbox Logs" table.
+   * Sources:
+   * - OK: sandbox_transactions.transaction_type (used as event text)
+   * - ERROR: sandbox_errors.message
+   */
+  async listSandboxLogs(userId: string, query: ListSandboxLogsQuery): Promise<ListSandboxLogsResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+    const status = query.status ?? 'all';
+
+    const client = supabaseAdmin!;
+    const offset = (page - 1) * pageSize;
+    const to = offset + pageSize - 1;
+
+    const mapTxRow = (r: Record<string, unknown>) => ({
+      id: r.id as string,
+      event: (r.transaction_type as string) ?? 'Sandbox Transaction',
+      status: 'OK' as const,
+      createdAt: (r.created_at as string) ?? '',
+      time: r.created_at ? formatSandboxLogTime(r.created_at as string) : undefined,
+    });
+
+    const mapErrRow = (r: Record<string, unknown>) => ({
+      id: r.id as string,
+      event: (r.message as string) ?? 'Sandbox Error',
+      status: 'ERROR' as const,
+      createdAt: (r.created_at as string) ?? '',
+      time: r.created_at ? formatSandboxLogTime(r.created_at as string) : undefined,
+    });
+
+    if (status === 'OK') {
+      const from = offset;
+      const { data: rows, error, count } = await client
+        .from('sandbox_transactions')
+        .select('id, transaction_type, created_at', { count: 'exact' })
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        return { success: false, message: error.message || 'Failed to list sandbox logs', error: error.message };
+      }
+
+      const logs = (rows ?? []).map(mapTxRow);
+      return {
+        success: true,
+        message: 'Sandbox logs retrieved',
+        data: { logs, total: count ?? logs.length, page, pageSize },
+      };
+    }
+
+    if (status === 'ERROR') {
+      const from = offset;
+      const { data: rows, error, count } = await client
+        .from('sandbox_errors')
+        .select('id, message, created_at', { count: 'exact' })
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        return { success: false, message: error.message || 'Failed to list sandbox logs', error: error.message };
+      }
+
+      const logs = (rows ?? []).map(mapErrRow);
+      return {
+        success: true,
+        message: 'Sandbox logs retrieved',
+        data: { logs, total: count ?? logs.length, page, pageSize },
+      };
+    }
+
+    // status === 'all': merge two ordered lists (OK tx + ERROR err).
+    const [{ count: totalTx }, { count: totalErr }] = await Promise.all([
+      client.from('sandbox_transactions').select('*', { count: 'exact', head: true }).eq('business_id', businessId),
+      client.from('sandbox_errors').select('*', { count: 'exact', head: true }).eq('business_id', businessId),
+    ]);
+
+    const fetchCount = page * pageSize; // enough to build the requested page after merge+sort
+
+    const [{ data: txRows, error: txError }, { data: errRows, error: errError }] = await Promise.all([
+      client
+        .from('sandbox_transactions')
+        .select('id, transaction_type, created_at')
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false })
+        .range(0, fetchCount - 1),
+      client
+        .from('sandbox_errors')
+        .select('id, message, created_at')
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false })
+        .range(0, fetchCount - 1),
+    ]);
+
+    if (txError || errError) {
+      return {
+        success: false,
+        message: txError?.message || errError?.message || 'Failed to list sandbox logs',
+        error: txError?.message || errError?.message,
+      };
+    }
+
+    const merged = [
+      ...(txRows ?? []).map(mapTxRow),
+      ...(errRows ?? []).map(mapErrRow),
+    ].filter((l) => !!l.createdAt);
+
+    merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const logs = merged.slice(offset, to + 1);
+
+    return {
+      success: true,
+      message: 'Sandbox logs retrieved',
+      data: {
+        logs,
+        total: (totalTx ?? 0) + (totalErr ?? 0),
+        page,
+        pageSize,
+      },
     };
   }
 
@@ -458,6 +601,18 @@ export class SandboxService {
     }
 
     const escrowId = (row as { id: string }).id;
+
+    // Write a log row so the "Sandbox Logs" table can show escrow creation events.
+    const logMessage = `Escrow#${refNum} Created`;
+    const logInsert = await client.from('sandbox_transactions').insert({
+      business_id: businessId,
+      amount_usd: 0,
+      transaction_type: logMessage,
+    });
+    if (logInsert.error) {
+      return { success: false, message: logInsert.error.message || 'Failed to write sandbox log', error: logInsert.error.message };
+    }
+
     return {
       success: true,
       message: 'Test escrow created',
@@ -508,6 +663,36 @@ export class SandboxService {
     }
 
     const eventId = `evt_${eventType}_${crypto.randomBytes(8).toString('hex')}`;
+
+    const logMessageByEventType: Record<string, string> = {
+      subscription_renewal: 'Subscription Renewal Simulated',
+      dispute: 'Dispute Simulated',
+      payment_success: 'Payment Successful (Test Card)',
+      payment_failed: 'Payment Failed (Test Card)',
+    };
+    const logMessage = logMessageByEventType[eventType] ?? `Simulated ${eventType.replace(/_/g, ' ')}`;
+    const client = supabaseAdmin!;
+
+    // payment_failed is stored as an ERROR row; others are OK (transactions).
+    if (eventType === 'payment_failed') {
+      const ins = await client.from('sandbox_errors').insert({
+        business_id: businessId,
+        message: logMessage,
+      });
+      if (ins.error) {
+        return { success: false, message: ins.error.message || 'Failed to write sandbox error log', error: ins.error.message };
+      }
+    } else {
+      const ins = await client.from('sandbox_transactions').insert({
+        business_id: businessId,
+        amount_usd: 0,
+        transaction_type: logMessage,
+      });
+      if (ins.error) {
+        return { success: false, message: ins.error.message || 'Failed to write sandbox transaction log', error: ins.error.message };
+      }
+    }
+
     return {
       success: true,
       message: `Simulated ${eventType.replace(/_/g, ' ')}`,
