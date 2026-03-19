@@ -12,7 +12,45 @@ import type {
   CreateSandboxKeyRequest,
   CreateSandboxKeyResponse,
   SandboxStatsCard,
+  SandboxPermission,
 } from '../../types/api/sandbox.types';
+
+const SANDBOX_PERMISSIONS: SandboxPermission[] = [
+  'cancel_escrow',
+  'create_escrow',
+  'release_escrow',
+  'create_wallet',
+  'read_wallet',
+  'transaction_logs',
+  'webhook_test_events',
+];
+
+const IP_OR_CIDR_REGEX =
+  /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\/(?:3[0-2]|[12]?[0-9]))?$/;
+
+function normalizeIpAllowlist(input: string[] | string | undefined): string[] | null {
+  if (input == null) return null;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  if (Array.isArray(input)) {
+    const list = input.map((s) => (typeof s === 'string' ? s.trim() : '')).filter(Boolean);
+    return list.length ? list : null;
+  }
+  return null;
+}
+
+function validateIpOrCidr(entry: string): boolean {
+  return IP_OR_CIDR_REGEX.test(entry);
+}
+
+function normalizePermissions(input: SandboxPermission[] | undefined): SandboxPermission[] | null {
+  if (!input || !Array.isArray(input) || input.length === 0) return null;
+  const valid = input.filter((p): p is SandboxPermission => SANDBOX_PERMISSIONS.includes(p));
+  return valid.length ? valid : null;
+}
 
 function trendPercent(current: number, previous: number): number {
   if (previous === 0) return current > 0 ? 100 : 0;
@@ -153,7 +191,7 @@ export class SandboxService {
   }
 
   /**
-   * POST /api/business-suite/sandbox/keys – create a sandbox key. keySecret returned once.
+   * POST /api/business-suite/sandbox/keys – create sandbox key (Create New Sandbox Key modal). keySecret returned once.
    */
   async createSandboxKey(userId: string, body: CreateSandboxKeyRequest): Promise<CreateSandboxKeyResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
@@ -166,7 +204,31 @@ export class SandboxService {
       return { success: false, message: 'No business registered for this account', error: 'No business' };
     }
 
-    const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : 'Sandbox Key';
+    const environmentName =
+      typeof body?.environmentName === 'string' && body.environmentName.trim()
+        ? body.environmentName.trim()
+        : typeof body?.name === 'string' && body.name.trim()
+          ? body.name.trim()
+          : 'Sandbox Key';
+    const environmentPurpose =
+      typeof body?.environmentPurpose === 'string' && body.environmentPurpose.trim()
+        ? body.environmentPurpose.trim()
+        : null;
+    const autoGenerateKeys = body?.autoGenerateKeys !== false;
+
+    const allowedIps = normalizeIpAllowlist(body?.ipAllowlist);
+    if (allowedIps != null) {
+      const invalid = allowedIps.find((ip) => !validateIpOrCidr(ip));
+      if (invalid) {
+        return {
+          success: false,
+          message: `Invalid IP or CIDR: ${invalid}. Use e.g. 192.168.1.1 or 10.0.0.0/24`,
+          error: 'Validation',
+        };
+      }
+    }
+
+    const permissions = normalizePermissions(body?.permissions);
 
     const secretPart = crypto.randomBytes(32).toString('hex');
     const keySecret = `tch_sandbox_${secretPart}`;
@@ -178,9 +240,15 @@ export class SandboxService {
       .from('sandbox_keys')
       .insert({
         business_id: businessId,
-        name,
+        name: environmentName,
         key_prefix: keyPrefix,
         key_hash: keyHash,
+        environment_name: environmentName,
+        environment_purpose: environmentPurpose,
+        auto_generate_keys: autoGenerateKeys,
+        allowed_ips: allowedIps,
+        permissions: permissions,
+        is_active: true,
       })
       .select('id, created_at')
       .single();
@@ -199,8 +267,15 @@ export class SandboxService {
       data: {
         keyId: created.id,
         keySecret,
+        secretKey: keyPrefix,
         keyPrefix,
-        name,
+        name: environmentName,
+        environmentName: environmentName,
+        environmentPurpose,
+        autoGenerateKeys,
+        ipAllowlist: allowedIps,
+        permissions,
+        status: 'active',
         createdAt: created.created_at,
       },
     };
