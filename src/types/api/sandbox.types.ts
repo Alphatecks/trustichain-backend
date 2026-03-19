@@ -75,3 +75,70 @@ export interface CreateSandboxKeyResponse {
   };
   error?: string;
 }
+
+/** List sandbox keys – query params. */
+export interface ListSandboxKeysQuery {
+  status?: 'Successful' | 'Inactive' | 'all';
+  dateRange?: 'monthly' | 'yearly' | 'all';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface SandboxKeyListItem {
+  id: string;
+  name: string;
+  publicKey: string;
+  status: 'Successful' | 'Inactive';
+  dateCreated: string;
+}
+
+export interface ListSandboxKeysResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    keys: SandboxKeyListItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+  error?: string;
+}
+
+export interface SandboxKeyDetailResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    id: string;
+    name: string;
+    publicKey: string;
+    status: 'Successful' | 'Inactive';
+    dateCreated: string;
+    environmentName: string | null;
+    environmentPurpose: string | null;
+    permissions: SandboxPermission[] | null;
+    createdAt: string;
+  };
+  error?: string;
+}
+
+/** Testing tools – response includes copyValue for Copy button. */
+export interface SandboxTestWalletResponse {
+  success: boolean;
+  message: string;
+  data?: { address: string; copyValue: string };
+  error?: string;
+}
+
+export interface SandboxTestEscrowResponse {
+  success: boolean;
+  message: string;
+  data?: { escrowId: string; reference: string; copyValue: string };
+  error?: string;
+}
+
+export interface SandboxSimulateResponse {
+  success: boolean;
+  message: string;
+  data?: { eventId: string; copyValue: string };
+  error?: string;
+}

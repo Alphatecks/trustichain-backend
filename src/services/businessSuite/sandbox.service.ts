@@ -13,6 +13,13 @@ import type {
   CreateSandboxKeyResponse,
   SandboxStatsCard,
   SandboxPermission,
+  ListSandboxKeysQuery,
+  ListSandboxKeysResponse,
+  SandboxKeyListItem,
+  SandboxKeyDetailResponse,
+  SandboxTestWalletResponse,
+  SandboxTestEscrowResponse,
+  SandboxSimulateResponse,
 } from '../../types/api/sandbox.types';
 
 const SANDBOX_PERMISSIONS: SandboxPermission[] = [
@@ -180,6 +187,7 @@ export class SandboxService {
 
     await client.from('sandbox_errors').delete().eq('business_id', businessId);
     await client.from('sandbox_transactions').delete().eq('business_id', businessId);
+    await client.from('sandbox_test_escrows').delete().eq('business_id', businessId);
     await client.from('test_wallets').delete().eq('business_id', businessId);
     await client.from('sandbox_keys').delete().eq('business_id', businessId);
     await client.from('sandbox_balances').delete().eq('business_id', businessId);
@@ -278,6 +286,232 @@ export class SandboxService {
         status: 'active',
         createdAt: created.created_at,
       },
+    };
+  }
+
+  /**
+   * GET /api/business-suite/sandbox/keys – list sandbox keys for table (filter, date range).
+   */
+  async listSandboxKeys(userId: string, query: ListSandboxKeysQuery): Promise<ListSandboxKeysResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+    const dateRange = query.dateRange || 'all';
+
+    let monthStart: string | null = null;
+    let monthEnd: string | null = null;
+    if (dateRange === 'monthly' || dateRange === 'yearly') {
+      const now = new Date();
+      if (dateRange === 'monthly') {
+        monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+        monthEnd = new Date().toISOString();
+      } else {
+        monthStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString();
+        monthEnd = new Date().toISOString();
+      }
+    }
+
+    const client = supabaseAdmin!;
+    let q = client
+      .from('sandbox_keys')
+      .select('id, name, key_prefix, is_active, created_at', { count: 'exact' })
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false });
+
+    if (query.status && query.status !== 'all') {
+      q = q.eq('is_active', query.status === 'Successful');
+    }
+    if (monthStart) {
+      q = q.gte('created_at', monthStart);
+    }
+    if (monthEnd && dateRange === 'monthly') {
+      q = q.lte('created_at', monthEnd);
+    }
+
+    const from = (page - 1) * pageSize;
+    const { data: rows, error, count } = await q.range(from, from + pageSize - 1);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to list sandbox keys', error: error.message };
+    }
+
+    const keys: SandboxKeyListItem[] = (rows ?? []).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      name: (r.name as string) ?? '',
+      publicKey: (r.key_prefix as string) ?? '',
+      status: (r.is_active as boolean) === true ? 'Successful' : 'Inactive',
+      dateCreated: (r.created_at as string) ? (r.created_at as string).slice(0, 10) : '',
+    }));
+
+    return {
+      success: true,
+      message: 'Sandbox keys list retrieved',
+      data: { keys, total: count ?? keys.length, page, pageSize },
+    };
+  }
+
+  /**
+   * GET /api/business-suite/sandbox/keys/:id – sandbox key detail (row action).
+   */
+  async getSandboxKeyDetail(userId: string, keyId: string): Promise<SandboxKeyDetailResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const { data: row, error } = await client
+      .from('sandbox_keys')
+      .select('id, name, key_prefix, is_active, created_at, environment_name, environment_purpose, permissions')
+      .eq('id', keyId)
+      .eq('business_id', businessId)
+      .single();
+
+    if (error || !row) {
+      return { success: false, message: error?.message ?? 'Sandbox key not found', error: 'Not found' };
+    }
+
+    const r = row as Record<string, unknown>;
+    return {
+      success: true,
+      message: 'Sandbox key detail retrieved',
+      data: {
+        id: r.id as string,
+        name: (r.name as string) ?? '',
+        publicKey: (r.key_prefix as string) ?? '',
+        status: (r.is_active as boolean) === true ? 'Successful' : 'Inactive',
+        dateCreated: (r.created_at as string) ? (r.created_at as string).slice(0, 10) : '',
+        environmentName: (r.environment_name as string) ?? null,
+        environmentPurpose: (r.environment_purpose as string) ?? null,
+        permissions: (r.permissions as SandboxPermission[] | null) ?? null,
+        createdAt: (r.created_at as string) ?? '',
+      },
+    };
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/test-wallet/generate – Testing Tools: Generate test wallet. Returns address for Copy.
+   */
+  async generateTestWallet(userId: string): Promise<SandboxTestWalletResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const address = 'r' + crypto.randomBytes(20).toString('hex');
+    const client = supabaseAdmin!;
+    await client.from('test_wallets').insert({ business_id: businessId, address });
+
+    return {
+      success: true,
+      message: 'Test wallet generated',
+      data: { address, copyValue: address },
+    };
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/test-escrow/create – Testing Tools: Create test escrow. Returns reference for Copy.
+   */
+  async createTestEscrow(userId: string): Promise<SandboxTestEscrowResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const year = new Date().getUTCFullYear();
+    const refNum = Math.floor(Math.random() * 999) + 1;
+    const reference = `SBX-ESC-${year}-${String(refNum).padStart(3, '0')}`;
+
+    const client = supabaseAdmin!;
+    const { data: row, error } = await client
+      .from('sandbox_test_escrows')
+      .insert({ business_id: businessId, reference, amount_usd: 0, status: 'active' })
+      .select('id')
+      .single();
+
+    if (error || !row) {
+      return { success: false, message: error?.message ?? 'Failed to create test escrow', error: error.message };
+    }
+
+    const escrowId = (row as { id: string }).id;
+    return {
+      success: true,
+      message: 'Test escrow created',
+      data: { escrowId, reference, copyValue: reference },
+    };
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/subscription-renewal/simulate – Testing Tools: Simulate subscription renewal.
+   */
+  async simulateSubscriptionRenewal(userId: string): Promise<SandboxSimulateResponse> {
+    return this.simulateEvent(userId, 'subscription_renewal');
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/dispute/simulate – Testing Tools: Simulate dispute.
+   */
+  async simulateDispute(userId: string): Promise<SandboxSimulateResponse> {
+    return this.simulateEvent(userId, 'dispute');
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/payment-success/simulate – Testing Tools: Simulate payment success.
+   */
+  async simulatePaymentSuccess(userId: string): Promise<SandboxSimulateResponse> {
+    return this.simulateEvent(userId, 'payment_success');
+  }
+
+  /**
+   * POST /api/business-suite/sandbox/payment-failed/simulate – Testing Tools: Simulate failed payment.
+   */
+  async simulatePaymentFailed(userId: string): Promise<SandboxSimulateResponse> {
+    return this.simulateEvent(userId, 'payment_failed');
+  }
+
+  private async simulateEvent(
+    userId: string,
+    eventType: string
+  ): Promise<SandboxSimulateResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No business registered for this account', error: 'No business' };
+    }
+
+    const eventId = `evt_${eventType}_${crypto.randomBytes(8).toString('hex')}`;
+    return {
+      success: true,
+      message: `Simulated ${eventType.replace(/_/g, ' ')}`,
+      data: { eventId, copyValue: eventId },
     };
   }
 }

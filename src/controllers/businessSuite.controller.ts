@@ -17,6 +17,7 @@ import { escrowService } from '../services/escrow/escrow.service';
 import type { BusinessSuiteActivityListParams, BusinessSuiteActivityStatus, BusinessSuitePortfolioPeriod } from '../types/api/businessSuiteDashboard.types';
 import type { CreatePayrollRequest, UpdatePayrollRequest } from '../types/api/businessSuitePayrolls.types';
 import type { ListApiKeysQuery } from '../types/api/businessSuiteApiKeys.types';
+import type { ListSandboxKeysQuery } from '../types/api/sandbox.types';
 
 export class BusinessSuiteController {
   /**
@@ -425,6 +426,106 @@ export class BusinessSuiteController {
     const userId = req.userId!;
     const result = await sandboxService.createSandboxKey(userId, req.body || {});
     if (result.success) res.status(201).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox Keys table – list with filter and date range. GET /api/business-suite/sandbox/keys
+   */
+  async listSandboxKeys(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const query: ListSandboxKeysQuery = {
+      status: req.query.status as ListSandboxKeysQuery['status'],
+      dateRange: req.query.dateRange as ListSandboxKeysQuery['dateRange'],
+      page: req.query.page != null ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : undefined,
+    };
+    const result = await sandboxService.listSandboxKeys(userId, query);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Sandbox key detail (row action). GET /api/business-suite/sandbox/keys/:id
+   */
+  async getSandboxKeyDetail(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const keyId = req.params.id;
+    if (!keyId) {
+      res.status(400).json({ success: false, message: 'Sandbox key ID required', error: 'Missing id' });
+      return;
+    }
+    const result = await sandboxService.getSandboxKeyDetail(userId, keyId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Testing Tools – generate test wallet. POST /api/business-suite/sandbox/test-wallet/generate
+   */
+  async generateTestWallet(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.generateTestWallet(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Testing Tools – create test escrow. POST /api/business-suite/sandbox/test-escrow/create
+   */
+  async createTestEscrow(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.createTestEscrow(userId);
+    if (result.success) res.status(201).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Testing Tools – simulate subscription renewal. POST /api/business-suite/sandbox/subscription-renewal/simulate
+   */
+  async simulateSubscriptionRenewal(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.simulateSubscriptionRenewal(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Testing Tools – simulate dispute. POST /api/business-suite/sandbox/dispute/simulate
+   */
+  async simulateDispute(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.simulateDispute(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Testing Tools – simulate payment success. POST /api/business-suite/sandbox/payment-success/simulate
+   */
+  async simulatePaymentSuccess(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.simulatePaymentSuccess(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /**
+   * Testing Tools – simulate failed payment. POST /api/business-suite/sandbox/payment-failed/simulate
+   */
+  async simulatePaymentFailed(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await sandboxService.simulatePaymentFailed(userId);
+    if (result.success) res.status(200).json(result);
     else if (result.error === 'No business') res.status(400).json(result);
     else res.status(403).json(result);
   }

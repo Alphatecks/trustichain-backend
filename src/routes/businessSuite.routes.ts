@@ -179,6 +179,78 @@ router.post('/sandbox/keys', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/sandbox/keys
+ * @desc    List sandbox keys for table. Query: status (Successful|Inactive|all), dateRange (monthly|yearly|all), page, pageSize.
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/keys', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.listSandboxKeys(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/sandbox/keys/:id
+ * @desc    Sandbox key detail (row action).
+ * @access  Private (business suite only)
+ */
+router.get('/sandbox/keys/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getSandboxKeyDetail(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/test-wallet/generate
+ * @desc    Testing Tools: Generate test wallet. Returns address for Copy.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/test-wallet/generate', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.generateTestWallet(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/test-escrow/create
+ * @desc    Testing Tools: Create test escrow. Returns reference for Copy.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/test-escrow/create', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.createTestEscrow(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/subscription-renewal/simulate
+ * @desc    Testing Tools: Simulate subscription renewal. Returns eventId for Copy.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/subscription-renewal/simulate', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.simulateSubscriptionRenewal(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/dispute/simulate
+ * @desc    Testing Tools: Simulate dispute. Returns eventId for Copy.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/dispute/simulate', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.simulateDispute(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/payment-success/simulate
+ * @desc    Testing Tools: Simulate payment success. Returns eventId for Copy.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/payment-success/simulate', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.simulatePaymentSuccess(req, res);
+}));
+
+/**
+ * @route   POST /api/business-suite/sandbox/payment-failed/simulate
+ * @desc    Testing Tools: Simulate failed payment. Returns eventId for Copy.
+ * @access  Private (business suite only)
+ */
+router.post('/sandbox/payment-failed/simulate', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.simulatePaymentFailed(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/supply-contracts/for-supplier
  * @desc    View new supply contract – supplier only. Contracts escrowed to this business (counterparty). Call this for the supplier view.
  * @access  Private (business suite only)
