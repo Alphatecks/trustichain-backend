@@ -4,6 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import { storageService } from '../storage/storage.service';
 
 export class UserService {
   /**
@@ -19,6 +20,8 @@ export class UserService {
       country: string | null;
       title?: string;
       verified: boolean;
+      /** Time-limited URL for displaying the profile photo (private storage bucket). */
+      avatarUrl: string | null;
     };
     error?: string;
   }> {
@@ -28,7 +31,7 @@ export class UserService {
       // Get user from users table
       const { data: userData, error: userError } = await adminClient
         .from('users')
-        .select('id, email, full_name, country')
+        .select('id, email, full_name, country, avatar_url')
         .eq('id', userId)
         .single();
 
@@ -43,6 +46,10 @@ export class UserService {
       // Get auth user to check verification status
       const { data: authData, error: authError } = await supabaseAdmin?.auth.admin.getUserById(userId) || { data: null, error: null };
 
+      const avatarUrl = await storageService.getSignedUrlForUserProfilePhoto(
+        (userData as { avatar_url?: string | null }).avatar_url ?? null
+      );
+
       if (authError && !authData) {
         // If we can't get auth data, assume not verified
         return {
@@ -54,6 +61,7 @@ export class UserService {
             fullName: userData.full_name,
             country: userData.country,
             verified: false,
+            avatarUrl,
           },
         };
       }
@@ -67,6 +75,7 @@ export class UserService {
           fullName: userData.full_name,
           country: userData.country,
           verified: authData?.user?.email_confirmed_at !== null,
+          avatarUrl,
         },
       };
     } catch (error) {
@@ -75,6 +84,63 @@ export class UserService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fetch user profile',
         error: error instanceof Error ? error.message : 'Failed to fetch user profile',
+      };
+    }
+  }
+
+  /**
+   * Upload profile picture (multipart image). Updates users.avatar_url with storage reference.
+   */
+  async uploadProfilePhoto(
+    userId: string,
+    file: Express.Multer.File
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { avatarUrl: string };
+    error?: string;
+  }> {
+    try {
+      const upload = await storageService.uploadUserProfilePhoto(userId, file);
+      if (!upload.success || !upload.data?.fileUrl) {
+        return {
+          success: false,
+          message: upload.message || 'Upload failed',
+          error: upload.error || 'Upload failed',
+        };
+      }
+
+      const adminClient = supabaseAdmin || supabase;
+      const storedRef = upload.data.fileUrl;
+      const { error: updateError } = await adminClient
+        .from('users')
+        .update({
+          avatar_url: storedRef,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error('uploadProfilePhoto: failed to update users.avatar_url', updateError);
+        return {
+          success: false,
+          message: updateError.message || 'Failed to save profile photo',
+          error: updateError.message || 'Database error',
+        };
+      }
+
+      const displayUrl = await storageService.getSignedUrlForUserProfilePhoto(storedRef);
+      return {
+        success: true,
+        message: 'Profile photo updated',
+        data: { avatarUrl: displayUrl || storedRef },
+      };
+    } catch (error) {
+      console.error('uploadProfilePhoto error:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to upload profile photo',
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
   }

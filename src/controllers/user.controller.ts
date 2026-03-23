@@ -11,6 +11,7 @@ interface UserProfileResponse {
     country: string | null;
     title?: string;
     verified: boolean;
+    avatarUrl?: string | null;
   };
   error?: string;
 }
@@ -25,6 +26,38 @@ export class UserController {
       const userId = req.userId!;
       const result = await userService.getUserProfile(userId);
 
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Upload profile picture (multipart image field "photo").
+   * POST /api/user/profile/photo
+   */
+  async uploadProfilePhoto(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          message: 'Image file is required (multipart field name: photo)',
+          error: 'Bad request',
+        });
+        return;
+      }
+      const result = await userService.uploadProfilePhoto(userId, file);
       if (result.success) {
         res.status(200).json(result);
       } else {

@@ -328,6 +328,88 @@ export class StorageService {
     }
   }
 
+  private static readonly USER_PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+
+  /**
+   * Upload app user profile photo (image only). Path: user-profile-photos/{userId}/...
+   * Store returned fileUrl in users.avatar_url; use getSignedUrlForUserProfilePhoto for display (private bucket).
+   */
+  async uploadUserProfilePhoto(
+    userId: string,
+    file: Express.Multer.File
+  ): Promise<UploadFileResult> {
+    try {
+      if (!file) {
+        return { success: false, message: 'No file provided', error: 'No file provided' };
+      }
+      if (file.size > StorageService.USER_PROFILE_PHOTO_MAX_BYTES) {
+        return {
+          success: false,
+          message: 'Profile photo must be 5MB or smaller',
+          error: 'File too large',
+        };
+      }
+      if (!IMAGE_MIME_TYPES.includes(file.mimetype)) {
+        return {
+          success: false,
+          message: 'Only images are allowed (JPEG, PNG, GIF, WebP, HEIC)',
+          error: 'Invalid file type',
+        };
+      }
+      const adminClient = supabaseAdmin || supabase;
+      if (!adminClient) {
+        return { success: false, message: 'Storage service not available', error: 'Storage service not available' };
+      }
+      await this.ensureBucketExists();
+      const prepared = await this.prepareFileForUpload(file);
+      const filePath = `user-profile-photos/${this.generateFilePath(userId, prepared.fileName)}`;
+      const { data, error: uploadError } = await adminClient.storage
+        .from(this.BUCKET_NAME)
+        .upload(filePath, prepared.buffer, {
+          contentType: prepared.contentType,
+          upsert: false,
+        });
+      if (uploadError || !data) {
+        return {
+          success: false,
+          message: uploadError?.message || 'Failed to upload profile photo',
+          error: uploadError?.message || 'Upload failed',
+        };
+      }
+      const fileUrl = `${this.BUCKET_NAME}/${data.path}`;
+      return {
+        success: true,
+        message: 'Profile photo uploaded successfully',
+        data: {
+          fileUrl,
+          filePath: data.path,
+          fileName: prepared.fileName,
+          fileSize: prepared.buffer.length,
+          fileType: prepared.contentType,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to upload profile photo',
+        error: error instanceof Error ? error.message : 'Failed to upload profile photo',
+      };
+    }
+  }
+
+  /**
+   * Signed URL for a stored user profile photo (private bucket).
+   */
+  async getSignedUrlForUserProfilePhoto(
+    storedUrlOrPath: string | null | undefined,
+    expiresIn: number = 7 * 24 * 3600
+  ): Promise<string | null> {
+    if (!storedUrlOrPath || typeof storedUrlOrPath !== 'string') return null;
+    const path = this.normalizeStoredPathToBucketPath(storedUrlOrPath);
+    if (!path) return null;
+    return this.getSignedUrl(path, expiresIn);
+  }
+
   /**
    * Upload file and return a signed URL (e.g. for KYC providers that need to fetch the image by URL).
    * Default expiry 7 days.
