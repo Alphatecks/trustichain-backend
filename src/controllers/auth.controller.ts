@@ -544,6 +544,24 @@ export class AuthController {
   }
 
   /**
+   * After server-side Google OAuth, send the browser to the SPA with tokens in the **hash**
+   * (fragment is not sent to the server on the next navigation; avoids query-string leaks in logs/referrer).
+   * Frontend should parse hash, store access_token (e.g. localStorage), then strip the hash.
+   */
+  private buildGoogleOAuthFrontendRedirect(
+    frontendBaseUrl: string,
+    tokens: { accessToken: string; refreshToken: string }
+  ): string {
+    const origin = frontendBaseUrl.replace(/\/$/, '');
+    const hash = new URLSearchParams({
+      access_token: tokens.accessToken,
+      refresh_token: tokens.refreshToken,
+      token_type: 'bearer',
+    }).toString();
+    return `${origin}/auth/callback?success=true&provider=google#${hash}`;
+  }
+
+  /**
    * Handle Google OAuth callback
    * GET /api/auth/google/callback?code=xxx
    */
@@ -622,7 +640,13 @@ export class AuthController {
 
       if (result.success && result.data) {
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-        res.redirect(`${frontendUrl}/auth/callback?success=true&provider=google`);
+        const { accessToken, refreshToken } = result.data;
+        if (accessToken && refreshToken) {
+          res.redirect(302, this.buildGoogleOAuthFrontendRedirect(frontendUrl, { accessToken, refreshToken }));
+        } else {
+          console.warn('[OAuth callback] Missing access or refresh token; redirecting without hash tokens');
+          res.redirect(`${frontendUrl.replace(/\/$/, '')}/auth/callback?success=true&provider=google`);
+        }
         return;
       } else {
         res.status(400).send(this.getErrorPage('Google Sign-In Failed', result.message || 'Unable to sign in with Google.'));
