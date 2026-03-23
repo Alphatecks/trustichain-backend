@@ -1,5 +1,18 @@
+import type { User } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, GoogleOAuthCallbackResponse, LogoutResponse } from '../types/api/auth.types';
+import {
+  RegisterRequest,
+  RegisterResponse,
+  LoginRequest,
+  LoginResponse,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
+  GoogleOAuthResponse,
+  GoogleOAuthCallbackResponse,
+  LogoutResponse,
+  EnsureProfileResponse,
+  SupabasePublicConfigResponse,
+} from '../types/api/auth.types';
 import { emailService } from './email.service';
 import * as crypto from 'crypto';
 
@@ -525,6 +538,125 @@ export class AuthService {
   }
 
   /**
+   * Insert or update public.users from a Supabase Auth user (shared by server OAuth callback and SPA ensure-profile).
+   */
+  private async upsertPublicUserProfileFromAuthUser(user: User): Promise<{
+    id: string;
+    email: string;
+    fullName: string;
+    country: string | null;
+  }> {
+    const adminClient = supabaseAdmin || supabase;
+    const email = user.email;
+    const fullName =
+      (user.user_metadata?.full_name as string | undefined) ||
+      (user.user_metadata?.name as string | undefined) ||
+      email?.split('@')[0] ||
+      'User';
+    const country = (user.user_metadata?.country as string | null) ?? null;
+
+    const { data: existingProfile } = await adminClient.from('users').select('*').eq('id', user.id).maybeSingle();
+
+    if (!existingProfile) {
+      const { error: profileError } = await adminClient.from('users').insert({
+        id: user.id,
+        email: email?.toLowerCase() || '',
+        full_name: fullName,
+        country: country,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (profileError) {
+        console.error('Failed to create user profile:', profileError);
+      }
+    } else {
+      await adminClient
+        .from('users')
+        .update({
+          email: email?.toLowerCase() || existingProfile.email,
+          full_name: fullName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+    }
+
+    const { data: profileData } = await adminClient
+      .from('users')
+      .select('id, email, full_name, country')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    return {
+      id: profileData?.id || user.id,
+      email: profileData?.email || email || '',
+      fullName: profileData?.full_name || fullName,
+      country: profileData?.country ?? country ?? null,
+    };
+  }
+
+  /**
+   * Sync public.users from Supabase Auth for the JWT subject (SPA OAuth / any provider).
+   */
+  async ensurePublicUserProfile(userId: string): Promise<EnsureProfileResponse> {
+    if (!supabaseAdmin) {
+      return {
+        success: false,
+        message: 'Server misconfiguration: SUPABASE_SERVICE_ROLE_KEY required for profile sync',
+        error: 'Service unavailable',
+      };
+    }
+
+    const { data: beforeRow } = await supabaseAdmin.from('users').select('id').eq('id', userId).maybeSingle();
+
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (authError || !authData?.user) {
+      return {
+        success: false,
+        message: authError?.message || 'User not found in Auth',
+        error: 'Not found',
+      };
+    }
+
+    const userProfile = await this.upsertPublicUserProfileFromAuthUser(authData.user);
+    const created = !beforeRow;
+
+    return {
+      success: true,
+      message: 'Profile synced successfully',
+      data: {
+        user: {
+          id: userProfile.id,
+          email: userProfile.email,
+          fullName: userProfile.fullName,
+          country: userProfile.country,
+        },
+        created,
+      },
+    };
+  }
+
+  /**
+   * Public Supabase URL + anon key for browser client bootstrap (anon key is public by design).
+   */
+  getSupabasePublicConfig(): SupabasePublicConfigResponse {
+    const url = process.env.SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY;
+    if (!url || !anonKey) {
+      return {
+        success: false,
+        message: 'Supabase URL or anon key not configured',
+        error: 'Configuration error',
+      };
+    }
+    return {
+      success: true,
+      message: 'Supabase client configuration',
+      data: { url, anonKey },
+    };
+  }
+
+  /**
    * Get Google OAuth URL for sign-in
    * @returns OAuth URL to redirect user to
    */
@@ -596,63 +728,17 @@ export class AuthService {
       }
 
       const user = sessionData.user;
-      const email = user.email;
-      const fullName = user.user_metadata?.full_name || user.user_metadata?.name || email?.split('@')[0] || 'User';
-      const country = user.user_metadata?.country || null;
-
-      // Check if user profile exists in database
-      const adminClient = supabaseAdmin || supabase;
-      const { data: existingProfile } = await adminClient
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (!existingProfile) {
-        // Create user profile if it doesn't exist
-        const { error: profileError } = await adminClient
-          .from('users')
-          .insert({
-            id: user.id,
-            email: email?.toLowerCase() || '',
-            full_name: fullName,
-            country: country,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-
-        if (profileError) {
-          console.error('Failed to create user profile:', profileError);
-          // Continue anyway - user is authenticated
-        }
-      } else {
-        // Update user profile if it exists
-        await adminClient
-          .from('users')
-          .update({
-            email: email?.toLowerCase() || existingProfile.email,
-            full_name: fullName,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
-      }
-
-      // Get updated profile
-      const { data: profileData } = await adminClient
-        .from('users')
-        .select('id, email, full_name, country')
-        .eq('id', user.id)
-        .single();
+      const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
 
       return {
         success: true,
         message: 'Successfully signed in with Google',
         data: {
           user: {
-            id: profileData?.id || user.id,
-            email: profileData?.email || email || '',
-            fullName: profileData?.full_name || fullName,
-            country: profileData?.country || country,
+            id: userProfile.id,
+            email: userProfile.email,
+            fullName: userProfile.fullName,
+            country: userProfile.country,
           },
           accessToken: sessionData.session.access_token,
           refreshToken: sessionData.session.refresh_token,
@@ -688,57 +774,17 @@ export class AuthService {
       }
 
       const user = sessionData.user;
-      const email = user.email;
-      const fullName = user.user_metadata?.full_name || user.user_metadata?.name || email?.split('@')[0] || 'User';
-      const country = user.user_metadata?.country || null;
-
-      const adminClient = supabaseAdmin || supabase;
-      const { data: existingProfile } = await adminClient
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (!existingProfile) {
-        const { error: profileError } = await adminClient
-          .from('users')
-          .insert({
-            id: user.id,
-            email: email?.toLowerCase() || '',
-            full_name: fullName,
-            country: country,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-        if (profileError) {
-          console.error('Failed to create user profile:', profileError);
-        }
-      } else {
-        await adminClient
-          .from('users')
-          .update({
-            email: email?.toLowerCase() || existingProfile.email,
-            full_name: fullName,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
-      }
-
-      const { data: profileData } = await adminClient
-        .from('users')
-        .select('id, email, full_name, country')
-        .eq('id', user.id)
-        .single();
+      const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
 
       return {
         success: true,
         message: 'Successfully signed in with Google',
         data: {
           user: {
-            id: profileData?.id || user.id,
-            email: profileData?.email || email || '',
-            fullName: profileData?.full_name || fullName,
-            country: profileData?.country || country,
+            id: userProfile.id,
+            email: userProfile.email,
+            fullName: userProfile.fullName,
+            country: userProfile.country,
           },
           accessToken: sessionData.session.access_token,
           refreshToken: sessionData.session.refresh_token,

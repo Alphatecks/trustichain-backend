@@ -42,6 +42,7 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// Legacy server-mediated OAuth only. Prefer SPA signInWithOAuth (redirect to frontend) + POST /api/auth/ensure-profile.
 // OAuth intermediary: Supabase redirects here with hash (#access_token=...). Server cannot read hash, so this page
 // runs in the browser, reads the hash, and redirects to the backend callback with params in the query string.
 app.get('/auth/oauth-callback', (req: Request, res: Response) => {

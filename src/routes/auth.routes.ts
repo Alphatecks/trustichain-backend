@@ -47,8 +47,28 @@ router.get('/verify-email', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/auth/supabase-public-config
+ * @desc    Public Supabase URL + anon key (for SPA createClient). Anon key is public by design.
+ * @access  Public
+ */
+router.get('/supabase-public-config', (req, res) => {
+  authController.getSupabasePublicConfig(req, res);
+});
+
+/**
+ * @route   POST /api/auth/ensure-profile
+ * @desc    Sync public.users from Supabase Auth for the JWT user (call after SPA OAuth / signInWithOAuth).
+ * @access  Private
+ */
+router.post('/ensure-profile', authenticate, asyncHandler(async (req, res) => {
+  await authController.ensureProfile(req, res);
+}));
+
+/**
+ * Legacy server-mediated Google OAuth. Prefer SPA signInWithOAuth + POST /api/auth/ensure-profile.
+ *
  * @route   GET /api/auth/google
- * @desc    Get Google OAuth URL for sign-in
+ * @desc    Get Google OAuth URL for sign-in (redirectTo backend /auth/oauth-callback)
  * @access  Public
  */
 router.get('/google', async (req, res) => {
@@ -84,6 +104,8 @@ router.get('/google', async (req, res) => {
 });
 
 /**
+ * Legacy server OAuth callback (pairs with GET /api/auth/google). See /auth/oauth-callback in index.ts.
+ *
  * @route   GET /api/auth/google/callback?code=xxx
  * @desc    Handle Google OAuth callback
  * @access  Public

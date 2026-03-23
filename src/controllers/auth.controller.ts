@@ -1,6 +1,17 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
-import { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse, VerifyEmailRequest, VerifyEmailResponse, GoogleOAuthResponse, LogoutResponse } from '../types/api/auth.types';
+import {
+  RegisterRequest,
+  RegisterResponse,
+  LoginRequest,
+  LoginResponse,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
+  GoogleOAuthResponse,
+  LogoutResponse,
+  EnsureProfileResponse,
+  SupabasePublicConfigResponse,
+} from '../types/api/auth.types';
 
 export class AuthController {
   /**
@@ -458,6 +469,46 @@ export class AuthController {
 </body>
 </html>
       `;
+  }
+
+  /**
+   * Sync public.users from Supabase Auth for the current JWT (SPA OAuth).
+   * POST /api/auth/ensure-profile
+   */
+  async ensureProfile(req: Request, res: Response<EnsureProfileResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await authService.ensurePublicUserProfile(userId);
+      if (result.success) {
+        res.status(200).json(result);
+      } else if (result.error === 'Not found') {
+        res.status(404).json(result);
+      } else if (result.error === 'Service unavailable') {
+        res.status(503).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Public Supabase project URL + anon key for browser client bootstrap.
+   * GET /api/auth/supabase-public-config
+   */
+  getSupabasePublicConfig(_req: Request, res: Response<SupabasePublicConfigResponse>): void {
+    const result = authService.getSupabasePublicConfig();
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(503).json(result);
+    }
   }
 
   /**

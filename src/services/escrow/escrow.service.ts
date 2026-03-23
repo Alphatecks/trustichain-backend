@@ -23,6 +23,47 @@ export class EscrowService {
     return `#ESC-${year}-${sequence.toString().padStart(3, '0')}`;
   }
 
+  /**
+   * In-app row + FCM when an escrow is successfully created on XRPL (initiator and counterparty).
+   */
+  private async notifyEscrowCreated(params: {
+    initiatorUserId: string;
+    counterpartyUserId: string | null;
+    escrowId: string;
+    amountXrp: number;
+    xrplTxHash: string;
+  }): Promise<void> {
+    const { initiatorUserId, counterpartyUserId, escrowId, amountXrp, xrplTxHash } = params;
+    const amt = Number(amountXrp);
+    const amountLabel = Number.isFinite(amt) ? amt.toFixed(6) : String(amountXrp);
+    try {
+      await notificationService.createNotification({
+        userId: initiatorUserId,
+        type: 'escrow_created',
+        title: 'Escrow created',
+        message: `Escrow was created for ${amountLabel} XRP.`,
+        metadata: {
+          escrowId,
+          xrplTxHash,
+        },
+      });
+      if (counterpartyUserId) {
+        await notificationService.createNotification({
+          userId: counterpartyUserId,
+          type: 'escrow_created',
+          title: 'New escrow assigned',
+          message: `You have been added to a new escrow for ${amountLabel} XRP.`,
+          metadata: {
+            escrowId,
+            xrplTxHash,
+          },
+        });
+      }
+    } catch (notifyError) {
+      console.warn('Failed to create escrow created notifications:', notifyError);
+    }
+  }
+
   /** UUID v4 pattern for escrow id */
   private static readonly UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -940,38 +981,15 @@ export class EscrowService {
           .like('description', `%XUMM_UUID:${xummUuid}%`);
       }
 
-      // Create notifications for initiator and counterparty (if user)
-      // Only send notifications if escrow was auto-signed (active status)
+      // Create notifications for initiator and counterparty (if escrow is active on XRPL)
       if (xrplTxHash) {
-        try {
-          // Initiator
-          await notificationService.createNotification({
-            userId,
-            type: 'escrow_created',
-            title: 'Escrow created',
-            message: `Escrow was created for ${amountXrp.toFixed(6)} XRP.`,
-            metadata: {
-              escrowId: escrow.id,
-              xrplTxHash: xrplTxHash,
-            },
-          });
-
-          // Counterparty
-          if (counterpartyUserId) {
-            await notificationService.createNotification({
-              userId: counterpartyUserId,
-              type: 'escrow_created',
-              title: 'New escrow assigned',
-              message: `You have been added to a new escrow for ${amountXrp.toFixed(6)} XRP.`,
-              metadata: {
-                escrowId: escrow.id,
-                xrplTxHash: xrplTxHash,
-              },
-            });
-          }
-        } catch (notifyError) {
-          console.warn('Failed to create escrow created notifications:', notifyError);
-        }
+        await this.notifyEscrowCreated({
+          initiatorUserId: userId,
+          counterpartyUserId: counterpartyUserId,
+          escrowId: escrow.id,
+          amountXrp,
+          xrplTxHash,
+        });
 
         // Send emails to payer and counterparty
         try {
@@ -3724,6 +3742,16 @@ export class EscrowService {
         .select('*')
         .eq('id', escrowId)
         .single();
+
+      if (updatedEscrow && xrplTxHash) {
+        await this.notifyEscrowCreated({
+          initiatorUserId: updatedEscrow.user_id,
+          counterpartyUserId: updatedEscrow.counterparty_id,
+          escrowId,
+          amountXrp: Number(updatedEscrow.amount_xrp),
+          xrplTxHash,
+        });
+      }
 
       return {
         success: true,

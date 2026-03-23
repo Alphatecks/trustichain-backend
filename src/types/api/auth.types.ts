@@ -85,4 +85,31 @@ export interface LogoutResponse {
   error?: string;
 }
 
+/** POST /api/auth/ensure-profile — sync public.users from Supabase Auth (SPA OAuth, etc.) */
+export interface EnsureProfileResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    user: {
+      id: string;
+      email: string;
+      fullName: string;
+      country: string | null;
+    };
+    created: boolean;
+  };
+  error?: string;
+}
+
+/** GET /api/auth/supabase-public-config — public anon client bootstrap */
+export interface SupabasePublicConfigResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    url: string;
+    anonKey: string;
+  };
+  error?: string;
+}
+
 
