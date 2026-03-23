@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase';
+import { walletService } from './wallet/wallet.service';
 import {
   RegisterRequest,
   RegisterResponse,
@@ -596,6 +597,20 @@ export class AuthService {
   }
 
   /**
+   * Idempotent: ensure a personal custodial wallet exists (GET /api/wallet/balance requires a wallets row).
+   */
+  private async ensurePersonalWalletExists(userId: string): Promise<void> {
+    try {
+      const result = await walletService.createWallet(userId, 'personal');
+      if (!result.success) {
+        console.warn('[AuthService] ensurePersonalWalletExists:', result.message);
+      }
+    } catch (e) {
+      console.warn('[AuthService] ensurePersonalWalletExists: unexpected error', e);
+    }
+  }
+
+  /**
    * Sync public.users from Supabase Auth for the JWT subject (SPA OAuth / any provider).
    */
   async ensurePublicUserProfile(userId: string): Promise<EnsureProfileResponse> {
@@ -620,6 +635,8 @@ export class AuthService {
 
     const userProfile = await this.upsertPublicUserProfileFromAuthUser(authData.user);
     const created = !beforeRow;
+
+    await this.ensurePersonalWalletExists(userId);
 
     return {
       success: true,
@@ -729,6 +746,7 @@ export class AuthService {
 
       const user = sessionData.user;
       const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
+      await this.ensurePersonalWalletExists(user.id);
 
       return {
         success: true,
@@ -775,6 +793,7 @@ export class AuthService {
 
       const user = sessionData.user;
       const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
+      await this.ensurePersonalWalletExists(user.id);
 
       return {
         success: true,
