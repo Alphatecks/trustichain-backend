@@ -6,6 +6,14 @@
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { storageService } from '../storage/storage.service';
 
+/** Stored avatar: our bucket ref, or external https URL (e.g. Google profile photo). */
+async function resolveAvatarDisplayUrl(stored: string | null | undefined): Promise<string | null> {
+  if (stored == null || !String(stored).trim()) return null;
+  const t = String(stored).trim();
+  if (t.startsWith('http://') || t.startsWith('https://')) return t;
+  return storageService.getSignedUrlForUserProfilePhoto(stored);
+}
+
 export class UserService {
   /**
    * Get user profile including verification status
@@ -46,7 +54,7 @@ export class UserService {
       // Get auth user to check verification status
       const { data: authData, error: authError } = await supabaseAdmin?.auth.admin.getUserById(userId) || { data: null, error: null };
 
-      const avatarUrl = await storageService.getSignedUrlForUserProfilePhoto(
+      const avatarUrl = await resolveAvatarDisplayUrl(
         (userData as { avatar_url?: string | null }).avatar_url ?? null
       );
 

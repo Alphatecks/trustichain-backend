@@ -539,6 +539,19 @@ export class AuthService {
   }
 
   /**
+   * OAuth providers (e.g. Google) expose profile photo as `picture` or `avatar_url` in user_metadata.
+   */
+  private static oauthProfilePictureFromMetadata(metadata: User['user_metadata']): string | null {
+    if (!metadata || typeof metadata !== 'object') return null;
+    const m = metadata as Record<string, unknown>;
+    const raw = m.picture ?? m.avatar_url;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    const url = raw.trim();
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    return null;
+  }
+
+  /**
    * Insert or update public.users from a Supabase Auth user (shared by server OAuth callback and SPA ensure-profile).
    */
   private async upsertPublicUserProfileFromAuthUser(user: User): Promise<{
@@ -555,6 +568,7 @@ export class AuthService {
       email?.split('@')[0] ||
       'User';
     const country = (user.user_metadata?.country as string | null) ?? null;
+    const oauthPicture = AuthService.oauthProfilePictureFromMetadata(user.user_metadata);
 
     const { data: existingProfile } = await adminClient.from('users').select('*').eq('id', user.id).maybeSingle();
 
@@ -564,6 +578,7 @@ export class AuthService {
         email: email?.toLowerCase() || '',
         full_name: fullName,
         country: country,
+        avatar_url: oauthPicture,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -572,14 +587,17 @@ export class AuthService {
         console.error('Failed to create user profile:', profileError);
       }
     } else {
-      await adminClient
-        .from('users')
-        .update({
-          email: email?.toLowerCase() || existingProfile.email,
-          full_name: fullName,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
+      const hasNoAvatar =
+        existingProfile.avatar_url == null || String(existingProfile.avatar_url).trim() === '';
+      const updatePayload: Record<string, unknown> = {
+        email: email?.toLowerCase() || existingProfile.email,
+        full_name: fullName,
+        updated_at: new Date().toISOString(),
+      };
+      if (hasNoAvatar && oauthPicture) {
+        updatePayload.avatar_url = oauthPicture;
+      }
+      await adminClient.from('users').update(updatePayload).eq('id', user.id);
     }
 
     const { data: profileData } = await adminClient
