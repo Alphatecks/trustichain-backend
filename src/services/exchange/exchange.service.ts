@@ -1,8 +1,7 @@
 /**
  * Exchange Rate Service
  * Fetches live exchange rates for XRP against major currencies
- * Primary: Binance API (XRP/USDT ≈ USD)
- * Backup: XRPL Price Oracles (placeholder for future implementation)
+ * XRP/USD: Coinbase spot API only (https://api.coinbase.com/v2/prices/XRP-USD/spot)
  */
 
 interface CachedRate {
@@ -22,11 +21,6 @@ export class ExchangeService {
   private cache: Map<string, CachedRate> = new Map();
   private readonly CACHE_TTL = 60 * 1000; // 1 minute - keep XRP/USD closer to live
   private readonly MAX_STALE_AGE = 2 * 60 * 1000; // Don't use expired cache older than 2 minutes
-  // XRPL server config for future XRPL price oracle implementation
-  // private readonly XRPL_NETWORK = process.env.XRPL_NETWORK || 'testnet';
-  // private readonly XRPL_SERVER = this.XRPL_NETWORK === 'mainnet'
-  //   ? 'wss://xrplcluster.com'
-  //   : 'wss://s.altnet.rippletest.net:51233';
 
   /**
    * Get live exchange rates for XRP against USD, EUR, GBP, JPY
@@ -87,8 +81,7 @@ export class ExchangeService {
             changePercent: 0,
           });
         } else if (usdCurrency === 'USD') {
-          // When all APIs fail (e.g. Binance geo-blocked, CoinGecko/CryptoCompare rate-limited),
-          // use optional env fallback so balance USD still displays (e.g. on Render).
+          // When Coinbase is unavailable, optional env fallback so balance USD still displays (e.g. on Render).
           const fallback = process.env.FALLBACK_XRP_USD_RATE;
           const fallbackRate = fallback != null ? parseFloat(fallback) : NaN;
           if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
@@ -99,7 +92,7 @@ export class ExchangeService {
               change: 0,
               changePercent: 0,
             });
-            console.warn('[Exchange] Using FALLBACK_XRP_USD_RATE (all APIs failed or unavailable)', {
+            console.warn('[Exchange] Using FALLBACK_XRP_USD_RATE (Coinbase unavailable)', {
               rate: fallbackRate,
               hint: 'Set FALLBACK_XRP_USD_RATE in Render env to a rough XRP/USD value; update periodically.',
             });
@@ -203,273 +196,60 @@ export class ExchangeService {
   }
 
   /**
-   * Fetch exchange rate from multiple sources (in order of preference)
-   * 1. Binance API (primary) - may be geo-blocked in some regions
-   * 2. CoinGecko API (alternative) - more widely available
-   * 3. CryptoCompare API (alternative) - backup option
-   * 4. XRPL price oracles (when configured) - for USD only
+   * Fetch XRP spot price vs USD from Coinbase (sole live source for XRP/USD).
    */
   private async fetchExchangeRate(currency: string): Promise<number | null> {
-    // Try Binance API first (primary)
-    const binanceRate = await this.fetchFromBinance(currency);
-    if (binanceRate !== null) {
-      return binanceRate;
-    }
-
-    // If Binance fails, try CoinGecko (alternative source, not a fallback rate)
-    const coinGeckoRate = await this.fetchFromCoinGecko(currency);
-    if (coinGeckoRate !== null) {
-      return coinGeckoRate;
-    }
-
-    // If CoinGecko fails, try CryptoCompare (another alternative source)
-    const cryptoCompareRate = await this.fetchFromCryptoCompare(currency);
-    if (cryptoCompareRate !== null) {
-      return cryptoCompareRate;
-    }
-
-    // If all APIs fail and currency is USD, try XRPL price oracles (backup)
-    if (currency === 'USD') {
-      const xrplRate = await this.fetchFromXRPLOracle('USD');
-      if (xrplRate !== null) {
-        return xrplRate;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Fetch XRP/USDT rate from Binance API (primary source)
-   * USDT is treated as USD equivalent (1:1)
-   */
-  private async fetchFromBinance(currency: string): Promise<number | null> {
-    try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromBinance',message:'fetchFromBinance: Entry',data:{currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      
-      // Binance provides XRP/USDT, which we use as USD equivalent
-      // For other currencies, we'll need to convert from USD
-      if (currency === 'USD') {
-        const url = 'https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT';
-        console.log('[DEBUG] fetchFromBinance: Fetching XRP/USDT from Binance', { currency, url });
-        
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-        });
-
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromBinance',message:'fetchFromBinance: Response received',data:{currency,status:response.status,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
-
-        if (!response.ok) {
-          let errorBody = '';
-          try {
-            errorBody = await response.text();
-            console.log('[DEBUG] fetchFromBinance: Response not OK', { 
-              currency, 
-              status: response.status, 
-              statusText: response.statusText,
-              errorBody 
-            });
-          } catch (e) {
-            console.log('[DEBUG] fetchFromBinance: Response not OK (could not read body)', { 
-              currency, 
-              status: response.status, 
-              statusText: response.statusText 
-            });
-          }
-          return null;
-        }
-
-        const data = await response.json() as { symbol: string; price: string };
-        console.log('[DEBUG] fetchFromBinance: Parsed response data', { currency, data, dataType: typeof data, hasPrice: 'price' in data });
-        
-        const rate = parseFloat(data.price);
-        console.log('[DEBUG] fetchFromBinance: Parsed rate', { currency, priceString: data.price, rate, isNaN: isNaN(rate) });
-        
-        if (isNaN(rate) || rate <= 0) {
-          console.warn('[WARNING] fetchFromBinance: Invalid rate returned', { currency, rate, data, isNaN: isNaN(rate), isPositive: rate > 0 });
-          return null;
-        }
-
-        console.log('[DEBUG] fetchFromBinance: Success', { currency, rate, symbol: data.symbol });
-        return rate;
-      } else {
-        // For non-USD currencies, we'll convert from USD using fiat exchange rates
-        // This method will be called after USD is fetched
-        return null;
-      }
-    } catch (error) {
-      // #region agent log
-      const errorData = error instanceof Error ? {message:error.message,stack:error.stack,name:error.name} : {error:String(error)};
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromBinance',message:'fetchFromBinance: Error',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      console.log('[DEBUG] fetchFromBinance: Error', {
-        currency,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Fetch XRP/USD rate from XRPL price oracles (backup for USD)
-   */
-  private async fetchFromXRPLOracle(currency: string): Promise<number | null> {
-    // Only use XRPL oracles for USD
     if (currency !== 'USD') {
       return null;
     }
+    return this.fetchFromCoinbase();
+  }
 
+  /**
+   * Coinbase public API: XRP-USD spot price (1 XRP in USD).
+   * @see https://docs.cloud.coinbase.com/sign-in-with-coinbase/docs/api-prices#get-spot-price
+   */
+  private async fetchFromCoinbase(): Promise<number | null> {
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromXRPLOracle',message:'fetchFromXRPLOracle: Entry',data:{currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      
-      console.log('[DEBUG] fetchFromXRPLOracle: Attempting to fetch from XRPL price oracles', { currency });
-      
-      // Note: XRPL price oracles require oracle account addresses and document IDs
-      // This is a simplified implementation - in production, you'd need to maintain
-      // a list of trusted oracle accounts
-      // For now, we'll skip XRPL oracles as they require setup
-      // TODO: Implement XRPL price oracle support when oracle accounts are configured
-      
-      console.log('[DEBUG] fetchFromXRPLOracle: XRPL oracles not yet configured, skipping');
-      return null;
-      
-      /* Future implementation:
-      const client = new Client(this.XRPL_SERVER);
-      await client.connect();
-      
-      try {
-        // You'll need to provide oracle account addresses and document IDs
-        const request = {
-          command: 'get_aggregate_price',
-          base_asset: 'XRP',
-          quote_asset: 'USD',
-          oracles: [
-            // Add trusted oracle accounts here
-          ],
-        };
-        
-        const response = await client.request(request);
-        await client.disconnect();
-        
-        // Extract mean price from aggregate response
-        const meanPrice = response.result?.mean;
-        if (meanPrice && meanPrice > 0) {
-          return parseFloat(meanPrice);
+      const url = 'https://api.coinbase.com/v2/prices/XRP-USD/spot';
+      console.log('[DEBUG] fetchFromCoinbase: Fetching XRP/USD spot from Coinbase', { url });
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        let errorBody = '';
+        try {
+          errorBody = await response.text();
+          console.log('[DEBUG] fetchFromCoinbase: Response not OK', {
+            status: response.status,
+            statusText: response.statusText,
+            errorBody,
+          });
+        } catch {
+          console.log('[DEBUG] fetchFromCoinbase: Response not OK (could not read body)', {
+            status: response.status,
+            statusText: response.statusText,
+          });
         }
-      } catch (oracleError) {
-        await client.disconnect();
-        throw oracleError;
-      }
-      */
-    } catch (error) {
-      // #region agent log
-      const errorData = error instanceof Error ? {message:error.message,stack:error.stack,name:error.name} : {error:String(error)};
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'exchange.service.ts:fetchFromXRPLOracle',message:'fetchFromXRPLOracle: Error',data:{currency,errorData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      console.log('[DEBUG] fetchFromXRPLOracle: Error', {
-        currency,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Fetch XRP rate from CoinGecko API (alternative source when Binance is blocked)
-   */
-  private async fetchFromCoinGecko(currency: string): Promise<number | null> {
-    try {
-      console.log('[DEBUG] fetchFromCoinGecko: Attempting to fetch from CoinGecko', { currency });
-      
-      const url = `https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=${currency.toLowerCase()}`;
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      const apiKey = process.env.COINGECKO_API_KEY;
-      if (apiKey) {
-        headers['x-cg-demo-api-key'] = apiKey;
-      }
-
-      const response = await fetch(url, {
-        method: 'GET',
-        headers,
-      });
-
-      if (!response.ok) {
-        console.log('[DEBUG] fetchFromCoinGecko: Response not OK', { 
-          currency, 
-          status: response.status, 
-          statusText: response.statusText 
-        });
         return null;
       }
 
-      const data = await response.json() as { ripple?: Record<string, number> };
-      const rate = data.ripple?.[currency.toLowerCase()] || null;
-      
-      if (rate !== null && rate > 0) {
-        console.log('[DEBUG] fetchFromCoinGecko: Success', { currency, rate });
-        return rate;
-      }
+      const data = await response.json() as { data?: { amount?: string } };
+      const amountStr = data.data?.amount;
+      const rate = amountStr != null ? parseFloat(amountStr) : NaN;
 
-      console.log('[DEBUG] fetchFromCoinGecko: Invalid or missing rate', { currency, data, rate });
-      return null;
-    } catch (error) {
-      console.log('[DEBUG] fetchFromCoinGecko: Error', {
-        currency,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Fetch XRP rate from CryptoCompare API (another alternative source)
-   */
-  private async fetchFromCryptoCompare(currency: string): Promise<number | null> {
-    try {
-      console.log('[DEBUG] fetchFromCryptoCompare: Attempting to fetch from CryptoCompare', { currency });
-      
-      // CryptoCompare free tier: https://min-api.cryptocompare.com/
-      // Note: For production, you might want to use an API key for higher rate limits
-      const url = `https://min-api.cryptocompare.com/data/price?fsym=XRP&tsyms=${currency}`;
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        console.log('[DEBUG] fetchFromCryptoCompare: Response not OK', { 
-          currency, 
-          status: response.status, 
-          statusText: response.statusText 
-        });
+      if (isNaN(rate) || rate <= 0) {
+        console.warn('[WARNING] fetchFromCoinbase: Invalid rate', { data, rate });
         return null;
       }
 
-      const data = await response.json() as Record<string, number>;
-      const rate = data[currency];
-      
-      if (rate && rate > 0) {
-        console.log('[DEBUG] fetchFromCryptoCompare: Success', { currency, rate });
-        return rate;
-      }
-
-      console.log('[DEBUG] fetchFromCryptoCompare: Invalid or missing rate', { currency, data, rate });
-      return null;
+      console.log('[DEBUG] fetchFromCoinbase: Success', { rate });
+      return rate;
     } catch (error) {
-      console.log('[DEBUG] fetchFromCryptoCompare: Error', {
-        currency,
+      console.log('[DEBUG] fetchFromCoinbase: Error', {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       return null;
