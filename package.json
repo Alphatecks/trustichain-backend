@@ -27,6 +27,7 @@
     "fs": "^0.0.1-security",
     "heic-convert": "^2.1.0",
     "multer": "^2.0.2",
+    "otplib": "^13.4.0",
     "path": "^0.12.7",
     "resend": "^3.5.0",
     "ripple-keypairs": "^2.0.0",

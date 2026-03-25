@@ -16,6 +16,8 @@ import {
 } from '../types/api/auth.types';
 import { emailService } from './email.service';
 import * as crypto from 'crypto';
+import { createMfaLoginToken, parseMfaLoginToken, mfaService } from './mfa.service';
+import type { LoginMfaRequest } from '../types/api/auth.types';
 
 export class AuthService {
   /**
@@ -425,6 +427,47 @@ export class AuthService {
       }).catch(() => {});
       // #endregion
 
+      const { data: mfaRow } = await supabase
+        .from('users')
+        .select('mfa_enabled')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (mfaRow?.mfa_enabled === true && authData.session?.access_token) {
+        let mfaToken: string;
+        try {
+          mfaToken = createMfaLoginToken({
+            userId: user.id,
+            email: userEmail,
+            access_token: authData.session.access_token,
+            refresh_token: authData.session.refresh_token ?? '',
+          });
+        } catch {
+          await supabase.auth.signOut();
+          return {
+            success: false,
+            message:
+              'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
+            error: 'Server misconfiguration',
+          };
+        }
+        await supabase.auth.signOut();
+        return {
+          success: true,
+          message: 'Additional verification required',
+          data: {
+            requiresMfa: true,
+            mfaToken,
+            user: {
+              id: user.id,
+              email: userEmail,
+              fullName,
+              country: country ?? '',
+            },
+          },
+        };
+      }
+
       return {
         success: true,
         message: 'Login successful',
@@ -437,6 +480,85 @@ export class AuthService {
           },
           accessToken: authData.session?.access_token,
           refreshToken: authData.session?.refresh_token,
+        },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return {
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  /**
+   * Complete password login when MFA is enabled (TOTP second step).
+   */
+  async loginWithMfa(body: LoginMfaRequest): Promise<LoginResponse> {
+    try {
+      const { code, mfaToken, email } = body;
+      if (!code || !mfaToken) {
+        return {
+          success: false,
+          message: 'code and mfaToken are required',
+          error: 'Validation failed',
+        };
+      }
+
+      const payload = parseMfaLoginToken(mfaToken);
+      if (!payload) {
+        return {
+          success: false,
+          message: 'Invalid or expired MFA token. Please sign in again.',
+          error: 'Invalid mfaToken',
+        };
+      }
+
+      if (email && email.toLowerCase().trim() !== payload.email.toLowerCase()) {
+        return {
+          success: false,
+          message: 'Email does not match this sign-in attempt',
+          error: 'Email mismatch',
+        };
+      }
+
+      const totpOk = await mfaService.verifyLoginCode(payload.userId, code);
+      if (!totpOk) {
+        return {
+          success: false,
+          message: 'Invalid authenticator code',
+          error: 'Invalid code',
+        };
+      }
+
+      const adminClient = supabaseAdmin || supabase;
+      const { data: profile, error: profileError } = await adminClient
+        .from('users')
+        .select('email, full_name, country')
+        .eq('id', payload.userId)
+        .maybeSingle();
+
+      if (profileError || !profile) {
+        return {
+          success: false,
+          message: 'User profile not found',
+          error: 'Not found',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Login successful',
+        data: {
+          user: {
+            id: payload.userId,
+            email: profile.email,
+            fullName: profile.full_name,
+            country: profile.country ?? '',
+          },
+          accessToken: payload.access_token,
+          refreshToken: payload.refresh_token,
         },
       };
     } catch (error) {

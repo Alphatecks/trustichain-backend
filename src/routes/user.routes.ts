@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { userController } from '../controllers/user.controller';
+import { mfaController } from '../controllers/mfa.controller';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -18,6 +19,35 @@ const profilePhotoUpload = multer({
  */
 router.get('/profile', authenticate, asyncHandler(async (req, res) => {
   await userController.getUserProfile(req, res);
+}));
+
+/**
+ * @route   POST /api/user/mfa/setup
+ * @desc    Start TOTP enrollment — returns secret + otpauth URL for authenticator app
+ * @access  Private
+ */
+router.post('/mfa/setup', authenticate, asyncHandler(async (req, res) => {
+  await mfaController.setup(req, res);
+}));
+
+/**
+ * @route   POST /api/user/mfa/setup/verify
+ * @desc    Finish TOTP enrollment with a valid 6-digit code
+ * @access  Private
+ * @body    { code }
+ */
+router.post('/mfa/setup/verify', authenticate, asyncHandler(async (req, res) => {
+  await mfaController.verifySetup(req, res);
+}));
+
+/**
+ * @route   POST /api/user/mfa/disable
+ * @desc    Disable TOTP with a current 6-digit code
+ * @access  Private
+ * @body    { code }
+ */
+router.post('/mfa/disable', authenticate, asyncHandler(async (req, res) => {
+  await mfaController.disable(req, res);
 }));
 
 /**

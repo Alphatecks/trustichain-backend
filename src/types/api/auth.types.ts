@@ -39,9 +39,20 @@ export interface LoginResponse {
     };
     accessToken?: string;
     refreshToken?: string;
+    /** Present when password sign-in succeeded but TOTP is required */
+    requiresMfa?: boolean;
+    /** Short-lived encrypted token for POST /api/auth/login/mfa */
+    mfaToken?: string;
   };
   error?: string;
   emailVerificationRequired?: boolean;
+}
+
+/** POST /api/auth/login/mfa — complete login after TOTP */
+export interface LoginMfaRequest {
+  code: string;
+  mfaToken: string;
+  email?: string;
 }
 
 export interface VerifyEmailRequest {

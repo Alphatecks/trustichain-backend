@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
-import { validateRegister, validateLogin } from '../middleware/validation';
+import { validateRegister, validateLogin, validateLoginMfa } from '../middleware/validation';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate } from '../middleware/auth';
 
@@ -24,6 +24,16 @@ router.post('/register', validateRegister, asyncHandler(async (req, res) => {
  */
 router.post('/login', validateLogin, asyncHandler(async (req, res) => {
   await authController.login(req, res);
+}));
+
+/**
+ * @route   POST /api/auth/login/mfa
+ * @desc    Complete login with TOTP after POST /api/auth/login returned requiresMfa + mfaToken
+ * @access  Public
+ * @body    { code, mfaToken, email? }
+ */
+router.post('/login/mfa', validateLoginMfa, asyncHandler(async (req, res) => {
+  await authController.loginMfa(req, res);
 }));
 
 /**

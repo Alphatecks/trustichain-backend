@@ -5,6 +5,7 @@ import {
   RegisterResponse,
   LoginRequest,
   LoginResponse,
+  LoginMfaRequest,
   VerifyEmailRequest,
   VerifyEmailResponse,
   GoogleOAuthResponse,
@@ -115,6 +116,29 @@ export class AuthController {
         // Return 403 if email not verified, 401 for other auth failures
         const statusCode = result.emailVerificationRequired ? 403 : 401;
         res.status(statusCode).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Complete login with TOTP (after POST /api/auth/login returned requiresMfa)
+   * POST /api/auth/login/mfa
+   */
+  async loginMfa(req: Request, res: Response<LoginResponse>): Promise<void> {
+    try {
+      const body = req.body as LoginMfaRequest;
+      const result = await authService.loginWithMfa(body);
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(401).json(result);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
