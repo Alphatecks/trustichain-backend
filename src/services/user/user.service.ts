@@ -28,6 +28,8 @@ export class UserService {
       country: string | null;
       title?: string;
       verified: boolean;
+      /** Google Authenticator / TOTP MFA enabled (from users.mfa_enabled). */
+      mfaEnabled: boolean;
       /** Time-limited URL for displaying the profile photo (private storage bucket). */
       avatarUrl: string | null;
     };
@@ -39,7 +41,7 @@ export class UserService {
       // Get user from users table
       const { data: userData, error: userError } = await adminClient
         .from('users')
-        .select('id, email, full_name, country, avatar_url')
+        .select('id, email, full_name, country, avatar_url, mfa_enabled')
         .eq('id', userId)
         .single();
 
@@ -58,6 +60,8 @@ export class UserService {
         (userData as { avatar_url?: string | null }).avatar_url ?? null
       );
 
+      const mfaEnabled = (userData as { mfa_enabled?: boolean }).mfa_enabled === true;
+
       if (authError && !authData) {
         // If we can't get auth data, assume not verified
         return {
@@ -69,6 +73,7 @@ export class UserService {
             fullName: userData.full_name,
             country: userData.country,
             verified: false,
+            mfaEnabled,
             avatarUrl,
           },
         };
@@ -83,6 +88,7 @@ export class UserService {
           fullName: userData.full_name,
           country: userData.country,
           verified: authData?.user?.email_confirmed_at !== null,
+          mfaEnabled,
           avatarUrl,
         },
       };

@@ -11,6 +11,8 @@ interface UserProfileResponse {
     country: string | null;
     title?: string;
     verified: boolean;
+    /** True when TOTP MFA is active (sync toggle from GET /api/user/profile). */
+    mfaEnabled?: boolean;
     avatarUrl?: string | null;
   };
   error?: string;
