@@ -451,7 +451,9 @@ export class AuthService {
             error: 'Server misconfiguration',
           };
         }
-        await supabase.auth.signOut();
+        // Clear this client's session only. Default signOut() uses scope "global" and revokes
+        // the refresh token on the server, which invalidates the tokens we put in mfaToken.
+        await supabase.auth.signOut({ scope: 'local' });
         return {
           success: true,
           message: 'Additional verification required',
