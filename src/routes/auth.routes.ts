@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
-import { validateRegister, validateLogin, validateLoginMfa } from '../middleware/validation';
+import { validateRegister, validateLogin, validateLoginMfa, validateOAuthMfaPrep } from '../middleware/validation';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate } from '../middleware/auth';
 
@@ -35,6 +35,16 @@ router.post('/login', validateLogin, asyncHandler(async (req, res) => {
  */
 router.post('/login/mfa', validateLoginMfa, asyncHandler(async (req, res) => {
   await authController.loginMfa(req, res);
+}));
+
+/**
+ * @route   POST /api/auth/oauth/mfa-prep
+ * @desc    SPA Google OAuth: after signInWithOAuth, send session tokens to get mfaToken when mfa_enabled (then POST /api/auth/login/mfa)
+ * @access  Public
+ * @body    { accessToken, refreshToken }
+ */
+router.post('/oauth/mfa-prep', validateOAuthMfaPrep, asyncHandler(async (req, res) => {
+  await authController.prepareOAuthMfa(req, res);
 }));
 
 /**

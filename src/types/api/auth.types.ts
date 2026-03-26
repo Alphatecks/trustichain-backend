@@ -87,8 +87,18 @@ export interface GoogleOAuthCallbackResponse {
     };
     accessToken?: string;
     refreshToken?: string;
+    /** Google sign-in succeeded but TOTP is required before tokens are issued */
+    requiresMfa?: boolean;
+    /** Encrypted token for POST /api/auth/login/mfa (same as password MFA flow) */
+    mfaToken?: string;
   };
   error?: string;
+}
+
+/** POST /api/auth/oauth/mfa-prep — SPA Google OAuth: obtain mfaToken when mfa_enabled (call before using the app) */
+export interface OAuthMfaPrepRequest {
+  accessToken: string;
+  refreshToken: string;
 }
 
 export interface LogoutResponse {

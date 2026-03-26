@@ -1,4 +1,4 @@
-import { createClient, type User } from '@supabase/supabase-js';
+import { createClient, type Session, type User } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { walletService } from './wallet/wallet.service';
 import {
@@ -13,6 +13,7 @@ import {
   LogoutResponse,
   EnsureProfileResponse,
   SupabasePublicConfigResponse,
+  OAuthMfaPrepRequest,
 } from '../types/api/auth.types';
 import { emailService } from './email.service';
 import * as crypto from 'crypto';
@@ -874,6 +875,168 @@ export class AuthService {
   }
 
   /**
+   * After Google OAuth session is established (code exchange or setSession), upsert profile
+   * and either require TOTP (mfa_enabled) or return tokens.
+   */
+  private async finalizeGoogleOAuthSession(
+    session: Session,
+    user: User
+  ): Promise<GoogleOAuthCallbackResponse> {
+    const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
+    await this.ensurePersonalWalletExists(user.id);
+
+    const { data: mfaRow } = await supabase
+      .from('users')
+      .select('mfa_enabled')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (mfaRow?.mfa_enabled === true && session.access_token) {
+      let mfaToken: string;
+      try {
+        mfaToken = createMfaLoginToken({
+          userId: user.id,
+          email: userProfile.email,
+          access_token: session.access_token,
+          refresh_token: session.refresh_token ?? '',
+        });
+      } catch {
+        return {
+          success: false,
+          message:
+            'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
+          error: 'Server misconfiguration',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Additional verification required',
+        data: {
+          user: {
+            id: userProfile.id,
+            email: userProfile.email,
+            fullName: userProfile.fullName,
+            country: userProfile.country,
+          },
+          requiresMfa: true,
+          mfaToken,
+        },
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Successfully signed in with Google',
+      data: {
+        user: {
+          id: userProfile.id,
+          email: userProfile.email,
+          fullName: userProfile.fullName,
+          country: userProfile.country,
+        },
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
+      },
+    };
+  }
+
+  /**
+   * SPA Google OAuth: after signInWithOAuth, call with session tokens to get mfaToken for POST /api/auth/login/mfa.
+   * Frontend should sign out the Supabase client session until TOTP completes (otherwise the user still holds a JWT).
+   */
+  async prepareOAuthMfa(body: OAuthMfaPrepRequest): Promise<LoginResponse> {
+    try {
+      const accessToken = String(body.accessToken ?? '').trim();
+      const refreshToken = String(body.refreshToken ?? '').trim();
+      if (!accessToken || !refreshToken) {
+        return {
+          success: false,
+          message: 'accessToken and refreshToken are required',
+          error: 'Validation failed',
+        };
+      }
+
+      const ephemeral = createEphemeralAuthClient();
+      const { data: sessionData, error: sessionError } = await ephemeral.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (sessionError || !sessionData.session || !sessionData.user) {
+        return {
+          success: false,
+          message: 'Invalid or expired session',
+          error: 'Unauthorized',
+        };
+      }
+
+      const user = sessionData.user;
+      const { data: mfaRow } = await supabase
+        .from('users')
+        .select('mfa_enabled')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (mfaRow?.mfa_enabled !== true) {
+        return {
+          success: false,
+          message: 'Two-factor authentication is not enabled for this account',
+          error: 'MFA not enabled',
+        };
+      }
+
+      const userEmail = user.email || '';
+      const userMetadata = user.user_metadata as Record<string, unknown> | undefined;
+      const fullName =
+        (typeof userMetadata?.full_name === 'string' ? userMetadata.full_name : undefined) ||
+        (typeof userMetadata?.name === 'string' ? userMetadata.name : undefined) ||
+        userEmail.split('@')[0] ||
+        'User';
+      const country = (typeof userMetadata?.country === 'string' ? userMetadata.country : null) ?? null;
+
+      let mfaToken: string;
+      try {
+        mfaToken = createMfaLoginToken({
+          userId: user.id,
+          email: userEmail,
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+      } catch {
+        return {
+          success: false,
+          message:
+            'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
+          error: 'Server misconfiguration',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Additional verification required',
+        data: {
+          requiresMfa: true,
+          mfaToken,
+          user: {
+            id: user.id,
+            email: userEmail,
+            fullName,
+            country: country ?? '',
+          },
+        },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      return {
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      };
+    }
+  }
+
+  /**
    * Get Google OAuth URL for sign-in
    * @returns OAuth URL to redirect user to
    */
@@ -933,8 +1096,8 @@ export class AuthService {
    */
   async handleGoogleOAuthCallback(code: string): Promise<GoogleOAuthCallbackResponse> {
     try {
-      // Exchange code for session
-      const { data: sessionData, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
+      const loginClient = createEphemeralAuthClient();
+      const { data: sessionData, error: sessionError } = await loginClient.auth.exchangeCodeForSession(code);
 
       if (sessionError || !sessionData.session || !sessionData.user) {
         return {
@@ -944,24 +1107,7 @@ export class AuthService {
         };
       }
 
-      const user = sessionData.user;
-      const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
-      await this.ensurePersonalWalletExists(user.id);
-
-      return {
-        success: true,
-        message: 'Successfully signed in with Google',
-        data: {
-          user: {
-            id: userProfile.id,
-            email: userProfile.email,
-            fullName: userProfile.fullName,
-            country: userProfile.country,
-          },
-          accessToken: sessionData.session.access_token,
-          refreshToken: sessionData.session.refresh_token,
-        },
-      };
+      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
@@ -978,7 +1124,8 @@ export class AuthService {
    */
   async handleGoogleOAuthCallbackWithTokens(access_token: string, refresh_token: string): Promise<GoogleOAuthCallbackResponse> {
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+      const loginClient = createEphemeralAuthClient();
+      const { data: sessionData, error: sessionError } = await loginClient.auth.setSession({
         access_token,
         refresh_token,
       });
@@ -991,24 +1138,7 @@ export class AuthService {
         };
       }
 
-      const user = sessionData.user;
-      const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
-      await this.ensurePersonalWalletExists(user.id);
-
-      return {
-        success: true,
-        message: 'Successfully signed in with Google',
-        data: {
-          user: {
-            id: userProfile.id,
-            email: userProfile.email,
-            fullName: userProfile.fullName,
-            country: userProfile.country,
-          },
-          accessToken: sessionData.session.access_token,
-          refreshToken: sessionData.session.refresh_token,
-        },
-      };
+      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {

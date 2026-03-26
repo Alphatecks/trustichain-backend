@@ -82,6 +82,37 @@ const loginMfaSchema = z.object({
   email: z.string().email('Invalid email').optional(),
 });
 
+const oauthMfaPrepSchema = z.object({
+  accessToken: z.string().min(1, 'accessToken is required'),
+  refreshToken: z.string().min(1, 'refreshToken is required'),
+});
+
+export const validateOAuthMfaPrep = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  try {
+    oauthMfaPrepSchema.parse(req.body);
+    next();
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      const firstError = error.issues[0];
+      res.status(400).json({
+        success: false,
+        message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid request data',
+        error: 'Validation failed',
+      });
+    }
+  }
+};
+
 export const validateLoginMfa = (
   req: Request,
   res: Response,

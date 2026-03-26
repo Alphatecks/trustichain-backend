@@ -12,6 +12,7 @@ import {
   LogoutResponse,
   EnsureProfileResponse,
   SupabasePublicConfigResponse,
+  OAuthMfaPrepRequest,
 } from '../types/api/auth.types';
 
 export class AuthController {
@@ -139,6 +140,35 @@ export class AuthController {
         res.status(200).json(result);
       } else {
         res.status(401).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * SPA Google OAuth: obtain mfaToken when mfa_enabled (then POST /api/auth/login/mfa with TOTP).
+   * POST /api/auth/oauth/mfa-prep
+   */
+  async prepareOAuthMfa(req: Request, res: Response<LoginResponse>): Promise<void> {
+    try {
+      const body = req.body as OAuthMfaPrepRequest;
+      const result = await authService.prepareOAuthMfa(body);
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        const status =
+          result.error === 'Unauthorized'
+            ? 401
+            : result.error === 'Internal server error'
+              ? 500
+              : 400;
+        res.status(status).json(result);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
@@ -586,6 +616,32 @@ export class AuthController {
   }
 
   /**
+   * Google OAuth completed but TOTP required — send SPA to /auth/callback with mfa_token in hash (fragment).
+   */
+  private buildGoogleOAuthFrontendMfaRedirect(
+    frontendBaseUrl: string,
+    data: {
+      mfaToken: string;
+      user: { id: string; email: string; fullName: string; country: string | null };
+    }
+  ): string {
+    const origin = frontendBaseUrl.replace(/\/$/, '');
+    const hashParams = new URLSearchParams({
+      requires_mfa: 'true',
+      mfa_token: data.mfaToken,
+      user_email: data.user.email,
+      user_id: data.user.id,
+    });
+    if (data.user.fullName) {
+      hashParams.set('full_name', data.user.fullName);
+    }
+    if (data.user.country) {
+      hashParams.set('country', String(data.user.country));
+    }
+    return `${origin}/auth/callback?success=true&provider=google#${hashParams.toString()}`;
+  }
+
+  /**
    * Handle Google OAuth callback
    * GET /api/auth/google/callback?code=xxx
    */
@@ -664,6 +720,16 @@ export class AuthController {
 
       if (result.success && result.data) {
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        if (result.data.requiresMfa && result.data.mfaToken && result.data.user) {
+          res.redirect(
+            302,
+            this.buildGoogleOAuthFrontendMfaRedirect(frontendUrl, {
+              mfaToken: result.data.mfaToken,
+              user: result.data.user,
+            })
+          );
+          return;
+        }
         const { accessToken, refreshToken } = result.data;
         if (accessToken && refreshToken) {
           res.redirect(302, this.buildGoogleOAuthFrontendRedirect(frontendUrl, { accessToken, refreshToken }));
