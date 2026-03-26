@@ -79,4 +79,27 @@ export interface SavingsTransactionsResponse {
   error?: string;
 }
 
+/** POST /api/savings/transfer — move XRP from custodial wallet into a savings bucket */
+export interface SavingsTransferRequest {
+  /** Target savings account (`savings_wallets.id`) */
+  savingsWalletId: string;
+  /** Source custodial wallet (`wallets.id`, personal). Omit if user has only one XRP wallet. */
+  sourceWalletId?: string;
+  /** Amount in XRP to move */
+  amountXrp: number;
+}
+
+export interface SavingsTransferResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    savingsWalletId: string;
+    amountXrp: number;
+    amountUsd: number;
+    newWalletBalanceXrp: number;
+  };
+  error?: string;
+}
+
 

@@ -4,6 +4,7 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import { exchangeService } from '../exchange/exchange.service';
 
 import {
   SavingsSummaryResponse,
@@ -11,6 +12,7 @@ import {
   SavingsWalletsResponse,
   SavingsTransactionsResponse,
   SavingsTransactionDirection,
+  SavingsTransferResponse,
 } from '../../types/api/savings.types';
 import type { TransactionType } from '../../types/api/transaction.types';
 
@@ -397,6 +399,168 @@ export class SavingsService {
    * Create a new savings wallet
    * POST /api/savings/wallets
    */
+  /**
+   * Move XRP from the user's custodial wallet (DB balance) into a savings wallet.
+   * Records a completed `transfer` transaction with `savings_wallet_id` for dashboard aggregation.
+   */
+  async transferFromWallet(
+    userId: string,
+    body: { savingsWalletId: string; sourceWalletId?: string; amountXrp: number }
+  ): Promise<SavingsTransferResponse> {
+    try {
+      const adminClient = supabaseAdmin;
+      if (!adminClient) {
+        return {
+          success: false,
+          message: 'Savings transfer requires server configuration (service role)',
+          error: 'Service unavailable',
+        };
+      }
+
+      const savingsWalletId = String(body.savingsWalletId || '').trim();
+      const amountRaw = Number(body.amountXrp);
+      if (!savingsWalletId) {
+        return { success: false, message: 'savingsWalletId is required', error: 'Validation failed' };
+      }
+      if (!Number.isFinite(amountRaw) || amountRaw <= 0) {
+        return { success: false, message: 'amountXrp must be a positive number', error: 'Validation failed' };
+      }
+
+      const amountXrp = parseFloat(amountRaw.toFixed(6));
+      if (amountXrp <= 0) {
+        return { success: false, message: 'amountXrp must be a positive number', error: 'Validation failed' };
+      }
+
+      const { data: savingsRow, error: savingsErr } = await adminClient
+        .from('savings_wallets')
+        .select('id, name')
+        .eq('id', savingsWalletId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (savingsErr || !savingsRow) {
+        return {
+          success: false,
+          message: 'Savings account not found',
+          error: 'Not found',
+        };
+      }
+
+      let walletQuery = adminClient
+        .from('wallets')
+        .select('id, balance_xrp')
+        .eq('user_id', userId)
+        .eq('suite_context', 'personal');
+
+      if (body.sourceWalletId) {
+        walletQuery = walletQuery.eq('id', String(body.sourceWalletId).trim());
+      }
+
+      const { data: wallet, error: walletErr } = await walletQuery.maybeSingle();
+
+      if (walletErr || !wallet) {
+        return {
+          success: false,
+          message: body.sourceWalletId
+            ? 'Source wallet not found'
+            : 'No personal XRP wallet found. Connect or create a wallet first.',
+          error: 'Not found',
+        };
+      }
+
+      const currentXrp = parseFloat(String(wallet.balance_xrp ?? 0));
+      if (currentXrp + 1e-9 < amountXrp) {
+        return {
+          success: false,
+          message: `Insufficient XRP balance. Available: ${currentXrp.toFixed(6)} XRP`,
+          error: 'Insufficient balance',
+        };
+      }
+
+      const rates = await exchangeService.getLiveExchangeRates();
+      const xrpUsd = rates.data?.rates.find((r) => r.currency === 'USD')?.rate;
+      if (!xrpUsd || xrpUsd <= 0) {
+        return {
+          success: false,
+          message: 'Could not load XRP/USD rate. Try again shortly.',
+          error: 'Rate unavailable',
+        };
+      }
+
+      const amountUsd = parseFloat((amountXrp * xrpUsd).toFixed(2));
+      const newBalanceXrp = parseFloat((currentXrp - amountXrp).toFixed(6));
+
+      const { error: updErr } = await adminClient
+        .from('wallets')
+        .update({
+          balance_xrp: newBalanceXrp,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', wallet.id)
+        .eq('user_id', userId);
+
+      if (updErr) {
+        console.error('[SavingsTransfer] wallet update failed:', updErr);
+        return {
+          success: false,
+          message: 'Failed to update wallet balance',
+          error: updErr.message,
+        };
+      }
+
+      const { data: txRow, error: txErr } = await adminClient
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'transfer',
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
+          status: 'completed',
+          savings_wallet_id: savingsWalletId,
+          description: `Transfer to savings: ${savingsRow.name} (${amountXrp} XRP)`,
+        })
+        .select('id')
+        .single();
+
+      if (txErr || !txRow) {
+        console.error('[SavingsTransfer] transaction insert failed, reverting wallet:', txErr);
+        await adminClient
+          .from('wallets')
+          .update({
+            balance_xrp: currentXrp,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', wallet.id)
+          .eq('user_id', userId);
+
+        return {
+          success: false,
+          message: 'Failed to record transfer',
+          error: txErr?.message || 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Transfer to savings completed',
+        data: {
+          transactionId: txRow.id,
+          savingsWalletId,
+          amountXrp,
+          amountUsd,
+          newWalletBalanceXrp: newBalanceXrp,
+        },
+      };
+    } catch (error) {
+      console.error('Error in transferFromWallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Transfer failed',
+        error: error instanceof Error ? error.message : 'Transfer failed',
+      };
+    }
+  }
+
   async createWallet(userId: string, body: { name: string; targetAmountUsd?: number }): Promise<SavingsWalletsResponse> {
     try {
       const adminClient = supabaseAdmin || supabase;

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { savingsController } from '../controllers/savings.controller';
 import { authenticate } from '../middleware/auth';
+import { validateSavingsTransfer } from '../middleware/validation';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
@@ -45,6 +46,21 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     await savingsController.getWallets(req, res);
+  })
+);
+
+/**
+ * @route   POST /api/savings/transfer
+ * @desc    Move XRP from custodial wallet balance into a savings wallet
+ * @access  Private
+ * @body    { savingsWalletId: string, amountXrp: number, sourceWalletId?: string }
+ */
+router.post(
+  '/transfer',
+  authenticate,
+  validateSavingsTransfer,
+  asyncHandler(async (req, res) => {
+    await savingsController.transfer(req, res);
   })
 );
 

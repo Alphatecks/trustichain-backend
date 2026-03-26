@@ -113,6 +113,38 @@ export const validateOAuthMfaPrep = (
   }
 };
 
+const savingsTransferSchema = z.object({
+  savingsWalletId: z.string().uuid('savingsWalletId must be a valid UUID'),
+  sourceWalletId: z.string().uuid('sourceWalletId must be a valid UUID').optional(),
+  amountXrp: z.coerce.number().positive('amountXrp must be greater than 0'),
+});
+
+export const validateSavingsTransfer = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  try {
+    savingsTransferSchema.parse(req.body);
+    next();
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      const firstError = error.issues[0];
+      res.status(400).json({
+        success: false,
+        message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid request data',
+        error: 'Validation failed',
+      });
+    }
+  }
+};
+
 export const validateLoginMfa = (
   req: Request,
   res: Response,
