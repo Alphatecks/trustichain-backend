@@ -31,6 +31,7 @@ router.post('/login', validateLogin, asyncHandler(async (req, res) => {
  * @desc    Complete login with TOTP after POST /api/auth/login returned requiresMfa + mfaToken
  * @access  Public
  * @body    { code, mfaToken, email? }
+ * @returns data.accessToken — use as Authorization Bearer on subsequent requests (never use mfaToken as Bearer)
  */
 router.post('/login/mfa', validateLoginMfa, asyncHandler(async (req, res) => {
   await authController.loginMfa(req, res);

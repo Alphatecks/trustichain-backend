@@ -29,6 +29,9 @@ const adminAuthenticateMiddleware = async (
   const { data: { user }, error } = await supabase.auth.getUser(token);
 
   if (error || !user) {
+    if (process.env.NODE_ENV !== 'production' && error?.message) {
+      console.warn('[adminAuthenticate] getUser failed:', error.message);
+    }
     res.status(401).json({
       success: false,
       message: 'Invalid or expired token. Please log in again.',

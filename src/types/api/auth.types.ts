@@ -37,11 +37,12 @@ export interface LoginResponse {
       fullName: string;
       country: string;
     };
+    /** Supabase JWT — use as Authorization: Bearer <accessToken> on protected routes (not mfaToken) */
     accessToken?: string;
     refreshToken?: string;
     /** Present when password sign-in succeeded but TOTP is required */
     requiresMfa?: boolean;
-    /** Short-lived encrypted token for POST /api/auth/login/mfa */
+    /** Short-lived encrypted blob for POST /api/auth/login/mfa body only — never send as Bearer */
     mfaToken?: string;
   };
   error?: string;

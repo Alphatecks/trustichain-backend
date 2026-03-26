@@ -1,4 +1,4 @@
-import type { User } from '@supabase/supabase-js';
+import { createClient, type User } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { walletService } from './wallet/wallet.service';
 import {
@@ -18,6 +18,21 @@ import { emailService } from './email.service';
 import * as crypto from 'crypto';
 import { createMfaLoginToken, parseMfaLoginToken, mfaService } from './mfa.service';
 import type { LoginMfaRequest } from '../types/api/auth.types';
+
+/** Per-request Supabase client for password login / MFA so the shared singleton is not used for sessions. */
+function createEphemeralAuthClient() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Missing Supabase configuration');
+  }
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
 
 export class AuthService {
   /**
@@ -297,6 +312,17 @@ export class AuthService {
    */
   async login(loginData: LoginRequest): Promise<LoginResponse> {
     try {
+      let loginClient;
+      try {
+        loginClient = createEphemeralAuthClient();
+      } catch {
+        return {
+          success: false,
+          message: 'Server configuration error',
+          error: 'Missing Supabase configuration',
+        };
+      }
+
       const { email, password } = loginData;
       const normalizedEmail = email.toLowerCase();
 
@@ -319,7 +345,7 @@ export class AuthService {
       // Attempt to sign in with timeout to fail fast if Supabase is slow
       const LOGIN_TIMEOUT_MS = 8000; // 8 second timeout
       const loginStartTime = Date.now();
-      const loginPromise = supabase.auth.signInWithPassword({
+      const loginPromise = loginClient.auth.signInWithPassword({
         email: normalizedEmail,
         password: password,
       });
@@ -443,7 +469,6 @@ export class AuthService {
             refresh_token: authData.session.refresh_token ?? '',
           });
         } catch {
-          await supabase.auth.signOut();
           return {
             success: false,
             message:
@@ -451,9 +476,7 @@ export class AuthService {
             error: 'Server misconfiguration',
           };
         }
-        // Clear this client's session only. Default signOut() uses scope "global" and revokes
-        // the refresh token on the server, which invalidates the tokens we put in mfaToken.
-        await supabase.auth.signOut({ scope: 'local' });
+        // Session lives only on the ephemeral client; no signOut on the shared singleton.
         return {
           success: true,
           message: 'Additional verification required',
@@ -549,6 +572,41 @@ export class AuthService {
         };
       }
 
+      let ephemeral;
+      try {
+        ephemeral = createEphemeralAuthClient();
+      } catch {
+        return {
+          success: false,
+          message: 'Server configuration error',
+          error: 'Missing Supabase configuration',
+        };
+      }
+
+      const { data: sessionData, error: sessionError } = await ephemeral.auth.setSession({
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token,
+      });
+
+      if (sessionError || !sessionData.session) {
+        return {
+          success: false,
+          message: 'Session could not be restored. Please sign in again.',
+          error: 'Invalid session',
+        };
+      }
+
+      const accessToken = sessionData.session.access_token;
+      const refreshToken = sessionData.session.refresh_token;
+      const { data: userData, error: userError } = await ephemeral.auth.getUser(accessToken);
+      if (userError || !userData.user) {
+        return {
+          success: false,
+          message: 'Session could not be restored. Please sign in again.',
+          error: 'Invalid session',
+        };
+      }
+
       return {
         success: true,
         message: 'Login successful',
@@ -559,8 +617,8 @@ export class AuthService {
             fullName: profile.full_name,
             country: profile.country ?? '',
           },
-          accessToken: payload.access_token,
-          refreshToken: payload.refresh_token,
+          accessToken,
+          refreshToken,
         },
       };
     } catch (error) {
