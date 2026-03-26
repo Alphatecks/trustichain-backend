@@ -134,4 +134,14 @@ export interface SavingsWithdrawResponse {
   error?: string;
 }
 
+/** DELETE /api/savings/wallets/:savingsWalletId */
+export interface SavingsDeleteWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    id: string;
+  };
+  error?: string;
+}
+
 

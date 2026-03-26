@@ -6,6 +6,7 @@ import {
   SavingsTransactionsResponse,
   SavingsTransferResponse,
   SavingsWithdrawResponse,
+  SavingsDeleteWalletResponse,
 } from '../types/api/savings.types';
 import { savingsService } from '../services/savings/savings.service';
 
@@ -183,6 +184,54 @@ export class SavingsController {
         return;
       }
       if (err === 'Rate unavailable') {
+        res.status(503).json(result);
+        return;
+      }
+      res.status(400).json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Delete an empty savings plan
+   * DELETE /api/savings/wallets/:savingsWalletId
+   */
+  async deleteWallet(req: Request, res: Response<SavingsDeleteWalletResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const savingsWalletId = req.params.savingsWalletId as string | undefined;
+      if (!savingsWalletId?.trim()) {
+        res.status(400).json({
+          success: false,
+          message: 'savingsWalletId is required',
+          error: 'Validation failed',
+        });
+        return;
+      }
+
+      const result = await savingsService.deleteWallet(userId, savingsWalletId.trim());
+
+      if (result.success) {
+        res.status(200).json(result);
+        return;
+      }
+
+      const err = result.error || '';
+      if (err === 'Not found') {
+        res.status(404).json(result);
+        return;
+      }
+      if (err === 'Balance not empty') {
+        res.status(409).json(result);
+        return;
+      }
+      if (err === 'Service unavailable') {
         res.status(503).json(result);
         return;
       }

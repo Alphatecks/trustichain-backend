@@ -14,6 +14,7 @@ import {
   SavingsTransactionDirection,
   SavingsTransferResponse,
   SavingsWithdrawResponse,
+  SavingsDeleteWalletResponse,
 } from '../../types/api/savings.types';
 import type { TransactionType } from '../../types/api/transaction.types';
 
@@ -795,6 +796,90 @@ export class SavingsService {
         success: false,
         message: error instanceof Error ? error.message : 'Withdrawal failed',
         error: error instanceof Error ? error.message : 'Withdrawal failed',
+      };
+    }
+  }
+
+  /**
+   * Remove an empty savings plan. Fails if net saved balance &gt; ~$0 (withdraw first).
+   */
+  async deleteWallet(userId: string, savingsWalletId: string): Promise<SavingsDeleteWalletResponse> {
+    try {
+      const adminClient = supabaseAdmin;
+      if (!adminClient) {
+        return {
+          success: false,
+          message: 'Deleting a savings plan requires server configuration (service role)',
+          error: 'Service unavailable',
+        };
+      }
+
+      const id = String(savingsWalletId || '').trim();
+      if (!id) {
+        return { success: false, message: 'savingsWalletId is required', error: 'Validation failed' };
+      }
+
+      const { data: row, error: fetchErr } = await adminClient
+        .from('savings_wallets')
+        .select('id')
+        .eq('id', id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (fetchErr || !row) {
+        return {
+          success: false,
+          message: 'Savings plan not found',
+          error: 'Not found',
+        };
+      }
+
+      const { data: txRows } = await adminClient
+        .from('transactions')
+        .select('type, amount_usd')
+        .eq('user_id', userId)
+        .eq('savings_wallet_id', id);
+
+      let availableUsd = 0;
+      for (const r of txRows || []) {
+        availableUsd += this.netSavingsUsdDelta(r as { type: string; amount_usd: unknown });
+      }
+
+      if (availableUsd > 0.01) {
+        return {
+          success: false,
+          message:
+            'This plan still has savings. Withdraw funds to your wallet before deleting the plan.',
+          error: 'Balance not empty',
+        };
+      }
+
+      const { error: delErr } = await adminClient
+        .from('savings_wallets')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
+
+      if (delErr) {
+        console.error('[SavingsDeleteWallet]', delErr);
+        return {
+          success: false,
+          message: 'Failed to delete savings plan',
+          error: delErr.message,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Savings plan removed',
+        data: { id },
+      };
+    } catch (error) {
+      console.error('Error in deleteWallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to delete savings plan',
+        error: error instanceof Error ? error.message : 'Failed to delete savings plan',
       };
     }
   }

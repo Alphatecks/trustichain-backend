@@ -96,6 +96,19 @@ router.post(
 );
 
 /**
+ * @route   DELETE /api/savings/wallets/:savingsWalletId
+ * @desc    Remove a savings plan (only if saved balance is zero — withdraw first otherwise)
+ * @access  Private
+ */
+router.delete(
+  '/wallets/:savingsWalletId',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await savingsController.deleteWallet(req, res);
+  })
+);
+
+/**
  * @route   GET /api/savings/transactions
  * @desc    Get savings transaction history for table
  * @access  Private
