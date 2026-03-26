@@ -5,6 +5,7 @@
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { exchangeService } from '../exchange/exchange.service';
+import { emailService } from '../email.service';
 
 import {
   SavingsSummaryResponse,
@@ -937,6 +938,33 @@ export class SavingsService {
           error: 'Failed to create savings wallet',
         };
       }
+
+      const targetUsd =
+        wallet.target_amount_usd != null && wallet.target_amount_usd !== ''
+          ? parseFloat(String(wallet.target_amount_usd))
+          : null;
+
+      void (async () => {
+        try {
+          const { data: userRow } = await adminClient
+            .from('users')
+            .select('email, full_name')
+            .eq('id', userId)
+            .maybeSingle();
+          if (!userRow?.email) return;
+          const result = await emailService.sendSavingsPlanCreatedEmail(
+            userRow.email,
+            userRow.full_name || 'there',
+            wallet.name,
+            targetUsd
+          );
+          if (!result.success) {
+            console.warn('Savings plan created email not sent:', result.error);
+          }
+        } catch (err) {
+          console.warn('Savings plan created email error:', err);
+        }
+      })();
 
       return {
         success: true,

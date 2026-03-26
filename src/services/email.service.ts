@@ -1106,6 +1106,84 @@ export class EmailService {
       return { success: false, error: errorMessage };
     }
   }
+
+  /**
+   * Notify user when a new savings plan (wallet) is created.
+   */
+  async sendSavingsPlanCreatedEmail(
+    email: string,
+    fullName: string,
+    planName: string,
+    targetAmountUsd?: number | null
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!resend || !process.env.RESEND_FROM_EMAIL) {
+        const errorMsg = !resend
+          ? 'Resend API key not configured. Please set RESEND_API_KEY environment variable.'
+          : 'Resend from email not configured. Please set RESEND_FROM_EMAIL environment variable.';
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const savingsLink = `${frontendUrl}/dashboard`;
+
+      const targetLine =
+        typeof targetAmountUsd === 'number' && !Number.isNaN(targetAmountUsd)
+          ? `<p style="margin: 12px 0;"><strong>Target amount:</strong> $${targetAmountUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</p>`
+          : '<p style="margin: 12px 0;">You can set or adjust a target amount anytime in the app.</p>';
+
+      const logoBase64 = this.getLogoBase64();
+
+      console.log(`Attempting to send savings plan created email to: ${email}`);
+
+      const { data, error } = await (resend as any).emails.send({
+        from: process.env.RESEND_FROM_EMAIL,
+        to: email,
+        subject: `Savings plan created — ${planName}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Savings plan created</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: white; margin: 0; font-size: 22px;">Savings plan created</h1>
+            </div>
+            <div style="background: #f9f9f9; padding: 28px; border-radius: 0 0 10px 10px;">
+              <p style="font-size: 16px; color: #333; margin: 0 0 16px 0;">Hi ${fullName},</p>
+              <p style="font-size: 16px; color: #333; margin: 0 0 16px 0;">Your new savings plan <strong>${planName}</strong> is ready.</p>
+              ${targetLine}
+              <p style="text-align: center; margin: 28px 0 0 0;">
+                <a href="${savingsLink}" style="background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Open dashboard</a>
+              </p>
+              <p style="font-size: 13px; color: #666; margin: 24px 0 0 0;">If you did not create this plan, please contact support.</p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+              <p>&copy; ${new Date().getFullYear()} TrustiChain. All rights reserved.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `Hi ${fullName},\n\nYour new savings plan "${planName}" is ready.\n${typeof targetAmountUsd === 'number' && !Number.isNaN(targetAmountUsd) ? `Target amount: $${targetAmountUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD\n` : ''}\nOpen your dashboard: ${savingsLink}\n\n© ${new Date().getFullYear()} TrustiChain.`,
+      });
+
+      if (error) {
+        console.error('Resend email error:', error);
+        return { success: false, error: error.message || 'Failed to send email via Resend' };
+      }
+      console.log('Savings plan created email sent:', { id: data?.id, to: email });
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send savings plan created email';
+      console.error('Email sending error:', error);
+      return { success: false, error: errorMessage };
+    }
+  }
 }
 
 export const emailService = new EmailService();
