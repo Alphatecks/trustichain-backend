@@ -7,12 +7,15 @@ import { supabase, supabaseAdmin } from '../../config/supabase';
 import {
   FundWalletRequest,
   WithdrawWalletRequest,
+  SendWalletToTrustitagRequest,
+  SendWalletToTrustitagResponse,
   WalletTransaction,
   SwapQuoteRequest,
   SwapQuoteResponse,
   SwapExecuteRequest,
   SwapExecuteResponse,
 } from '../../types/api/wallet.types';
+import { trustitagService } from '../trustitag.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { xrplDexService } from '../../xrpl/dex/xrpl-dex.service';
 import { exchangeService } from '../exchange/exchange.service';
@@ -2796,6 +2799,43 @@ export class WalletService {
         error: error instanceof Error ? error.message : 'Failed to withdraw from wallet',
       };
     }
+  }
+
+  /**
+   * Send XRP to another registered user by Trustitag (same on-chain flow as withdraw to their custodial address).
+   */
+  async sendWalletToTrustitag(userId: string, request: SendWalletToTrustitagRequest): Promise<SendWalletToTrustitagResponse> {
+    const normalized = trustitagService.normalizeTrustitag(request.trustitag);
+    if (!normalized) {
+      return {
+        success: false,
+        message: 'Invalid Trustitag. Use 3–32 characters: letters, numbers, and underscores (e.g. tc_abc123).',
+        error: 'Invalid trustitag',
+      };
+    }
+
+    const resolved = await trustitagService.resolveRecipientWallet(normalized);
+    if (!resolved) {
+      return {
+        success: false,
+        message: 'No TrustiChain user found with this Trustitag, or they have no personal wallet yet.',
+        error: 'Recipient not found',
+      };
+    }
+
+    if (resolved.recipientUserId === userId) {
+      return {
+        success: false,
+        message: 'You cannot send XRP to your own Trustitag.',
+        error: 'Invalid recipient',
+      };
+    }
+
+    return this.withdrawWallet(userId, {
+      amount: request.amount,
+      currency: request.currency,
+      destinationAddress: resolved.destinationAddress,
+    });
   }
 
   /**

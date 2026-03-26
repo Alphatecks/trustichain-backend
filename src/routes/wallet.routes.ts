@@ -75,6 +75,16 @@ router.post('/withdraw', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/wallet/send/trustitag
+ * @desc    Send XRP to another TrustiChain user by Trustitag (resolves their custodial wallet)
+ * @access  Private
+ * @body    { trustitag: string, amount: number, currency: 'USD' | 'XRP' }
+ */
+router.post('/send/trustitag', authenticate, asyncHandler(async (req, res) => {
+  await walletController.sendWalletToTrustitag(req, res);
+}));
+
+/**
  * @route   GET /api/wallet/transactions
  * @desc    Get wallet transactions
  * @access  Private

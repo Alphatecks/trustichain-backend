@@ -230,6 +230,57 @@ export class WalletController {
     }
   }
 
+  /**
+   * POST /api/wallet/send/trustitag — send XRP to another user by Trustitag
+   */
+  async sendWalletToTrustitag(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const { trustitag, amount, currency } = req.body;
+
+      if (!trustitag || typeof trustitag !== 'string' || !String(trustitag).trim()) {
+        res.json({
+          success: false,
+          message: 'Trustitag is required',
+          error: 'Validation failed',
+        });
+        return;
+      }
+
+      if (!amount || typeof amount !== 'number' || amount <= 0) {
+        res.json({
+          success: false,
+          message: 'Invalid amount. Amount must be a positive number.',
+          error: 'Invalid amount',
+        });
+        return;
+      }
+
+      if (!currency || (currency !== 'USD' && currency !== 'XRP')) {
+        res.json({
+          success: false,
+          message: 'Invalid currency. Currency must be either "USD" or "XRP".',
+          error: 'Invalid currency',
+        });
+        return;
+      }
+
+      const result = await walletService.sendWalletToTrustitag(userId, {
+        trustitag: String(trustitag).trim(),
+        amount,
+        currency,
+      });
+      res.json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
   async connectWallet(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as Request & { userId?: string }).userId!;

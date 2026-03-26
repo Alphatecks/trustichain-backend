@@ -117,6 +117,15 @@ export interface WithdrawWalletRequest {
   destinationAddress: string;
 }
 
+/** POST /api/wallet/send/trustitag — send XRP to another TrustiChain user by Trustitag */
+export interface SendWalletToTrustitagRequest {
+  trustitag: string;
+  amount: number;
+  currency: 'USD' | 'XRP';
+}
+
+export type SendWalletToTrustitagResponse = WithdrawWalletResponse;
+
 export interface WithdrawWalletResponse {
   success: boolean;
   message: string;

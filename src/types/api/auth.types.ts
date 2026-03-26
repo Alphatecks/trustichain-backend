@@ -16,6 +16,8 @@ export interface RegisterResponse {
       email: string;
       fullName: string;
       country: string;
+      /** Unique handle for P2P sends; assigned on registration when possible */
+      trustitag?: string;
     };
     emailVerificationRequired?: boolean;
   };
@@ -36,6 +38,8 @@ export interface LoginResponse {
       email: string;
       fullName: string;
       country: string;
+      /** Unique handle for sending/receiving XRP between TrustiChain users */
+      trustitag?: string;
     };
     /** Supabase JWT — use as Authorization: Bearer <accessToken> on protected routes (not mfaToken) */
     accessToken?: string;
@@ -84,6 +88,7 @@ export interface GoogleOAuthCallbackResponse {
       email: string;
       fullName: string;
       country: string | null;
+      trustitag?: string;
     };
     accessToken?: string;
     refreshToken?: string;
@@ -117,6 +122,7 @@ export interface EnsureProfileResponse {
       email: string;
       fullName: string;
       country: string | null;
+      trustitag?: string;
     };
     created: boolean;
   };

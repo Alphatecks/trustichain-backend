@@ -16,6 +16,7 @@ import {
   OAuthMfaPrepRequest,
 } from '../types/api/auth.types';
 import { emailService } from './email.service';
+import { trustitagService } from './trustitag.service';
 import * as crypto from 'crypto';
 import { createMfaLoginToken, parseMfaLoginToken, mfaService } from './mfa.service';
 import type { LoginMfaRequest } from '../types/api/auth.types';
@@ -238,6 +239,8 @@ export class AuthService {
         };
       }
 
+      const trustitag = await this.assignTrustitagForUser(profileData.id);
+
       // Generate verification token
       const verificationToken = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date();
@@ -278,6 +281,7 @@ export class AuthService {
               email: profileData.email,
               fullName: profileData.full_name,
               country: profileData.country,
+              ...(trustitag && { trustitag }),
             },
           },
         };
@@ -292,6 +296,7 @@ export class AuthService {
             email: profileData.email,
             fullName: profileData.full_name,
             country: profileData.country,
+            ...(trustitag && { trustitag }),
           },
           emailVerificationRequired: true,
         },
@@ -461,6 +466,8 @@ export class AuthService {
         .eq('id', user.id)
         .maybeSingle();
 
+      const trustitag = await this.assignTrustitagForUser(user.id);
+
       if (mfaRow?.mfa_enabled === true && authData.session?.access_token) {
         let mfaToken: string;
         try {
@@ -490,6 +497,7 @@ export class AuthService {
               email: userEmail,
               fullName,
               country: country ?? '',
+              ...(trustitag && { trustitag }),
             },
           },
         };
@@ -504,6 +512,7 @@ export class AuthService {
             email: userEmail,
             fullName,
             country,
+            ...(trustitag && { trustitag }),
           },
           accessToken: authData.session?.access_token,
           refreshToken: authData.session?.refresh_token,
@@ -609,6 +618,8 @@ export class AuthService {
         };
       }
 
+      const trustitag = await this.assignTrustitagForUser(payload.userId);
+
       return {
         success: true,
         message: 'Login successful',
@@ -618,6 +629,7 @@ export class AuthService {
             email: profile.email,
             fullName: profile.full_name,
             country: profile.country ?? '',
+            ...(trustitag && { trustitag }),
           },
           accessToken,
           refreshToken,
@@ -812,6 +824,16 @@ export class AuthService {
     }
   }
 
+  /** Assign Trustitag on login/signup; failures are non-fatal for auth. */
+  private async assignTrustitagForUser(userId: string): Promise<string | undefined> {
+    try {
+      return await trustitagService.ensureTrustitagForUser(userId);
+    } catch (e) {
+      console.warn('[AuthService] assignTrustitagForUser failed:', e);
+      return undefined;
+    }
+  }
+
   /**
    * Sync public.users from Supabase Auth for the JWT subject (SPA OAuth / any provider).
    */
@@ -839,6 +861,7 @@ export class AuthService {
     const created = !beforeRow;
 
     await this.ensurePersonalWalletExists(userId);
+    const trustitag = await this.assignTrustitagForUser(userId);
 
     return {
       success: true,
@@ -849,6 +872,7 @@ export class AuthService {
           email: userProfile.email,
           fullName: userProfile.fullName,
           country: userProfile.country,
+          ...(trustitag && { trustitag }),
         },
         created,
       },
@@ -887,6 +911,7 @@ export class AuthService {
   ): Promise<GoogleOAuthCallbackResponse> {
     const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
     await this.ensurePersonalWalletExists(user.id);
+    const trustitag = await this.assignTrustitagForUser(user.id);
 
     const { data: mfaRow } = await clientWithSession
       .from('users')
@@ -921,6 +946,7 @@ export class AuthService {
             email: userProfile.email,
             fullName: userProfile.fullName,
             country: userProfile.country,
+            ...(trustitag && { trustitag }),
           },
           requiresMfa: true,
           mfaToken,
@@ -937,6 +963,7 @@ export class AuthService {
           email: userProfile.email,
           fullName: userProfile.fullName,
           country: userProfile.country,
+          ...(trustitag && { trustitag }),
         },
         accessToken: session.access_token,
         refreshToken: session.refresh_token,
@@ -1015,6 +1042,8 @@ export class AuthService {
         };
       }
 
+      const trustitag = await this.assignTrustitagForUser(user.id);
+
       return {
         success: true,
         message: 'Additional verification required',
@@ -1026,6 +1055,7 @@ export class AuthService {
             email: userEmail,
             fullName,
             country: country ?? '',
+            ...(trustitag && { trustitag }),
           },
         },
       };
