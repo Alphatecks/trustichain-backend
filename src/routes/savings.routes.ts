@@ -25,7 +25,8 @@ router.get(
  * @desc    Get savings cashflow data (received vs spent)
  * @access  Private
  * @query   interval? - monthly | weekly (default: monthly)
- * @query   from? - ISO date string
+ * @query   range?     - this_month | last_month | this_year (default: this_month) when from/to omitted; aligns with GET /summary
+ * @query   from? - ISO date string (overrides range)
  * @query   to?   - ISO date string
  */
 router.get(

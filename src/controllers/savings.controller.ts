@@ -45,12 +45,14 @@ export class SavingsController {
       const interval = (req.query.interval as 'monthly' | 'weekly' | undefined) || 'monthly';
       const from = (req.query.from as string | undefined) || undefined;
       const to = (req.query.to as string | undefined) || undefined;
+      const range = (req.query.range as string | undefined) || undefined; // this_month | last_month | this_year (when from/to omitted)
 
       const result = await savingsService.getCashflow({
         userId,
         interval,
         from,
         to,
+        range,
       });
 
       if (result.success) {

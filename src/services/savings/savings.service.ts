@@ -227,22 +227,27 @@ export class SavingsService {
   /**
    * Get savings cashflow data
    * GET /api/savings/cashflow
+   * @param range - When `from`/`to` omitted: same as summary — this_month | last_month | this_year (default this_month)
    */
   async getCashflow(params: {
     userId: string;
     interval?: 'monthly' | 'weekly';
     from?: string;
     to?: string;
+    range?: string;
   }): Promise<SavingsCashflowResponse> {
-    const { userId, interval = 'monthly', from, to } = params;
+    const { userId, interval = 'monthly', from, to, range } = params;
 
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      const start = from ? new Date(from) : (() => {
-        const { start } = this.getDateRange('monthly');
-        return start;
-      })();
+      // Align with GET /api/savings/summary default (calendar period), not rolling 30 days
+      const start = from
+        ? new Date(from)
+        : (() => {
+            const { start: s } = this.getPeriodRange(range || 'this_month');
+            return s;
+          })();
       const end = to ? new Date(to) : new Date();
 
       const { data: rows, error } = await adminClient
@@ -275,9 +280,8 @@ export class SavingsService {
           return `${d.getUTCFullYear()}-W${week.toString().padStart(2, '0')}`;
         }
 
-        // Monthly: Jan, Feb, ...
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        return monthNames[d.getUTCMonth()];
+        // Monthly: YYYY-MM (sortable, unique per year — avoids "Mar" collapsing multiple years)
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
       };
 
       for (const row of rows || []) {
