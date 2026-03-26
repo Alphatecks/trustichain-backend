@@ -97,8 +97,9 @@ router.post(
 
 /**
  * @route   DELETE /api/savings/wallets/:savingsWalletId
- * @desc    Remove a savings plan (only if saved balance is zero — withdraw first otherwise)
+ * @desc    Remove a savings plan; any remaining balance is auto-released to custodial XRP first
  * @access  Private
+ * @query   targetWalletId? — personal custodial wallet UUID to credit (omit if only one)
  */
 router.delete(
   '/wallets/:savingsWalletId',

@@ -801,9 +801,14 @@ export class SavingsService {
   }
 
   /**
-   * Remove an empty savings plan. Fails if net saved balance &gt; ~$0 (withdraw first).
+   * Delete a savings plan. Any remaining saved balance is auto-released to the custodial wallet
+   * (same as withdrawAll), then the plan row is removed.
    */
-  async deleteWallet(userId: string, savingsWalletId: string): Promise<SavingsDeleteWalletResponse> {
+  async deleteWallet(
+    userId: string,
+    savingsWalletId: string,
+    targetWalletId?: string
+  ): Promise<SavingsDeleteWalletResponse> {
     try {
       const adminClient = supabaseAdmin;
       if (!adminClient) {
@@ -845,12 +850,33 @@ export class SavingsService {
         availableUsd += this.netSavingsUsdDelta(r as { type: string; amount_usd: unknown });
       }
 
+      let released:
+        | {
+            transactionId: string;
+            amountXrp: number;
+            amountUsd: number;
+            newWalletBalanceXrp: number;
+          }
+        | undefined;
+
       if (availableUsd > 0.01) {
-        return {
-          success: false,
-          message:
-            'This plan still has savings. Withdraw funds to your wallet before deleting the plan.',
-          error: 'Balance not empty',
+        const release = await this.withdrawToWallet(userId, {
+          savingsWalletId: id,
+          withdrawAll: true,
+          targetWalletId,
+        });
+        if (!release.success || !release.data) {
+          return {
+            success: false,
+            message: release.message,
+            error: release.error || 'Release failed',
+          };
+        }
+        released = {
+          transactionId: release.data.transactionId,
+          amountXrp: release.data.amountXrp,
+          amountUsd: release.data.amountUsd,
+          newWalletBalanceXrp: release.data.newWalletBalanceXrp,
         };
       }
 
@@ -871,8 +897,13 @@ export class SavingsService {
 
       return {
         success: true,
-        message: 'Savings plan removed',
-        data: { id },
+        message: released
+          ? 'Balance returned to your wallet and savings plan removed'
+          : 'Savings plan removed',
+        data: {
+          id,
+          released,
+        },
       };
     } catch (error) {
       console.error('Error in deleteWallet:', error);

@@ -215,7 +215,9 @@ export class SavingsController {
         return;
       }
 
-      const result = await savingsService.deleteWallet(userId, savingsWalletId.trim());
+      const targetWalletId = (req.query.targetWalletId as string | undefined)?.trim() || undefined;
+
+      const result = await savingsService.deleteWallet(userId, savingsWalletId.trim(), targetWalletId);
 
       if (result.success) {
         res.status(200).json(result);
@@ -227,11 +229,11 @@ export class SavingsController {
         res.status(404).json(result);
         return;
       }
-      if (err === 'Balance not empty') {
-        res.status(409).json(result);
+      if (err === 'Service unavailable') {
+        res.status(503).json(result);
         return;
       }
-      if (err === 'Service unavailable') {
+      if (err === 'Rate unavailable') {
         res.status(503).json(result);
         return;
       }

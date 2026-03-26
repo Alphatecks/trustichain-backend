@@ -134,12 +134,19 @@ export interface SavingsWithdrawResponse {
   error?: string;
 }
 
-/** DELETE /api/savings/wallets/:savingsWalletId */
+/** DELETE /api/savings/wallets/:savingsWalletId — any remaining balance is released to custodial XRP first */
 export interface SavingsDeleteWalletResponse {
   success: boolean;
   message: string;
   data?: {
     id: string;
+    /** Present when there was a positive saved balance and it was auto-withdrawn */
+    released?: {
+      transactionId: string;
+      amountXrp: number;
+      amountUsd: number;
+      newWalletBalanceXrp: number;
+    };
   };
   error?: string;
 }
