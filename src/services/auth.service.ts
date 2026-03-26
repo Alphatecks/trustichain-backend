@@ -1,4 +1,4 @@
-import { createClient, type Session, type User } from '@supabase/supabase-js';
+import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { walletService } from './wallet/wallet.service';
 import {
@@ -454,7 +454,8 @@ export class AuthService {
       }).catch(() => {});
       // #endregion
 
-      const { data: mfaRow } = await supabase
+      // Must use loginClient (JWT attached): shared supabase has no session here, so RLS hides the row.
+      const { data: mfaRow } = await loginClient
         .from('users')
         .select('mfa_enabled')
         .eq('id', user.id)
@@ -880,12 +881,14 @@ export class AuthService {
    */
   private async finalizeGoogleOAuthSession(
     session: Session,
-    user: User
+    user: User,
+    /** Client that already has this user's JWT (RLS: auth.uid() = id) */
+    clientWithSession: SupabaseClient
   ): Promise<GoogleOAuthCallbackResponse> {
     const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
     await this.ensurePersonalWalletExists(user.id);
 
-    const { data: mfaRow } = await supabase
+    const { data: mfaRow } = await clientWithSession
       .from('users')
       .select('mfa_enabled')
       .eq('id', user.id)
@@ -972,7 +975,7 @@ export class AuthService {
       }
 
       const user = sessionData.user;
-      const { data: mfaRow } = await supabase
+      const { data: mfaRow } = await ephemeral
         .from('users')
         .select('mfa_enabled')
         .eq('id', user.id)
@@ -1107,7 +1110,7 @@ export class AuthService {
         };
       }
 
-      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user);
+      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user, loginClient);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
@@ -1138,7 +1141,7 @@ export class AuthService {
         };
       }
 
-      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user);
+      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user, loginClient);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
