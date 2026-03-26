@@ -5,6 +5,7 @@ import {
   SavingsWalletsResponse,
   SavingsTransactionsResponse,
   SavingsTransferResponse,
+  SavingsWithdrawResponse,
 } from '../types/api/savings.types';
 import { savingsService } from '../services/savings/savings.service';
 
@@ -84,6 +85,56 @@ export class SavingsController {
       } else {
         res.status(400).json(result);
       }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Withdraw from savings back to custodial XRP wallet
+   * POST /api/savings/withdraw
+   */
+  async withdraw(req: Request, res: Response<SavingsWithdrawResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const body = req.body as {
+        savingsWalletId: string;
+        targetWalletId?: string;
+        withdrawAll?: boolean;
+        amountUsd?: number;
+        amountXrp?: number;
+      };
+
+      const result = await savingsService.withdrawToWallet(userId, body);
+
+      if (result.success) {
+        res.status(200).json(result);
+        return;
+      }
+
+      const err = result.error || '';
+      if (err === 'Not found') {
+        res.status(404).json(result);
+        return;
+      }
+      if (err === 'Insufficient balance') {
+        res.status(400).json(result);
+        return;
+      }
+      if (err === 'Service unavailable') {
+        res.status(503).json(result);
+        return;
+      }
+      if (err === 'Rate unavailable') {
+        res.status(503).json(result);
+        return;
+      }
+      res.status(400).json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.status(500).json({

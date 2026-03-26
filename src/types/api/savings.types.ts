@@ -102,4 +102,36 @@ export interface SavingsTransferResponse {
   error?: string;
 }
 
+/**
+ * POST /api/savings/withdraw — move value from a savings bucket back to custodial XRP
+ * Match UI: pick `savingsWalletId` (from GET /api/savings/wallets), then either withdraw
+ * the full Saved balance (`withdrawAll: true`) or a specific `amountUsd` / `amountXrp`.
+ * Provide exactly one of: withdrawAll | amountUsd | amountXrp.
+ */
+export interface SavingsWithdrawRequest {
+  savingsWalletId: string;
+  /** Custodial XRP wallet to credit; omit if user has only one personal wallet */
+  targetWalletId?: string;
+  /** One-tap withdraw entire Saved balance (US$ shown on the plan card) */
+  withdrawAll?: boolean;
+  /** Partial withdraw in USD (matches “Saved: US$…” in the UI) */
+  amountUsd?: number;
+  /** Partial withdraw in XRP (converted via live rate) */
+  amountXrp?: number;
+}
+
+export interface SavingsWithdrawResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    transactionId: string;
+    savingsWalletId: string;
+    amountXrp: number;
+    amountUsd: number;
+    newWalletBalanceXrp: number;
+    remainingSavingsUsd: number;
+  };
+  error?: string;
+}
+
 

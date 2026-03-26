@@ -13,6 +13,7 @@ import {
   SavingsTransactionsResponse,
   SavingsTransactionDirection,
   SavingsTransferResponse,
+  SavingsWithdrawResponse,
 } from '../../types/api/savings.types';
 import type { TransactionType } from '../../types/api/transaction.types';
 
@@ -115,6 +116,16 @@ export class SavingsService {
   }
 
   /**
+   * Net USD impact on savings bucket: transfers/deposits add; withdrawals subtract.
+   */
+  private netSavingsUsdDelta(row: { type: string; amount_usd: unknown }): number {
+    const amt = parseFloat(String(row.amount_usd ?? 0));
+    const abs = Math.abs(amt);
+    if (row.type === 'withdrawal') return -abs;
+    return abs;
+  }
+
+  /**
    * Get savings allocation summary
    * GET /api/savings/summary
    */
@@ -127,7 +138,7 @@ export class SavingsService {
       // Current period transactions linked to savings wallets
       const { data: currentTx, error: currentError } = await adminClient
         .from('transactions')
-        .select('savings_wallet_id, amount_usd')
+        .select('savings_wallet_id, amount_usd, type')
         .eq('user_id', userId)
         .not('savings_wallet_id', 'is', null)
         .gte('created_at', start.toISOString())
@@ -136,7 +147,7 @@ export class SavingsService {
       // Previous period for trend
       const { data: prevTx, error: prevError } = await adminClient
         .from('transactions')
-        .select('savings_wallet_id, amount_usd')
+        .select('savings_wallet_id, amount_usd, type')
         .eq('user_id', userId)
         .not('savings_wallet_id', 'is', null)
         .gte('created_at', prevRange.start.toISOString())
@@ -159,7 +170,7 @@ export class SavingsService {
           if (!row.savings_wallet_id) continue;
           const key = row.savings_wallet_id as string;
           const current = totals.get(key) || 0;
-          totals.set(key, current + parseFloat(row.amount_usd));
+          totals.set(key, current + this.netSavingsUsdDelta(row));
         }
         return totals;
       };
@@ -353,7 +364,7 @@ export class SavingsService {
       if (walletIds.length > 0) {
         const { data: txRows } = await adminClient
           .from('transactions')
-          .select('savings_wallet_id, amount_usd')
+          .select('savings_wallet_id, amount_usd, type')
           .eq('user_id', userId)
           .in('savings_wallet_id', walletIds);
 
@@ -362,7 +373,7 @@ export class SavingsService {
           if (!row.savings_wallet_id) continue;
           const key = row.savings_wallet_id as string;
           const current = totalsByWallet.get(key) || 0;
-          totalsByWallet.set(key, current + parseFloat(row.amount_usd));
+          totalsByWallet.set(key, current + this.netSavingsUsdDelta(row as { type: string; amount_usd: unknown }));
         }
       }
 
@@ -561,6 +572,229 @@ export class SavingsService {
         success: false,
         message: error instanceof Error ? error.message : 'Transfer failed',
         error: error instanceof Error ? error.message : 'Transfer failed',
+      };
+    }
+  }
+
+  /**
+   * Withdraw value from a savings bucket back to the user's custodial XRP balance.
+   * Supports full withdraw (UI: tap Withdraw on plan with US$ balance) or partial USD/XRP.
+   */
+  async withdrawToWallet(
+    userId: string,
+    body: {
+      savingsWalletId: string;
+      targetWalletId?: string;
+      withdrawAll?: boolean;
+      amountUsd?: number;
+      amountXrp?: number;
+    }
+  ): Promise<SavingsWithdrawResponse> {
+    try {
+      const adminClient = supabaseAdmin;
+      if (!adminClient) {
+        return {
+          success: false,
+          message: 'Savings withdrawal requires server configuration (service role)',
+          error: 'Service unavailable',
+        };
+      }
+
+      const savingsWalletId = String(body.savingsWalletId || '').trim();
+      if (!savingsWalletId) {
+        return { success: false, message: 'savingsWalletId is required', error: 'Validation failed' };
+      }
+
+      const hasAll = body.withdrawAll === true;
+      const usdRaw = body.amountUsd != null ? Number(body.amountUsd) : NaN;
+      const xrpRaw = body.amountXrp != null ? Number(body.amountXrp) : NaN;
+      const hasUsd = Number.isFinite(usdRaw) && usdRaw > 0;
+      const hasXrp = Number.isFinite(xrpRaw) && xrpRaw > 0;
+      const modeCount = [hasAll, hasUsd, hasXrp].filter(Boolean).length;
+      if (modeCount !== 1) {
+        return {
+          success: false,
+          message: 'Provide exactly one of: withdrawAll (true), amountUsd, or amountXrp',
+          error: 'Validation failed',
+        };
+      }
+
+      const { data: savingsRow, error: savingsErr } = await adminClient
+        .from('savings_wallets')
+        .select('id, name')
+        .eq('id', savingsWalletId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (savingsErr || !savingsRow) {
+        return {
+          success: false,
+          message: 'Savings account not found',
+          error: 'Not found',
+        };
+      }
+
+      const { data: txRows } = await adminClient
+        .from('transactions')
+        .select('type, amount_usd')
+        .eq('user_id', userId)
+        .eq('savings_wallet_id', savingsWalletId);
+
+      let availableUsd = 0;
+      for (const row of txRows || []) {
+        availableUsd += this.netSavingsUsdDelta(row as { type: string; amount_usd: unknown });
+      }
+
+      if (availableUsd <= 0) {
+        return {
+          success: false,
+          message: 'No funds available to withdraw from this savings account',
+          error: 'Insufficient balance',
+        };
+      }
+
+      const rates = await exchangeService.getLiveExchangeRates();
+      const xrpUsd = rates.data?.rates.find((r) => r.currency === 'USD')?.rate;
+      if (!xrpUsd || xrpUsd <= 0) {
+        return {
+          success: false,
+          message: 'Could not load XRP/USD rate. Try again shortly.',
+          error: 'Rate unavailable',
+        };
+      }
+
+      let amountUsd: number;
+      let amountXrp: number;
+
+      if (hasAll) {
+        amountUsd = parseFloat(availableUsd.toFixed(2));
+        amountXrp = parseFloat((amountUsd / xrpUsd).toFixed(6));
+      } else if (hasUsd) {
+        amountUsd = parseFloat(usdRaw.toFixed(2));
+        if (amountUsd > availableUsd + 0.01) {
+          return {
+            success: false,
+            message: `Insufficient savings balance. Saved: US$${availableUsd.toFixed(2)}`,
+            error: 'Insufficient balance',
+          };
+        }
+        amountXrp = parseFloat((amountUsd / xrpUsd).toFixed(6));
+      } else {
+        amountXrp = parseFloat(xrpRaw.toFixed(6));
+        amountUsd = parseFloat((amountXrp * xrpUsd).toFixed(2));
+        if (amountUsd > availableUsd + 0.01) {
+          const maxXrp = parseFloat((availableUsd / xrpUsd).toFixed(6));
+          return {
+            success: false,
+            message: `Insufficient savings balance. Available ≈ ${maxXrp.toFixed(6)} XRP (${availableUsd.toFixed(2)} USD).`,
+            error: 'Insufficient balance',
+          };
+        }
+      }
+
+      if (amountXrp <= 0 || amountUsd <= 0) {
+        return {
+          success: false,
+          message: 'Withdrawal amount is too small after conversion',
+          error: 'Validation failed',
+        };
+      }
+
+      let walletQuery = adminClient
+        .from('wallets')
+        .select('id, balance_xrp')
+        .eq('user_id', userId)
+        .eq('suite_context', 'personal');
+
+      if (body.targetWalletId) {
+        walletQuery = walletQuery.eq('id', String(body.targetWalletId).trim());
+      }
+
+      const { data: wallet, error: walletErr } = await walletQuery.maybeSingle();
+
+      if (walletErr || !wallet) {
+        return {
+          success: false,
+          message: body.targetWalletId
+            ? 'Target wallet not found'
+            : 'No personal XRP wallet found. Connect or create a wallet first.',
+          error: 'Not found',
+        };
+      }
+
+      const currentXrp = parseFloat(String(wallet.balance_xrp ?? 0));
+      const newBalanceXrp = parseFloat((currentXrp + amountXrp).toFixed(6));
+
+      const { error: updErr } = await adminClient
+        .from('wallets')
+        .update({
+          balance_xrp: newBalanceXrp,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', wallet.id)
+        .eq('user_id', userId);
+
+      if (updErr) {
+        console.error('[SavingsWithdraw] wallet update failed:', updErr);
+        return {
+          success: false,
+          message: 'Failed to update wallet balance',
+          error: updErr.message,
+        };
+      }
+
+      const { data: txRow, error: txErr } = await adminClient
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          type: 'withdrawal',
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
+          status: 'completed',
+          savings_wallet_id: savingsWalletId,
+          description: `Withdraw from savings: ${savingsRow.name} (${amountXrp} XRP)`,
+        })
+        .select('id')
+        .single();
+
+      if (txErr || !txRow) {
+        console.error('[SavingsWithdraw] transaction insert failed, reverting wallet:', txErr);
+        await adminClient
+          .from('wallets')
+          .update({
+            balance_xrp: currentXrp,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', wallet.id)
+          .eq('user_id', userId);
+
+        return {
+          success: false,
+          message: 'Failed to record withdrawal',
+          error: txErr?.message || 'Database error',
+        };
+      }
+
+      const remainingSavingsUsd = parseFloat((availableUsd - amountUsd).toFixed(2));
+
+      return {
+        success: true,
+        message: 'Withdrawal to wallet completed',
+        data: {
+          transactionId: txRow.id,
+          savingsWalletId,
+          amountXrp,
+          amountUsd,
+          newWalletBalanceXrp: newBalanceXrp,
+          remainingSavingsUsd: Math.max(0, remainingSavingsUsd),
+        },
+      };
+    } catch (error) {
+      console.error('Error in withdrawToWallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Withdrawal failed',
+        error: error instanceof Error ? error.message : 'Withdrawal failed',
       };
     }
   }

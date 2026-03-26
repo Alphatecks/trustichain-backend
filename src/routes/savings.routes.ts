@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { savingsController } from '../controllers/savings.controller';
 import { authenticate } from '../middleware/auth';
-import { validateSavingsTransfer } from '../middleware/validation';
+import { validateSavingsTransfer, validateSavingsWithdraw } from '../middleware/validation';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
@@ -62,6 +62,22 @@ router.post(
   validateSavingsTransfer,
   asyncHandler(async (req, res) => {
     await savingsController.transfer(req, res);
+  })
+);
+
+/**
+ * @route   POST /api/savings/withdraw
+ * @desc    Withdraw from a savings plan (wallet) to custodial XRP — matches UI: pick plan, then full or partial
+ * @access  Private
+ * @body    { savingsWalletId: string, targetWalletId?: string } — exactly one of:
+ *          withdrawAll: true (empty Saved balance), amountUsd (partial US$), amountXrp (partial XRP)
+ */
+router.post(
+  '/withdraw',
+  authenticate,
+  validateSavingsWithdraw,
+  asyncHandler(async (req, res) => {
+    await savingsController.withdraw(req, res);
   })
 );
 

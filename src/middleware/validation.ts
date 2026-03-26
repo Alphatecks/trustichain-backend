@@ -145,6 +145,55 @@ export const validateSavingsTransfer = (
   }
 };
 
+const savingsWithdrawSchema = z
+  .object({
+    savingsWalletId: z.string().uuid('savingsWalletId must be a valid UUID'),
+    targetWalletId: z.string().uuid('targetWalletId must be a valid UUID').optional(),
+    withdrawAll: z.boolean().optional(),
+    amountUsd: z.coerce.number().optional(),
+    amountXrp: z.coerce.number().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasAll = data.withdrawAll === true;
+    const usd = data.amountUsd != null ? Number(data.amountUsd) : NaN;
+    const xrp = data.amountXrp != null ? Number(data.amountXrp) : NaN;
+    const hasUsd = Number.isFinite(usd) && usd > 0;
+    const hasXrp = Number.isFinite(xrp) && xrp > 0;
+    const modes = [hasAll, hasUsd, hasXrp].filter(Boolean).length;
+    if (modes !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Provide exactly one of: withdrawAll (true), amountUsd, or amountXrp',
+      });
+    }
+  });
+
+export const validateSavingsWithdraw = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  try {
+    savingsWithdrawSchema.parse(req.body);
+    next();
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      const firstError = error.issues[0];
+      res.status(400).json({
+        success: false,
+        message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid request data',
+        error: 'Validation failed',
+      });
+    }
+  }
+};
+
 export const validateLoginMfa = (
   req: Request,
   res: Response,
