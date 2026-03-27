@@ -14,6 +14,14 @@ import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { emailService } from '../email.service';
+import { storageService } from '../storage/storage.service';
+
+async function resolveAvatarUrl(stored: string | null | undefined): Promise<string | null> {
+  if (stored == null || !String(stored).trim()) return null;
+  const t = String(stored).trim();
+  if (t.startsWith('http://') || t.startsWith('https://')) return t;
+  return storageService.getSignedUrlForUserProfilePhoto(stored);
+}
 
 export class EscrowService {
   /**
@@ -109,21 +117,30 @@ export class EscrowService {
   }
 
   /**
-   * Get party names (initiator and counterparty) for escrows
+   * Get party names and avatar URLs for escrow parties.
    */
-  private async getPartyNames(userIds: string[]): Promise<Record<string, string>> {
+  private async getPartyProfiles(userIds: string[]): Promise<Record<string, { name: string; avatarUrl: string | null }>> {
     if (userIds.length === 0) return {};
-    
+
     const adminClient = supabaseAdmin || supabase;
     const { data: users } = await adminClient
       .from('users')
-      .select('id, full_name')
+      .select('id, full_name, avatar_url')
       .in('id', userIds);
 
-    return (users || []).reduce((acc: Record<string, string>, user: { id: string; full_name: string }) => {
-      acc[user.id] = user.full_name;
-      return acc;
-    }, {} as Record<string, string>);
+    const entries = await Promise.all(
+      (users || []).map(async (u: any) => {
+        const avatarUrl = await resolveAvatarUrl(u.avatar_url ?? null);
+        return [u.id, { name: u.full_name || 'Unknown', avatarUrl }] as const;
+      })
+    );
+    return Object.fromEntries(entries);
+  }
+
+  /** Backward-compat wrapper used by callers that only need names. */
+  private async getPartyNames(userIds: string[]): Promise<Record<string, string>> {
+    const profiles = await this.getPartyProfiles(userIds);
+    return Object.fromEntries(Object.entries(profiles).map(([id, p]) => [id, p.name]));
   }
 
   /**
@@ -1256,21 +1273,26 @@ export class EscrowService {
         if (escrow.counterparty_id) userIds.add(escrow.counterparty_id);
       });
 
-      // Get party names
-      const partyNames = await this.getPartyNames(Array.from(userIds));
+      // Get party profiles (names + avatars)
+      const partyProfiles = await this.getPartyProfiles(Array.from(userIds));
 
       // Format escrows with all metadata
       const formattedEscrows: Escrow[] = (escrows || []).map((escrow: any) => {
         const year = new Date(escrow.created_at).getFullYear();
         const escrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
 
+        const initiatorProfile = partyProfiles[escrow.user_id];
+        const counterpartyProfile = escrow.counterparty_id ? partyProfiles[escrow.counterparty_id] : undefined;
+
         return {
           id: escrow.id,
           escrowId,
           userId: escrow.user_id,
           counterpartyId: escrow.counterparty_id || '',
-          initiatorName: partyNames[escrow.user_id] || 'Unknown',
-          counterpartyName: escrow.counterparty_id ? partyNames[escrow.counterparty_id] : undefined,
+          initiatorName: initiatorProfile?.name || 'Unknown',
+          initiatorAvatarUrl: initiatorProfile?.avatarUrl ?? null,
+          counterpartyName: counterpartyProfile?.name,
+          counterpartyAvatarUrl: counterpartyProfile?.avatarUrl ?? null,
           amount: {
             usd: parseFloat(escrow.amount_usd),
             xrp: parseFloat(escrow.amount_xrp),
@@ -1361,10 +1383,10 @@ export class EscrowService {
         };
       }
 
-      // Get party names
+      // Get party profiles (names + avatars)
       const userIds = [escrow.user_id];
       if (escrow.counterparty_id) userIds.push(escrow.counterparty_id);
-      const partyNames = await this.getPartyNames(userIds);
+      const partyProfiles = await this.getPartyProfiles(userIds);
 
       // Get milestones if this is a milestone-based escrow
       const milestones = await this.getMilestones(escrow.id);
@@ -1372,13 +1394,18 @@ export class EscrowService {
       const year = new Date(escrow.created_at).getFullYear();
       const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
 
+      const initiatorProfile = partyProfiles[escrow.user_id];
+      const counterpartyProfile = escrow.counterparty_id ? partyProfiles[escrow.counterparty_id] : undefined;
+
       const formattedEscrow: Escrow = {
         id: escrow.id,
         escrowId: formattedEscrowId,
         userId: escrow.user_id,
         counterpartyId: escrow.counterparty_id || '',
-        initiatorName: partyNames[escrow.user_id] || 'Unknown',
-        counterpartyName: escrow.counterparty_id ? partyNames[escrow.counterparty_id] : undefined,
+        initiatorName: initiatorProfile?.name || 'Unknown',
+        initiatorAvatarUrl: initiatorProfile?.avatarUrl ?? null,
+        counterpartyName: counterpartyProfile?.name,
+        counterpartyAvatarUrl: counterpartyProfile?.avatarUrl ?? null,
         amount: {
           usd: parseFloat(escrow.amount_usd),
           xrp: parseFloat(escrow.amount_xrp),

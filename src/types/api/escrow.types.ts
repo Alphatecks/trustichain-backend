@@ -81,7 +81,9 @@ export interface Escrow {
   userId: string; // Initiator user ID
   counterpartyId: string;
   initiatorName: string; // Full name of escrow creator
+  initiatorAvatarUrl?: string | null;
   counterpartyName?: string;
+  counterpartyAvatarUrl?: string | null;
   amount: {
     usd: number;
     xrp: number;
