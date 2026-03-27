@@ -13,6 +13,8 @@ interface UserProfileResponse {
     verified: boolean;
     /** True when TOTP MFA is active (sync toggle from GET /api/user/profile). */
     mfaEnabled?: boolean;
+    /** Unique handle for P2P sends (same as login / ensure-profile) */
+    trustitag?: string;
     avatarUrl?: string | null;
   };
   error?: string;

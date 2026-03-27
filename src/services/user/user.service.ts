@@ -5,6 +5,7 @@
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { storageService } from '../storage/storage.service';
+import { trustitagService } from '../trustitag.service';
 
 /** Stored avatar: our bucket ref, or external https URL (e.g. Google profile photo). */
 async function resolveAvatarDisplayUrl(stored: string | null | undefined): Promise<string | null> {
@@ -30,6 +31,8 @@ export class UserService {
       verified: boolean;
       /** Google Authenticator / TOTP MFA enabled (from users.mfa_enabled). */
       mfaEnabled: boolean;
+      /** Unique handle for P2P XRP by Trustitag; assigned if missing */
+      trustitag?: string;
       /** Time-limited URL for displaying the profile photo (private storage bucket). */
       avatarUrl: string | null;
     };
@@ -62,6 +65,13 @@ export class UserService {
 
       const mfaEnabled = (userData as { mfa_enabled?: boolean }).mfa_enabled === true;
 
+      let trustitag: string | undefined;
+      try {
+        trustitag = await trustitagService.ensureTrustitagForUser(userId);
+      } catch (e) {
+        console.warn('[UserService] ensureTrustitagForUser failed in getUserProfile:', e);
+      }
+
       if (authError && !authData) {
         // If we can't get auth data, assume not verified
         return {
@@ -74,6 +84,7 @@ export class UserService {
             country: userData.country,
             verified: false,
             mfaEnabled,
+            ...(trustitag && { trustitag }),
             avatarUrl,
           },
         };
@@ -89,6 +100,7 @@ export class UserService {
           country: userData.country,
           verified: authData?.user?.email_confirmed_at !== null,
           mfaEnabled,
+          ...(trustitag && { trustitag }),
           avatarUrl,
         },
       };
