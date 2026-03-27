@@ -485,6 +485,15 @@ router.post('/suppliers/check', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/profile/details
+ * @desc    Business profile details: profile picture, business name, business email, logged-in IP.
+ * @access  Private (business suite only)
+ */
+router.get('/profile/details', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getBusinessProfileDetails(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/business-email/status
  * @desc    Check if the business account has a business email. Returns { hasBusinessEmail, businessEmail }. Demand this before flows that require it.
  * @access  Private (authenticated)

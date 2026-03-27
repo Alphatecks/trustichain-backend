@@ -24,6 +24,17 @@ import type { ListSandboxWebhookLogsQuery } from '../types/api/sandbox.types';
 import type { SandboxWebhookLogDetailResponse } from '../types/api/sandbox.types';
 
 export class BusinessSuiteController {
+  private getRequestIp(req: Request): string | null {
+    const forwarded = req.headers['x-forwarded-for'];
+    const forwardedIp = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    if (typeof forwardedIp === 'string' && forwardedIp.trim()) {
+      return forwardedIp.split(',')[0].trim();
+    }
+    const fallback = req.ip || req.socket?.remoteAddress || null;
+    if (!fallback) return null;
+    return String(fallback).trim() || null;
+  }
+
   /**
    * Verify 6-digit business suite PIN (when switching from personal to business).
    * POST /api/business-suite/verify-pin
@@ -896,6 +907,19 @@ export class BusinessSuiteController {
     const result = await businessSuiteSuppliersService.checkSupplierRegistered(userId, name);
     if (!result.success) res.status(403).json(result);
     else res.status(200).json(result);
+  }
+
+  /**
+   * Get business profile details needed by business settings header/cards.
+   * GET /api/business-suite/profile/details
+   */
+  async getBusinessProfileDetails(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const requestIp = this.getRequestIp(req);
+    const result = await businessSuiteService.getBusinessProfileDetails(userId, requestIp);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business' || result.error === 'Not business suite') res.status(403).json(result);
+    else res.status(500).json(result);
   }
 
   /**

@@ -5,6 +5,7 @@
 
 import * as crypto from 'crypto';
 import { supabaseAdmin } from '../../config/supabase';
+import { storageService } from '../storage/storage.service';
 
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_COST = 16384;
@@ -239,6 +240,70 @@ export class BusinessSuiteService {
       message: businessEmailSet ? 'Business email is set' : 'Business email is required. Set it via PATCH /business-email.',
       hasBusinessEmail: businessEmailSet,
       businessEmail: displayEmail,
+    };
+  }
+
+  /**
+   * Get basic business profile details for the authenticated owner.
+   * Includes signed logo URL, business name, business email address, and current request IP.
+   */
+  async getBusinessProfileDetails(
+    userId: string,
+    loggedInIp: string | null
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      businessProfilePicture: string | null;
+      businessName: string | null;
+      businessEmailAddress: string | null;
+      loggedInIp: string | null;
+    };
+    error?: string;
+  }> {
+    const client = supabaseAdmin;
+    if (!client) {
+      return { success: false, message: 'Server error', error: 'No admin client' };
+    }
+
+    const access = await this.ensureBusinessSuiteAccess(userId);
+    if (!access.allowed) {
+      return { success: false, message: access.error ?? 'Not business suite', error: access.error };
+    }
+
+    const { data: biz, error: bizError } = await client
+      .from('businesses')
+      .select('company_name, company_logo_url, business_email')
+      .eq('owner_user_id', userId)
+      .maybeSingle();
+
+    if (bizError) {
+      return { success: false, message: bizError.message || 'Failed to fetch business profile', error: bizError.message };
+    }
+    if (!biz) {
+      return { success: false, message: 'No business found for this account', error: 'No business' };
+    }
+
+    const { data: user } = await client.from('users').select('email').eq('id', userId).maybeSingle();
+
+    const businessEmail =
+      biz.business_email != null && String(biz.business_email).trim().length > 0
+        ? String(biz.business_email).trim()
+        : user?.email != null && String(user.email).trim().length > 0
+          ? String(user.email).trim()
+          : null;
+
+    const businessProfilePicture = await storageService.getSignedUrlForCompanyLogo(biz.company_logo_url ?? null);
+
+    return {
+      success: true,
+      message: 'Business profile details retrieved',
+      data: {
+        businessProfilePicture,
+        businessName: biz.company_name != null && String(biz.company_name).trim().length > 0 ? String(biz.company_name).trim() : null,
+        businessEmailAddress: businessEmail,
+        loggedInIp: loggedInIp && loggedInIp.trim() ? loggedInIp.trim() : null,
+      },
     };
   }
 
