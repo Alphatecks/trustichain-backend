@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { savingsController } from '../controllers/savings.controller';
 import { authenticate } from '../middleware/auth';
-import { validateSavingsTransfer, validateSavingsWithdraw } from '../middleware/validation';
+import { validateSavingsCreateWallet, validateSavingsTransfer, validateSavingsWithdraw } from '../middleware/validation';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
@@ -85,11 +85,12 @@ router.post(
  * @route   POST /api/savings/wallets
  * @desc    Create a new savings wallet
  * @access  Private
- * @body    { name: string, targetAmountUsd?: number }
+ * @body    { name: string, targetAmountUsd?: number, durationMonths?: number }
  */
 router.post(
   '/wallets',
   authenticate,
+  validateSavingsCreateWallet,
   asyncHandler(async (req, res) => {
     await savingsController.createWallet(req, res);
   })

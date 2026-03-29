@@ -119,6 +119,16 @@ const savingsTransferSchema = z.object({
   amountXrp: z.coerce.number().positive('amountXrp must be greater than 0'),
 });
 
+const savingsCreateWalletSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'name is required')
+    .max(100, 'name must be less than or equal to 100 characters'),
+  targetAmountUsd: z.coerce.number().positive('targetAmountUsd must be greater than 0').optional(),
+  durationMonths: z.coerce.number().int('durationMonths must be a whole number').positive('durationMonths must be greater than 0').optional(),
+});
+
 export const validateSavingsTransfer = (
   req: Request,
   res: Response,
@@ -126,6 +136,32 @@ export const validateSavingsTransfer = (
 ): void => {
   try {
     savingsTransferSchema.parse(req.body);
+    next();
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      const firstError = error.issues[0];
+      res.status(400).json({
+        success: false,
+        message: firstError.message,
+        error: 'Validation failed',
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid request data',
+        error: 'Validation failed',
+      });
+    }
+  }
+};
+
+export const validateSavingsCreateWallet = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  try {
+    savingsCreateWalletSchema.parse(req.body);
     next();
   } catch (error: unknown) {
     if (error instanceof ZodError) {
