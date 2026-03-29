@@ -2952,14 +2952,19 @@ export class WalletService {
 
         // Process each transaction
         for (const txWrapper of transactions) {
-          const tx = txWrapper.tx || txWrapper;
+          // XRPL may return tx payload in tx_json (API v2) or tx (legacy/API v1).
+          const tx = txWrapper.tx_json || txWrapper.tx || txWrapper;
           
           // Only process Payment transactions where this address is the destination
           if (tx.TransactionType !== 'Payment') continue;
           if (tx.Destination !== xrplAddress) continue;
           
           // Skip if we already have this transaction
-          const txHash = tx.hash || txWrapper.hash;
+          const txHash =
+            tx.hash ||
+            txWrapper.hash ||
+            txWrapper.tx_json?.hash ||
+            txWrapper.tx?.hash;
           if (!txHash || existingHashes.has(txHash)) continue;
 
           // Get amount (handle both XRP and token payments)
@@ -2982,7 +2987,7 @@ export class WalletService {
 
           // Convert Ripple Epoch to Unix timestamp (Ripple Epoch starts Jan 1, 2000)
           // Ripple Epoch = Unix timestamp - 946684800
-          const rippleEpoch = txWrapper.date || tx.date;
+          const rippleEpoch = txWrapper.date || tx.date || txWrapper.tx_json?.date || txWrapper.tx?.date;
           const createdAt = rippleEpoch 
             ? new Date((rippleEpoch + 946684800) * 1000).toISOString()
             : new Date().toISOString();
@@ -3082,13 +3087,14 @@ export class WalletService {
             });
 
             const txResult = txResponse.result as any;
-            const destination = txResult.Destination;
+            const txJson = txResult.tx_json || txResult.tx || txResult;
+            const destination = txJson.Destination;
 
             // If this withdrawal sent to this user's address, create deposit record
-            if (destination === wallet.xrpl_address && txResult.TransactionType === 'Payment') {
+            if (destination === wallet.xrpl_address && txJson.TransactionType === 'Payment') {
               // Get amount from transaction
               const { dropsToXrp } = await import('xrpl');
-              const amountDrops = txResult.Amount;
+              const amountDrops = txJson.Amount;
               const amountXrp = parseFloat((dropsToXrp as any)(String(amountDrops)));
 
               // Calculate USD amount (use the same rate as withdrawal if available, or fetch current)
@@ -3114,7 +3120,7 @@ export class WalletService {
                   amount_usd: amountUsd,
                   xrpl_tx_hash: withdrawal.xrpl_tx_hash,
                   status: 'completed',
-                  description: `Deposit from ${txResult.Account}`,
+                  description: `Deposit from ${txJson.Account}`,
                 });
 
               // Update wallet balance
