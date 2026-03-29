@@ -3159,20 +3159,30 @@ export class WalletService {
       // ...existing code...
       // #endregion
 
-      // Sync pending transactions in the background (don't wait for it)
+      // Keep withdrawal reconciliation in background (not needed for first-load deposit visibility).
       this.syncPendingWithdrawals(userId).catch(() => {});
-      this.syncPendingDeposits(userId).catch(() => {});
-      
-      // Also sync incoming payments from XRPL if user has a wallet address (personal suite)
+
+      // Resolve wallet first so we can run all deposit sync work before querying history.
       const { data: wallet } = await adminClient
         .from('wallets')
         .select('xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', 'personal')
         .maybeSingle();
-      
+
+      // Run deposit sync BEFORE transaction query so first fetch includes new incoming deposits.
+      const depositSyncTasks: Promise<void>[] = [this.syncPendingDeposits(userId)];
       if (wallet?.xrpl_address) {
-        this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch(() => {});
+        depositSyncTasks.push(this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address));
+      }
+      const depositSyncResults = await Promise.allSettled(depositSyncTasks);
+      for (const [index, result] of depositSyncResults.entries()) {
+        if (result.status === 'rejected') {
+          console.warn(
+            `[WalletService.getTransactions] deposit sync task ${index + 1} failed:`,
+            result.reason
+          );
+        }
       }
 
       // Exclude transactions linked to business/supply escrows (they belong in supplier transaction history, not personal)
