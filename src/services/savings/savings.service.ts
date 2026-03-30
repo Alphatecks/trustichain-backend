@@ -6,6 +6,7 @@
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { exchangeService } from '../exchange/exchange.service';
 import { emailService } from '../email.service';
+import { notificationService } from '../notification/notification.service';
 
 import {
   SavingsSummaryResponse,
@@ -562,6 +563,26 @@ export class SavingsService {
           message: 'Failed to record transfer',
           error: txErr?.message || 'Database error',
         };
+      }
+
+      // Notify user that savings plan has been funded (in-app + push via FCM tokens).
+      try {
+        await notificationService.createNotification({
+          userId,
+          type: 'generic',
+          title: 'Savings funded',
+          message: `${amountXrp.toFixed(6)} XRP (~$${amountUsd.toFixed(2)}) added to "${savingsRow.name}".`,
+          metadata: {
+            category: 'savings_funded',
+            savingsWalletId,
+            savingsWalletName: savingsRow.name,
+            transactionId: txRow.id,
+            amountXrp,
+            amountUsd,
+          },
+        });
+      } catch (notifyError) {
+        console.warn('[SavingsTransfer] failed to create funding notification:', notifyError);
       }
 
       return {
