@@ -43,7 +43,7 @@ export interface SavingsWalletItem {
   amountUsd: number;
   percentage: number;
   targetAmountUsd?: number;
-  durationMonths?: number;
+  targetDate?: string;
 }
 
 export interface SavingsWalletsResponse {
@@ -84,8 +84,8 @@ export interface SavingsTransactionsResponse {
 export interface SavingsCreateWalletRequest {
   name: string;
   targetAmountUsd?: number;
-  /** Optional plan duration in months (e.g. 3, 6, 12) */
-  durationMonths?: number;
+  /** Optional target completion date in YYYY-MM-DD format */
+  targetDate?: string;
 }
 
 /** POST /api/savings/transfer — move XRP from custodial wallet into a savings bucket */

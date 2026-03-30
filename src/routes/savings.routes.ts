@@ -85,7 +85,7 @@ router.post(
  * @route   POST /api/savings/wallets
  * @desc    Create a new savings wallet
  * @access  Private
- * @body    { name: string, targetAmountUsd?: number, durationMonths?: number }
+ * @body    { name: string, targetAmountUsd?: number, targetDate?: string }
  */
 router.post(
   '/wallets',

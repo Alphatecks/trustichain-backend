@@ -255,13 +255,13 @@ export class SavingsController {
   async createWallet(req: Request, res: Response<SavingsWalletsResponse>): Promise<void> {
     try {
       const userId = req.userId!;
-      const { name, targetAmountUsd, durationMonths } = req.body as {
+      const { name, targetAmountUsd, targetDate } = req.body as {
         name: string;
         targetAmountUsd?: number;
-        durationMonths?: number;
+        targetDate?: string;
       };
 
-      const result = await savingsService.createWallet(userId, { name, targetAmountUsd, durationMonths });
+      const result = await savingsService.createWallet(userId, { name, targetAmountUsd, targetDate });
 
       if (result.success) {
         res.status(201).json(result);

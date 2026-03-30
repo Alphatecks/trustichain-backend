@@ -386,7 +386,7 @@ export class SavingsService {
         name: string;
         created_at: string;
         target_amount_usd?: string | number | null;
-        duration_months?: number | null;
+        target_date?: string | null;
       }) => {
         const amountUsd = totalsByWallet.get(w.id) || 0;
         const percentage = totalUsd > 0 ? (amountUsd / totalUsd) * 100 : 0;
@@ -397,10 +397,7 @@ export class SavingsService {
           amountUsd,
           percentage: parseFloat(percentage.toFixed(2)),
           targetAmountUsd: w.target_amount_usd ? parseFloat(String(w.target_amount_usd)) : undefined,
-          durationMonths:
-            typeof w.duration_months === 'number' && Number.isFinite(w.duration_months)
-              ? w.duration_months
-              : undefined,
+          targetDate: w.target_date || undefined,
         };
       });
 
@@ -929,11 +926,11 @@ export class SavingsService {
   async createWallet(userId: string, body: {
     name: string;
     targetAmountUsd?: number;
-    durationMonths?: number;
+    targetDate?: string;
   }): Promise<SavingsWalletsResponse> {
     try {
       const adminClient = supabaseAdmin || supabase;
-      const { name, targetAmountUsd, durationMonths } = body;
+      const { name, targetAmountUsd, targetDate } = body;
 
       const { data: wallet, error } = await adminClient
         .from('savings_wallets')
@@ -941,7 +938,7 @@ export class SavingsService {
           user_id: userId,
           name,
           target_amount_usd: typeof targetAmountUsd === 'number' ? targetAmountUsd : null,
-          duration_months: typeof durationMonths === 'number' ? durationMonths : null,
+          target_date: typeof targetDate === 'string' ? targetDate : null,
         })
         .select()
         .single();
@@ -995,10 +992,7 @@ export class SavingsService {
               targetAmountUsd: wallet.target_amount_usd
                 ? parseFloat(wallet.target_amount_usd)
                 : undefined,
-              durationMonths:
-                typeof wallet.duration_months === 'number' && Number.isFinite(wallet.duration_months)
-                  ? wallet.duration_months
-                  : undefined,
+              targetDate: wallet.target_date || undefined,
             },
           ],
         },

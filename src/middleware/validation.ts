@@ -126,7 +126,23 @@ const savingsCreateWalletSchema = z.object({
     .min(1, 'name is required')
     .max(100, 'name must be less than or equal to 100 characters'),
   targetAmountUsd: z.coerce.number().positive('targetAmountUsd must be greater than 0').optional(),
-  durationMonths: z.coerce.number().int('durationMonths must be a whole number').positive('durationMonths must be greater than 0').optional(),
+  targetDate: z.string().optional().refine((value) => {
+    if (!value) return true;
+    const parts = value.split('-');
+    if (parts.length !== 3) return false;
+    const year = Number(parts[0]);
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year
+      && date.getUTCMonth() === month - 1
+      && date.getUTCDate() === day
+    );
+  }, 'targetDate must be a valid date in YYYY-MM-DD format'),
 });
 
 export const validateSavingsTransfer = (
