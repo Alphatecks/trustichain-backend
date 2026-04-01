@@ -909,6 +909,16 @@ export class BusinessSuiteController {
     else res.status(200).json(result);
   }
 
+  /** Autocomplete verified supplier business names. GET /api/business-suite/suppliers/autocomplete?q=&limit= */
+  async autocompleteSupplierBusinesses(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const query = (req.query.q as string) ?? (req.query.query as string) ?? (req.query.name as string) ?? '';
+    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    const result = await businessSuiteSuppliersService.autocompleteSupplierBusinesses(userId, query, limit);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
   /**
    * Get business profile details needed by business settings header/cards.
    * GET /api/business-suite/profile/details

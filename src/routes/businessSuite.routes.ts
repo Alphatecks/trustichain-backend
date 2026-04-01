@@ -476,6 +476,15 @@ router.get('/suppliers/transactions', authenticate, asyncHandler(async (req, res
 }));
 
 /**
+ * @route   GET /api/business-suite/suppliers/autocomplete
+ * @desc    Autocomplete verified supplier business names while typing. Query: q (or query/name), limit (optional).
+ * @access  Private (business suite only)
+ */
+router.get('/suppliers/autocomplete', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.autocompleteSupplierBusinesses(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/suppliers/check
  * @desc    Check if a supplier (business) name is registered. Body: { name }. Returns { registered: boolean, message }.
  * @access  Private (business suite only)

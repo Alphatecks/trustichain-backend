@@ -48,6 +48,76 @@ export interface CreateSupplierRequest {
 
 export class BusinessSuiteSuppliersService {
   /**
+   * Autocomplete verified supplier business names for escrow forms.
+   * Prioritizes prefix matches, then contains matches; excludes caller's own business.
+   */
+  async autocompleteSupplierBusinesses(
+    userId: string,
+    query: string,
+    limit = 10
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { items: Array<{ businessId: string; businessName: string }> };
+    error?: string;
+  }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const trimmedQuery = typeof query === 'string' ? query.trim() : '';
+    if (trimmedQuery.length < 2) {
+      return {
+        success: true,
+        message: 'Type at least 2 characters',
+        data: { items: [] },
+      };
+    }
+
+    const cappedLimit = Number.isFinite(limit) ? Math.min(25, Math.max(1, Math.floor(limit))) : 10;
+    const ownBusinessId = await businessSuiteService.getBusinessId(userId);
+    const client = supabaseAdmin!;
+
+    const { data: rows, error } = await client
+      .from('businesses')
+      .select('id, company_name')
+      .eq('status', 'Verified')
+      .not('company_name', 'is', null)
+      .ilike('company_name', `%${trimmedQuery}%`)
+      .limit(100);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch supplier suggestions', error: error.message };
+    }
+
+    const normalizedQuery = trimmedQuery.toLowerCase();
+    const matches = (rows || [])
+      .filter((row) => row.id && row.company_name)
+      .filter((row) => row.id !== ownBusinessId)
+      .map((row) => ({
+        businessId: row.id as string,
+        businessName: String(row.company_name).trim(),
+      }))
+      .filter((item) => item.businessName.length > 0)
+      .sort((a, b) => {
+        const aName = a.businessName.toLowerCase();
+        const bName = b.businessName.toLowerCase();
+        const aStarts = aName.startsWith(normalizedQuery);
+        const bStarts = bName.startsWith(normalizedQuery);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return aName.localeCompare(bName);
+      })
+      .slice(0, cappedLimit);
+
+    return {
+      success: true,
+      message: matches.length > 0 ? 'Supplier suggestions retrieved' : 'No matching suppliers found',
+      data: { items: matches },
+    };
+  }
+
+  /**
    * Create a new supplier. POST /api/business-suite/suppliers
    * Supports Add supplier UI: name, walletAddress, country, kycStatus, contractType, tags.
    * Also supports legacy: dueDate, amount.
