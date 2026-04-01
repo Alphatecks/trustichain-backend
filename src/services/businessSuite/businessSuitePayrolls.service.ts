@@ -41,6 +41,79 @@ function formatTransactionId(payrollId: string, itemId: string): string {
 }
 
 export class BusinessSuitePayrollsService {
+  /**
+   * Deterministic XRPL permission check for payroll escrow destination.
+   * Uses business wallet as source and receiver wallet as destination.
+   */
+  async checkPayrollEscrowPermission(
+    userId: string,
+    input: { receiverWalletAddress?: string; counterpartyId?: string }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      network: string;
+      fromAddress: string;
+      toAddress: string;
+      destinationFlags: {
+        raw: number;
+        depositAuthEnabled: boolean;
+        requireDestTag: boolean;
+        disallowXrp: boolean;
+      };
+      depositAuthorized: boolean | null;
+      canCreateEscrow: boolean;
+      reasonCode:
+        | 'OK'
+        | 'DESTINATION_DEPOSIT_AUTH_NOT_AUTHORIZED'
+        | 'DESTINATION_ACCOUNT_NOT_FOUND'
+        | 'UNDETERMINED';
+      reason: string;
+      checkedAt: string;
+    };
+    error?: string;
+  }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const client = supabaseAdmin!;
+
+    const { data: businessWallet } = await client
+      .from('wallets')
+      .select('xrpl_address')
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .single();
+    if (!businessWallet?.xrpl_address) {
+      return { success: false, message: 'Business wallet not found. Connect a business wallet first.', error: 'Wallet not found' };
+    }
+
+    let receiverWalletAddress = (input.receiverWalletAddress || '').trim();
+    if (!receiverWalletAddress && input.counterpartyId) {
+      const { data: cpWallet } = await client
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', input.counterpartyId)
+        .eq('suite_context', 'personal')
+        .maybeSingle();
+      receiverWalletAddress = (cpWallet?.xrpl_address || '').trim();
+    }
+    if (!receiverWalletAddress) {
+      return {
+        success: false,
+        message: 'receiverWalletAddress is required (or provide counterpartyId with a connected personal wallet).',
+        error: 'Missing receiver wallet',
+      };
+    }
+    if (!receiverWalletAddress.startsWith('r')) {
+      return { success: false, message: 'receiverWalletAddress must be a valid XRPL classic address.', error: 'Invalid receiver wallet' };
+    }
+
+    return xrplEscrowService.diagnoseEscrowCreatePermission({
+      fromAddress: businessWallet.xrpl_address,
+      toAddress: receiverWalletAddress,
+    });
+  }
+
   async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string; escrowsCreated?: boolean }; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };

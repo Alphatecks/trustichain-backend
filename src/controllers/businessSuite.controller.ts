@@ -1100,6 +1100,30 @@ export class BusinessSuiteController {
     else res.status(400).json(result);
   }
 
+  /**
+   * Deterministic XRPL escrow permission check for payroll receiver.
+   * GET/POST /api/business-suite/payrolls/escrow-check
+   */
+  async checkPayrollEscrowPermission(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const receiverWalletAddress =
+      (typeof req.query.receiverWalletAddress === 'string' ? req.query.receiverWalletAddress : undefined) ??
+      (typeof req.query.receiverWallet === 'string' ? req.query.receiverWallet : undefined) ??
+      (typeof req.body?.receiverWalletAddress === 'string' ? req.body.receiverWalletAddress : undefined) ??
+      (typeof req.body?.receiverWallet === 'string' ? req.body.receiverWallet : undefined);
+    const counterpartyId =
+      (typeof req.query.counterpartyId === 'string' ? req.query.counterpartyId : undefined) ??
+      (typeof req.body?.counterpartyId === 'string' ? req.body.counterpartyId : undefined);
+
+    const result = await businessSuitePayrollsService.checkPayrollEscrowPermission(userId, {
+      receiverWalletAddress,
+      counterpartyId,
+    });
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Missing receiver wallet' || result.error === 'Invalid receiver wallet' || result.error === 'Wallet not found') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
   /** List payrolls. GET /api/business-suite/payrolls */
   async listPayrolls(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;

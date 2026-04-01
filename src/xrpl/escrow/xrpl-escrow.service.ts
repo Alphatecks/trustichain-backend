@@ -24,6 +24,140 @@ export class XRPLEscrowService {
   }
 
   /**
+   * Deterministic permission diagnostic for EscrowCreate from source -> destination.
+   * Uses account flags + deposit_authorized to determine whether destination permits incoming escrow/payment.
+   */
+  async diagnoseEscrowCreatePermission(params: {
+    fromAddress: string;
+    toAddress: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      network: string;
+      fromAddress: string;
+      toAddress: string;
+      destinationFlags: {
+        raw: number;
+        depositAuthEnabled: boolean;
+        requireDestTag: boolean;
+        disallowXrp: boolean;
+      };
+      depositAuthorized: boolean | null;
+      canCreateEscrow: boolean;
+      reasonCode:
+        | 'OK'
+        | 'DESTINATION_DEPOSIT_AUTH_NOT_AUTHORIZED'
+        | 'DESTINATION_ACCOUNT_NOT_FOUND'
+        | 'UNDETERMINED';
+      reason: string;
+      checkedAt: string;
+    };
+    error?: string;
+  }> {
+    const client = new Client(this.XRPL_SERVER);
+    await client.connect();
+    try {
+      let destinationInfo: any;
+      try {
+        destinationInfo = await (client as any).request({
+          command: 'account_info',
+          account: params.toAddress,
+          ledger_index: 'validated',
+        });
+      } catch (e: any) {
+        if (e?.data?.error === 'actNotFound') {
+          return {
+            success: true,
+            message: 'Deterministic XRPL check complete',
+            data: {
+              network: this.XRPL_NETWORK,
+              fromAddress: params.fromAddress,
+              toAddress: params.toAddress,
+              destinationFlags: {
+                raw: 0,
+                depositAuthEnabled: false,
+                requireDestTag: false,
+                disallowXrp: false,
+              },
+              depositAuthorized: null,
+              canCreateEscrow: false,
+              reasonCode: 'DESTINATION_ACCOUNT_NOT_FOUND',
+              reason: 'Destination XRPL account is not activated (actNotFound).',
+              checkedAt: new Date().toISOString(),
+            },
+          };
+        }
+        throw e;
+      }
+
+      const rawFlags = Number(destinationInfo?.result?.account_data?.Flags ?? 0);
+      const depositAuthEnabled = (rawFlags & 0x01000000) !== 0; // lsfDepositAuth
+      const requireDestTag = (rawFlags & 0x00020000) !== 0; // lsfRequireDestTag
+      const disallowXrp = (rawFlags & 0x00080000) !== 0; // lsfDisallowXRP
+
+      let depositAuthorized: boolean | null = null;
+      if (depositAuthEnabled) {
+        try {
+          const authResult = await (client as any).request({
+            command: 'deposit_authorized',
+            source_account: params.fromAddress,
+            destination_account: params.toAddress,
+            ledger_index: 'validated',
+          });
+          depositAuthorized = Boolean(authResult?.result?.deposit_authorized);
+        } catch {
+          depositAuthorized = null;
+        }
+      }
+
+      let canCreateEscrow = true;
+      let reasonCode: 'OK' | 'DESTINATION_DEPOSIT_AUTH_NOT_AUTHORIZED' | 'UNDETERMINED' = 'OK';
+      let reason = 'Destination account permissions allow incoming escrow from this source.';
+
+      if (depositAuthEnabled && depositAuthorized === false) {
+        canCreateEscrow = false;
+        reasonCode = 'DESTINATION_DEPOSIT_AUTH_NOT_AUTHORIZED';
+        reason =
+          'Destination has DepositAuth enabled and has not preauthorized the source account via DepositPreauth.';
+      } else if (depositAuthEnabled && depositAuthorized === null) {
+        reasonCode = 'UNDETERMINED';
+        reason =
+          'Destination has DepositAuth enabled, but deposit_authorized check could not be completed.';
+      }
+
+      return {
+        success: true,
+        message: 'Deterministic XRPL check complete',
+        data: {
+          network: this.XRPL_NETWORK,
+          fromAddress: params.fromAddress,
+          toAddress: params.toAddress,
+          destinationFlags: {
+            raw: rawFlags,
+            depositAuthEnabled,
+            requireDestTag,
+            disallowXrp,
+          },
+          depositAuthorized,
+          canCreateEscrow,
+          reasonCode,
+          reason,
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Failed to run deterministic XRPL check',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      await client.disconnect();
+    }
+  }
+
+  /**
    * Create an escrow on XRPL
    * Note: Requires wallet secret key - in production, handle securely
    */

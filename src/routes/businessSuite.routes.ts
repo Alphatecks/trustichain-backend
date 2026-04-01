@@ -678,6 +678,19 @@ router.post('/payrolls', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/payrolls/escrow-check
+ * @route   POST /api/business-suite/payrolls/escrow-check
+ * @desc    Deterministic XRPL escrow permission check for payroll receiver. Query/body: receiverWalletAddress (or receiverWallet) OR counterpartyId.
+ * @access  Private (business suite only)
+ */
+router.get('/payrolls/escrow-check', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.checkPayrollEscrowPermission(req, res);
+}));
+router.post('/payrolls/escrow-check', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.checkPayrollEscrowPermission(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/payrolls
  * @desc    List payrolls (left pane cards)
  * @access  Private (business suite only)
