@@ -6,6 +6,8 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
 import type {
+  SupplierAutocompleteItem,
+  SupplierAutocompleteResponse,
   SupplierDetailItem,
   SupplierDetailsResponse,
   SupplierTransactionListItem,
@@ -47,76 +49,6 @@ export interface CreateSupplierRequest {
 }
 
 export class BusinessSuiteSuppliersService {
-  /**
-   * Autocomplete verified supplier business names for escrow forms.
-   * Prioritizes prefix matches, then contains matches; excludes caller's own business.
-   */
-  async autocompleteSupplierBusinesses(
-    userId: string,
-    query: string,
-    limit = 10
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data?: { items: Array<{ businessId: string; businessName: string }> };
-    error?: string;
-  }> {
-    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
-    if (!check.allowed) {
-      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
-    }
-
-    const trimmedQuery = typeof query === 'string' ? query.trim() : '';
-    if (trimmedQuery.length < 2) {
-      return {
-        success: true,
-        message: 'Type at least 2 characters',
-        data: { items: [] },
-      };
-    }
-
-    const cappedLimit = Number.isFinite(limit) ? Math.min(25, Math.max(1, Math.floor(limit))) : 10;
-    const ownBusinessId = await businessSuiteService.getBusinessId(userId);
-    const client = supabaseAdmin!;
-
-    const { data: rows, error } = await client
-      .from('businesses')
-      .select('id, company_name')
-      .eq('status', 'Verified')
-      .not('company_name', 'is', null)
-      .ilike('company_name', `%${trimmedQuery}%`)
-      .limit(100);
-
-    if (error) {
-      return { success: false, message: error.message || 'Failed to fetch supplier suggestions', error: error.message };
-    }
-
-    const normalizedQuery = trimmedQuery.toLowerCase();
-    const matches = (rows || [])
-      .filter((row) => row.id && row.company_name)
-      .filter((row) => row.id !== ownBusinessId)
-      .map((row) => ({
-        businessId: row.id as string,
-        businessName: String(row.company_name).trim(),
-      }))
-      .filter((item) => item.businessName.length > 0)
-      .sort((a, b) => {
-        const aName = a.businessName.toLowerCase();
-        const bName = b.businessName.toLowerCase();
-        const aStarts = aName.startsWith(normalizedQuery);
-        const bStarts = bName.startsWith(normalizedQuery);
-        if (aStarts !== bStarts) return aStarts ? -1 : 1;
-        return aName.localeCompare(bName);
-      })
-      .slice(0, cappedLimit);
-
-    return {
-      success: true,
-      message: matches.length > 0 ? 'Supplier suggestions retrieved' : 'No matching suppliers found',
-      data: { items: matches },
-    };
-  }
-
   /**
    * Create a new supplier. POST /api/business-suite/suppliers
    * Supports Add supplier UI: name, walletAddress, country, kycStatus, contractType, tags.
@@ -280,6 +212,74 @@ export class BusinessSuiteSuppliersService {
       success: true,
       registered: false,
       message: 'Supplier is not registered',
+    };
+  }
+
+  /**
+   * Autocomplete verified supplier businesses by company name.
+   * GET /api/business-suite/suppliers/autocomplete?q=&limit= - prefix matches first, then alphabetical; excludes caller's business.
+   */
+  async autocompleteSupplierBusinesses(
+    userId: string,
+    query: string,
+    limit = 10
+  ): Promise<SupplierAutocompleteResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const trimmedQuery = typeof query === 'string' ? query.trim() : '';
+    if (trimmedQuery.length < 2) {
+      return {
+        success: true,
+        message: 'Type at least 2 characters',
+        data: { items: [] },
+      };
+    }
+
+    const rawLimit = limit === undefined || limit === null || !Number.isFinite(Number(limit)) ? 10 : Math.floor(Number(limit));
+    const cappedLimit = Math.min(20, Math.max(1, rawLimit));
+    const escaped = trimmedQuery.replace(/[%_]/g, '\\$&');
+    const client = supabaseAdmin!;
+
+    const [ownBusinessId, { data: rows, error }] = await Promise.all([
+      businessSuiteService.getBusinessId(userId),
+      client
+        .from('businesses')
+        .select('id, company_name')
+        .eq('status', 'Verified')
+        .not('company_name', 'is', null)
+        .ilike('company_name', `%${escaped}%`)
+        .limit(100),
+    ]);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch supplier suggestions', error: error.message };
+    }
+
+    const loweredQuery = trimmedQuery.toLowerCase();
+    const items: SupplierAutocompleteItem[] = (rows || [])
+      .filter((row) => row.company_name && row.id && row.id !== ownBusinessId)
+      .map((row) => ({
+        businessId: row.id as string,
+        companyName: String(row.company_name).trim(),
+      }))
+      .filter((item) => item.companyName.length > 0)
+      .sort((a, b) => {
+        const aName = a.companyName.toLowerCase();
+        const bName = b.companyName.toLowerCase();
+        const aStarts = aName.startsWith(loweredQuery);
+        const bStarts = bName.startsWith(loweredQuery);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return aName.localeCompare(bName);
+      })
+      .slice(0, cappedLimit);
+
+    return {
+      success: true,
+      message: items.length > 0 ? 'Supplier suggestions retrieved' : 'No matching suppliers found',
+      data: { items },
     };
   }
 

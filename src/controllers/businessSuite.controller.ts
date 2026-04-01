@@ -919,11 +919,15 @@ export class BusinessSuiteController {
     else res.status(200).json(result);
   }
 
-  /** Autocomplete verified supplier business names. GET /api/business-suite/suppliers/autocomplete?q=&limit= */
+  /** Supplier business name autocomplete for escrow forms. GET /api/business-suite/suppliers/autocomplete?q=&limit= */
   async autocompleteSupplierBusinesses(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
-    const query = (req.query.q as string) ?? (req.query.query as string) ?? (req.query.name as string) ?? '';
-    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    const query =
+      (typeof req.query.q === 'string' ? req.query.q : undefined) ??
+      (typeof req.query.query === 'string' ? req.query.query : undefined) ??
+      '';
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
     const result = await businessSuiteSuppliersService.autocompleteSupplierBusinesses(userId, query, limit);
     if (result.success) res.status(200).json(result);
     else res.status(403).json(result);

@@ -477,7 +477,7 @@ router.get('/suppliers/transactions', authenticate, asyncHandler(async (req, res
 
 /**
  * @route   GET /api/business-suite/suppliers/autocomplete
- * @desc    Autocomplete verified supplier business names while typing. Query: q (or query/name), limit (optional).
+ * @desc    Autocomplete verified businesses (excludes own). Query params: q (or query), limit (1–20, default 10). Response data.items: { businessId, companyName }[].
  * @access  Private (business suite only)
  */
 router.get('/suppliers/autocomplete', authenticate, asyncHandler(async (req, res) => {

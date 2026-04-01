@@ -52,3 +52,18 @@ export interface SupplierTransactionHistoryResponse {
   };
   error?: string;
 }
+
+/** Verified business option from GET /api/business-suite/suppliers/autocomplete */
+export interface SupplierAutocompleteItem {
+  businessId: string;
+  companyName: string;
+}
+
+export interface SupplierAutocompleteResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: SupplierAutocompleteItem[];
+  };
+  error?: string;
+}

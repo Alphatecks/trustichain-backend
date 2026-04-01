@@ -226,7 +226,11 @@ export class BusinessSuitePayrollsService {
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { success: false, message: `Failed to create XRPL escrow for team member: ${msg}`, error: 'XRPL escrow failed' };
+        return {
+          success: false,
+          message: `Failed to create XRPL escrow for team member wallet ${toAddress}: ${msg}`,
+          error: 'XRPL escrow failed',
+        };
       }
       const { data: escrow, error: escrowError } = await client
         .from('escrows')
