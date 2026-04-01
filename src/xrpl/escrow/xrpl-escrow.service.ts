@@ -119,10 +119,45 @@ export class XRPLEscrowService {
         });
         
         // Check for transaction failure
-        // tec* codes are temporary failures, ter* are retryable, tesSUCCESS is success
+        // tec* codes are failures, ter* are retryable, tesSUCCESS is success
         if (engineResult && !engineResult.startsWith('tes') && engineResult !== 'terQUEUED') {
+          let failureMessage = `Escrow creation transaction failed: ${engineResult}. The escrow was not created on XRPL.`;
+
+          if (engineResult === 'tecNO_PERMISSION') {
+            // Diagnose common permission issues to avoid misleading "insufficient balance" messaging.
+            let destinationHint =
+              'Destination account permissions block this escrow (common cause: DepositAuth enabled without preauthorization).';
+            try {
+              const destinationInfo = await (client as any).request({
+                command: 'account_info',
+                account: params.toAddress,
+                ledger_index: 'validated',
+              });
+              const flags = Number(destinationInfo?.result?.account_data?.Flags ?? 0);
+              const hasDepositAuth = (flags & 0x01000000) !== 0; // lsfDepositAuth
+              if (hasDepositAuth) {
+                destinationHint =
+                  'Destination account has DepositAuth enabled and has not preauthorized this business wallet. The receiver must disable DepositAuth or add DepositPreauth for the sender.';
+              }
+            } catch (diagError: any) {
+              if (diagError?.data?.error === 'actNotFound') {
+                destinationHint =
+                  'Destination account is not activated on XRPL (account not found). It must be funded/activated before receiving escrow.';
+              }
+            }
+
+            failureMessage =
+              `Escrow creation transaction failed: tecNO_PERMISSION. ${destinationHint}`;
+          } else if (engineResult === 'tecINSUFFICIENT_RESERVE') {
+            failureMessage =
+              'Escrow creation transaction failed: tecINSUFFICIENT_RESERVE. The sender account lacks spendable XRP reserve for creating another escrow object.';
+          } else if (engineResult === 'tecUNFUNDED_PAYMENT') {
+            failureMessage =
+              'Escrow creation transaction failed: tecUNFUNDED_PAYMENT. The sender account does not have enough spendable XRP for this escrow amount.';
+          }
+
           await client.disconnect();
-          throw new Error(`Escrow creation transaction failed: ${engineResult}. This usually means the account doesn't have enough XRP to cover the escrow amount and transaction fee.`);
+          throw new Error(failureMessage);
         }
         
         // If we have a validated transaction result, check it
