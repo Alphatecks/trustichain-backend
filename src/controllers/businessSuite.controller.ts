@@ -206,6 +206,16 @@ export class BusinessSuiteController {
     else res.status(403).json(result);
   }
 
+  /** Autocomplete team names. GET /api/business-suite/teams/autocomplete?q=&limit= */
+  async autocompleteTeamNames(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const query = (req.query.q as string) ?? (req.query.query as string) ?? (req.query.name as string) ?? '';
+    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+    const result = await businessSuiteTeamsService.autocompleteTeams(userId, query, limit);
+    if (result.success) res.status(200).json(result);
+    else res.status(403).json(result);
+  }
+
   /**
    * Check team member by full name. POST /api/business-suite/teams/members/check (body: { fullName }) or query ?fullName=
    */

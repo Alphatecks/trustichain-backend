@@ -611,6 +611,15 @@ router.get('/teams/members', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/business-suite/teams/autocomplete
+ * @desc    Autocomplete team names while typing. Query: q (or query/name), limit (optional).
+ * @access  Private (business suite only)
+ */
+router.get('/teams/autocomplete', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.autocompleteTeamNames(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/teams/members/check?fullName=
  * @route   POST /api/business-suite/teams/members/check (body: { fullName })
  * @desc    Check if a personal user exists by full name; returns email, phone, country. Errors if name is the business owner (cannot add self).

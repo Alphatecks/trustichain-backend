@@ -26,6 +26,76 @@ function formatNextDate(iso: string | null): string | null {
 
 export class BusinessSuiteTeamsService {
   /**
+   * Autocomplete team names for the current business while typing.
+   * Prioritizes prefix matches, then contains matches.
+   */
+  async autocompleteTeams(
+    userId: string,
+    query: string,
+    limit = 10
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { items: Array<{ teamId: string; teamName: string }> };
+    error?: string;
+  }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
+
+    const trimmedQuery = typeof query === 'string' ? query.trim() : '';
+    if (trimmedQuery.length < 2) {
+      return {
+        success: true,
+        message: 'Type at least 2 characters',
+        data: { items: [] },
+      };
+    }
+
+    const cappedLimit = Number.isFinite(limit) ? Math.min(25, Math.max(1, Math.floor(limit))) : 10;
+    const client = supabaseAdmin!;
+    const { data: rows, error } = await client
+      .from('business_teams')
+      .select('id, name')
+      .eq('business_id', businessId)
+      .ilike('name', `%${trimmedQuery}%`)
+      .limit(100);
+
+    if (error) {
+      return { success: false, message: error.message || 'Failed to fetch team suggestions', error: error.message };
+    }
+
+    const normalizedQuery = trimmedQuery.toLowerCase();
+    const matches = (rows || [])
+      .filter((row) => row.id && row.name)
+      .map((row) => ({
+        teamId: row.id as string,
+        teamName: String(row.name).trim(),
+      }))
+      .filter((item) => item.teamName.length > 0)
+      .sort((a, b) => {
+        const aName = a.teamName.toLowerCase();
+        const bName = b.teamName.toLowerCase();
+        const aStarts = aName.startsWith(normalizedQuery);
+        const bStarts = bName.startsWith(normalizedQuery);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return aName.localeCompare(bName);
+      })
+      .slice(0, cappedLimit);
+
+    return {
+      success: true,
+      message: matches.length > 0 ? 'Team suggestions retrieved' : 'No matching teams found',
+      data: { items: matches },
+    };
+  }
+
+  /**
    * List teams for the business user (My Teams). Paginated.
    */
   async getTeamList(
