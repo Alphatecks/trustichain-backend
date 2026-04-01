@@ -37,7 +37,7 @@ export class LookupController {
 
   /**
    * GET /api/lookup/business-email?businessName=...
-   * Returns the business (owner) email for the registered business with the given company name, if any.
+   * Returns the business (owner) email and business XRP address for the registered business with the given company name, if any.
    */
   async getBusinessEmailByName(req: Request, res: Response): Promise<void> {
     try {

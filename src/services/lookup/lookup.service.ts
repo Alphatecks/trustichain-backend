@@ -15,7 +15,12 @@ export interface BusinessNameByEmailResult {
 export interface BusinessEmailByNameResult {
   success: boolean;
   message: string;
-  data?: { businessEmail: string | null; hasBusinessEmail: boolean };
+  data?: {
+    businessEmail: string | null;
+    hasBusinessEmail: boolean;
+    businessXrpAddress: string | null;
+    hasBusinessXrpAddress: boolean;
+  };
   error?: string;
 }
 
@@ -113,7 +118,7 @@ export class LookupService {
   }
 
   /**
-   * Get business email for a registered business by company name.
+   * Get business email and business XRP wallet address for a registered business by company name.
    * Returns businesses.business_email when set. If business exists but business_email is not set,
    * returns businessEmail: null and message that this business email is not set.
    */
@@ -148,25 +153,56 @@ export class LookupService {
         return {
           success: true,
           message: 'No business found with that name',
-          data: { businessEmail: null, hasBusinessEmail: false },
+          data: {
+            businessEmail: null,
+            hasBusinessEmail: false,
+            businessXrpAddress: null,
+            hasBusinessXrpAddress: false,
+          },
         };
       }
 
       const businessEmailSet = biz.business_email != null && String(biz.business_email).trim().length > 0;
       const businessEmail = businessEmailSet ? String(biz.business_email).trim() : null;
+      const ownerUserId = biz.owner_user_id ? String(biz.owner_user_id) : null;
+
+      let businessXrpAddress: string | null = null;
+      if (ownerUserId) {
+        const { data: wallet } = await client
+          .from('wallets')
+          .select('xrpl_address')
+          .eq('user_id', ownerUserId)
+          .eq('suite_context', 'business')
+          .maybeSingle();
+        businessXrpAddress =
+          wallet?.xrpl_address && String(wallet.xrpl_address).trim().length > 0
+            ? String(wallet.xrpl_address).trim()
+            : null;
+      }
+      const hasBusinessXrpAddress = businessXrpAddress != null;
 
       if (!businessEmailSet) {
         return {
           success: true,
           message: 'This business email is not set',
-          data: { businessEmail: null, hasBusinessEmail: false },
+          data: {
+            businessEmail: null,
+            hasBusinessEmail: false,
+            businessXrpAddress,
+            hasBusinessXrpAddress,
+          },
         };
       }
 
       return {
         success: true,
-        message: 'Business email retrieved',
-        data: { businessEmail, hasBusinessEmail: true },
+        message: 'Business email and XRP address retrieved',
+        data: {
+          businessEmail,
+          hasBusinessEmail: true,
+          businessXrpAddress,
+          hasBusinessXrpAddress,
+        },
       };
     } catch (err) {
       console.error('[Lookup] getBusinessEmailByName: unexpected error', { businessName: trimmed, err });
