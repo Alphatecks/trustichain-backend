@@ -344,7 +344,6 @@ export class BusinessSuitePayrollsService {
       .from('business_payrolls')
       .select('id, name, release_date, freeze_auto_release, status, created_at', { count: 'exact' })
       .eq('business_id', businessId)
-      .neq('status', 'released')
       .order('created_at', { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) return { success: false, message: error.message, error: error.message };
