@@ -40,6 +40,47 @@ function formatTransactionId(payrollId: string, itemId: string): string {
   return `TC-PAY-${p}-${i}`;
 }
 
+function parseFrontendAmountToNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null;
+  }
+
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Keep only numeric/separator/sign characters from common formatted inputs (e.g. "$1,200.50")
+  let normalized = trimmed.replace(/[^\d,.\-]/g, '');
+  if (!normalized) return null;
+
+  const hasComma = normalized.includes(',');
+  const hasDot = normalized.includes('.');
+
+  if (hasComma && hasDot) {
+    // If comma appears after dot, treat comma as decimal separator (EU format)
+    const lastComma = normalized.lastIndexOf(',');
+    const lastDot = normalized.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    const commaCount = (normalized.match(/,/g) || []).length;
+    if (commaCount > 1) {
+      normalized = normalized.replace(/,/g, '');
+    } else {
+      const [intPart, decPart = ''] = normalized.split(',');
+      normalized = decPart.length > 0 && decPart.length <= 2
+        ? `${intPart}.${decPart}`
+        : normalized.replace(/,/g, '');
+    }
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export class BusinessSuitePayrollsService {
   /**
    * Deterministic XRPL permission check for payroll escrow destination.
@@ -166,12 +207,27 @@ export class BusinessSuitePayrollsService {
           error: 'Invalid items',
         };
       }
-      const items = validItems.map((it: { counterpartyId: string; amountUsd: number; dueDate?: string }) => ({
-        payroll_id: payroll.id,
-        counterparty_id: it.counterpartyId.trim(),
-        amount_usd: Number(it.amountUsd) || 0,
-        due_date: it.dueDate ? new Date(it.dueDate).toISOString().split('T')[0] : null,
-      }));
+      const items: Array<{ payroll_id: string; counterparty_id: string; amount_usd: number; due_date: string | null }> = [];
+      for (let i = 0; i < validItems.length; i++) {
+        const item = validItems[i] as { counterpartyId: string; amountUsd: unknown; dueDate?: string };
+        const parsedAmountUsd = parseFrontendAmountToNumber(item.amountUsd);
+        if (parsedAmountUsd == null || parsedAmountUsd <= 0) {
+          await client.from('business_payrolls').delete().eq('id', payroll.id);
+          return {
+            success: false,
+            message: `Invalid amountUsd for payroll item ${i + 1}. Send a positive amount (for example: 1200.50).`,
+            error: 'Invalid amount',
+          };
+        }
+
+        items.push({
+          payroll_id: payroll.id,
+          counterparty_id: item.counterpartyId.trim(),
+          amount_usd: parseFloat(parsedAmountUsd.toFixed(2)),
+          due_date: item.dueDate ? new Date(item.dueDate).toISOString().split('T')[0] : null,
+        });
+      }
+
       const { error: itemsError } = await client.from('business_payroll_items').insert(items);
       if (itemsError) {
         await client.from('business_payrolls').delete().eq('id', payroll.id);
@@ -269,10 +325,28 @@ export class BusinessSuitePayrollsService {
       finishAfter = Math.floor(Date.now() / 1000) - 60 - RIPPLE_EPOCH_OFFSET;
     }
 
-    const itemAmountsXrp = items.map((i: any) => {
-      const usd = parseFloat(String(i.amount_usd));
-      return { item: i, amountUsd: usd, amountXrp: parseFloat((usd / usdRate).toFixed(6)) };
-    });
+    const itemAmountsXrp: Array<{ item: any; amountUsd: number; amountXrp: number }> = [];
+    for (const item of items as any[]) {
+      const usd = Number(item.amount_usd);
+      if (!Number.isFinite(usd) || usd <= 0) {
+        return {
+          success: false,
+          message: `Invalid payroll amount for item ${item.id}. amount_usd must be a positive number.`,
+          error: 'Invalid amount',
+        };
+      }
+
+      const amountXrp = parseFloat((usd / usdRate).toFixed(6));
+      if (!Number.isFinite(amountXrp) || amountXrp <= 0) {
+        return {
+          success: false,
+          message: `Invalid XRP conversion for payroll item ${item.id}. Amount is too small after conversion.`,
+          error: 'Invalid converted amount',
+        };
+      }
+
+      itemAmountsXrp.push({ item, amountUsd: usd, amountXrp });
+    }
     const totalXrp = itemAmountsXrp.reduce((s, x) => s + x.amountXrp, 0);
     const feePerTx = 0.000012;
     const requiredXrp = totalXrp + items.length * feePerTx;
