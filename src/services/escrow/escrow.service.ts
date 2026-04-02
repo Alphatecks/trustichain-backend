@@ -1093,6 +1093,7 @@ export class EscrowService {
               usd: parseFloat(amountUsd.toFixed(2)),
               xrp: parseFloat(amountXrp.toFixed(6)),
             },
+            xrpHash: xrplTxHash,
             status: escrow.status,
             xrplEscrowId: xrplTxHash,
           },

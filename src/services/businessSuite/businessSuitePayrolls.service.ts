@@ -114,7 +114,7 @@ export class BusinessSuitePayrollsService {
     });
   }
 
-  async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string; escrowsCreated?: boolean }; error?: string }> {
+  async createPayroll(userId: string, body: CreatePayrollRequest): Promise<{ success: boolean; message: string; data?: { id: string; escrowsCreated?: boolean; xrpHashes?: string[] }; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const businessId = await businessSuiteService.getBusinessId(userId);
@@ -186,7 +186,15 @@ export class BusinessSuitePayrollsService {
           return { success: false, message: created.message, error: created.error };
         }
         await client.from('business_payrolls').update({ status: 'released' }).eq('id', payroll.id);
-        return { success: true, message: 'Payroll created and escrowed', data: { id: payroll.id, escrowsCreated: true } };
+        return {
+          success: true,
+          message: 'Payroll created and escrowed',
+          data: {
+            id: payroll.id,
+            escrowsCreated: true,
+            xrpHashes: created.data?.xrpHashes ?? [],
+          },
+        };
       }
     }
     return { success: true, message: 'Payroll created', data: { id: payroll.id } };
@@ -199,7 +207,7 @@ export class BusinessSuitePayrollsService {
     payrollId: string,
     payrollName: string,
     releaseDate: string | null
-  ): Promise<{ success: boolean; message: string; error?: string }> {
+  ): Promise<{ success: boolean; message: string; data?: { xrpHashes: string[] }; error?: string }> {
     if (!client) return { success: false, message: 'Database unavailable', error: 'Database' };
     const { data: items } = await client.from('business_payroll_items').select('*').eq('payroll_id', payrollId).eq('status', 'pending');
     if (!items?.length) return { success: false, message: 'No pending items to create escrows for', error: 'No items' };
@@ -284,6 +292,7 @@ export class BusinessSuitePayrollsService {
     const currentYear = new Date().getFullYear();
     const { data: lastEscrow } = await client.from('escrows').select('escrow_sequence').gte('created_at', new Date(currentYear, 0, 1).toISOString()).order('escrow_sequence', { ascending: false }).limit(1).maybeSingle();
     let nextSeq = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
+    const xrpHashes: string[] = [];
 
     for (const { item, amountUsd, amountXrp } of itemAmountsXrp) {
       const toAddress = walletByUser[item.counterparty_id];
@@ -328,9 +337,10 @@ export class BusinessSuitePayrollsService {
         return { success: false, message: escrowError?.message || 'Failed to save escrow record', error: escrowError?.message };
       }
       await client.from('business_payroll_items').update({ escrow_id: escrow.id, amount_xrp: amountXrp, status: 'released' }).eq('id', item.id);
+      xrpHashes.push(xrplTxHash);
       nextSeq += 1;
     }
-    return { success: true, message: 'Escrows created' };
+    return { success: true, message: 'Escrows created', data: { xrpHashes } };
   }
 
   async listPayrolls(userId: string, page: number = 1, pageSize: number = 20): Promise<BusinessPayrollListResponse> {
@@ -476,7 +486,7 @@ export class BusinessSuitePayrollsService {
     return { success: true, message: 'Payroll updated' };
   }
 
-  async releasePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; error?: string }> {
+  async releasePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; data?: { xrpHashesCreated?: string[] }; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     const businessId = await businessSuiteService.getBusinessId(userId);
@@ -487,10 +497,12 @@ export class BusinessSuitePayrollsService {
 
     const releaseDate = payroll.release_date ? String(payroll.release_date).split('T')[0] : null;
     const alreadyReleased = payroll.status === 'released';
+    let xrpHashesCreated: string[] = [];
 
     if (!alreadyReleased) {
       const created = await this.createEscrowsForPayroll(client, userId, payrollId, payroll.name, releaseDate);
       if (!created.success) return { success: false, message: created.message, error: created.error };
+      xrpHashesCreated = created.data?.xrpHashes ?? [];
     }
 
     const { data: items } = await client.from('business_payroll_items').select('escrow_id').eq('payroll_id', payrollId).not('escrow_id', 'is', null);
@@ -505,7 +517,7 @@ export class BusinessSuitePayrollsService {
     }
 
     if (alreadyReleased && finishedCount === 0) {
-      return { success: true, message: 'Payroll was already released' };
+      return { success: true, message: 'Payroll was already released', data: xrpHashesCreated.length ? { xrpHashesCreated } : undefined };
     }
     if (!alreadyReleased) {
       await client.from('business_payrolls').update({ status: 'released' }).eq('id', payrollId);
@@ -515,6 +527,7 @@ export class BusinessSuitePayrollsService {
       message: alreadyReleased && finishedCount > 0
         ? `Released ${finishedCount} remaining escrow(s); payroll is now fully released.`
         : 'Payroll released',
+      data: xrpHashesCreated.length ? { xrpHashesCreated } : undefined,
     };
   }
 

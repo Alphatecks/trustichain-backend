@@ -64,6 +64,7 @@ export interface CreateEscrowResponse {
       usd: number;
       xrp: number;
     };
+    xrpHash?: string;
     status: string;
     xrplEscrowId?: string;
     // XUMM-related fields for user-signed escrow creation
