@@ -12,6 +12,7 @@ import { encryptionService } from '../encryption/encryption.service';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
 import { escrowService } from '../escrow/escrow.service';
+import { getEscrowCreationFeeSettings } from '../escrow/escrowCreationFee.service';
 import type {
   CreatePayrollRequest,
   UpdatePayrollRequest,
@@ -326,7 +327,11 @@ export class BusinessSuitePayrollsService {
       finishAfter = Math.floor(Date.now() / 1000) + 10 - RIPPLE_EPOCH_OFFSET;
     }
 
-    const itemAmountsXrp: Array<{ item: any; amountUsd: number; amountXrp: number }> = [];
+    const feeSettings = await getEscrowCreationFeeSettings();
+    const payrollFeeUsd = Math.max(0, Number(feeSettings.payrollFeeUsd) || 0);
+    const payrollFeeXrpPerItem = payrollFeeUsd > 0 ? parseFloat((payrollFeeUsd / usdRate).toFixed(6)) : 0;
+
+    const itemAmountsXrp: Array<{ item: any; amountUsd: number; amountXrp: number; creationFeeXrp: number }> = [];
     for (const item of items as any[]) {
       const usd = Number(item.amount_usd);
       if (!Number.isFinite(usd) || usd <= 0) {
@@ -346,16 +351,17 @@ export class BusinessSuitePayrollsService {
         };
       }
 
-      itemAmountsXrp.push({ item, amountUsd: usd, amountXrp });
+      itemAmountsXrp.push({ item, amountUsd: usd, amountXrp, creationFeeXrp: payrollFeeXrpPerItem });
     }
     const totalXrp = itemAmountsXrp.reduce((s, x) => s + x.amountXrp, 0);
+    const totalCreationFeeXrp = itemAmountsXrp.reduce((s, x) => s + x.creationFeeXrp, 0);
     const feePerTx = 0.000012;
-    const requiredXrp = totalXrp + items.length * feePerTx;
+    const requiredXrp = totalXrp + totalCreationFeeXrp + items.length * feePerTx;
     const balanceXrp = await xrplWalletService.getBalance(businessWallet.xrpl_address);
     if (balanceXrp < requiredXrp) {
       return {
         success: false,
-        message: `Insufficient XRP in business wallet. Required ${requiredXrp.toFixed(6)} XRP (${totalXrp.toFixed(6)} for payroll + fees), have ${balanceXrp.toFixed(6)} XRP.`,
+        message: `Insufficient XRP in business wallet. Required ${requiredXrp.toFixed(6)} XRP (${totalXrp.toFixed(6)} payroll + ${totalCreationFeeXrp.toFixed(6)} creation fees + ${(items.length * feePerTx).toFixed(6)} network fees), have ${balanceXrp.toFixed(6)} XRP.`,
         error: 'Insufficient balance',
       };
     }
@@ -436,6 +442,14 @@ export class BusinessSuitePayrollsService {
       await client.from('business_payroll_items').update({ escrow_id: escrow.id, amount_xrp: amountXrp, status: 'released' }).eq('id', item.id);
       xrpHashes.push(xrplTxHash);
       nextSeq += 1;
+    }
+
+    if (totalCreationFeeXrp > 0) {
+      try {
+        await client.rpc('credit_escrow_fee', { amount_xrp: totalCreationFeeXrp });
+      } catch (feeErr) {
+        console.warn('[Payroll Escrow Create] Failed to credit escrow creation fees (non-fatal):', feeErr instanceof Error ? feeErr.message : feeErr);
+      }
     }
     return { success: true, message: 'Escrows created', data: { xrpHashes } };
   }

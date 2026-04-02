@@ -15,6 +15,7 @@ import { notificationService } from '../notification/notification.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
+import { getEscrowCreationFeeSettings, resolveEscrowCreationFeeUsdByType } from './escrowCreationFee.service';
 
 async function resolveAvatarUrl(stored: string | null | undefined): Promise<string | null> {
   if (stored == null || !String(stored).trim()) return null;
@@ -592,50 +593,40 @@ export class EscrowService {
         }
       }
 
+      const escrowTransactionType = request.transactionType || 'custom';
+
       // Use totalAmount if provided, otherwise use amount
       const escrowAmount = request.totalAmount !== undefined ? request.totalAmount : request.amount;
 
       // Convert amount to XRP if needed
       let amountXrp = escrowAmount;
       let amountUsd = escrowAmount;
-
+      const exchangeRates = await exchangeService.getLiveExchangeRates();
+      if (!exchangeRates.success || !exchangeRates.data) {
+        return {
+          success: false,
+          message: 'Failed to fetch exchange rates for currency conversion',
+          error: 'Exchange rate fetch failed',
+        };
+      }
+      const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+      if (!usdRate || usdRate <= 0) {
+        return {
+          success: false,
+          message: 'XRP/USD exchange rate not available',
+          error: 'Exchange rate not available',
+        };
+      }
       if (request.currency === 'USD') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
-          return {
-            success: false,
-            message: 'XRP/USD exchange rate not available',
-            error: 'Exchange rate not available',
-          };
-        }
         amountXrp = escrowAmount / usdRate;
       } else {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
-          return {
-            success: false,
-            message: 'XRP/USD exchange rate not available',
-            error: 'Exchange rate not available',
-          };
-        }
         amountUsd = escrowAmount * usdRate;
       }
+
+      const feeSettings = await getEscrowCreationFeeSettings();
+      const creationFeeUsd = resolveEscrowCreationFeeUsdByType(escrowTransactionType, feeSettings);
+      const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / usdRate).toFixed(6)) : 0;
+      const payableXrp = amountXrp + creationFeeXrp;
 
       // Use user's wallet address (payerWallet already fetched above)
       const userWalletAddress = payerWallet.xrpl_address;
@@ -644,17 +635,19 @@ export class EscrowService {
       // Check user's XRPL balance on-chain before proceeding
       console.log('[Escrow Create] Checking user XRPL balance on-chain...', {
         userWalletAddress,
-        requiredAmountXrp: amountXrp,
+        requiredAmountXrp: payableXrp,
       });
 
       try {
         const userBalanceXrp = await xrplWalletService.getBalance(userWalletAddress);
         const transactionFeeXrp = 0.000012; // Standard XRPL transaction fee (~12 drops)
-        const requiredTotalXrp = amountXrp + transactionFeeXrp;
+        const requiredTotalXrp = payableXrp + transactionFeeXrp;
 
         console.log('[Escrow Create] Balance check result:', {
           userBalanceXrp,
-          requiredAmountXrp: amountXrp,
+          escrowAmountXrp: amountXrp,
+          creationFeeXrp,
+          requiredAmountXrp: payableXrp,
           transactionFeeXrp,
           requiredTotalXrp,
           sufficient: userBalanceXrp >= requiredTotalXrp,
@@ -663,7 +656,7 @@ export class EscrowService {
         if (userBalanceXrp < requiredTotalXrp) {
           return {
             success: false,
-            message: `Insufficient XRP balance. You have ${userBalanceXrp.toFixed(6)} XRP but need ${requiredTotalXrp.toFixed(6)} XRP (${amountXrp.toFixed(6)} XRP for escrow + ${transactionFeeXrp.toFixed(6)} XRP for transaction fee).`,
+            message: `Insufficient XRP balance. You have ${userBalanceXrp.toFixed(6)} XRP but need ${requiredTotalXrp.toFixed(6)} XRP (${amountXrp.toFixed(6)} XRP escrow + ${creationFeeXrp.toFixed(6)} XRP creation fee + ${transactionFeeXrp.toFixed(6)} XRP network fee).`,
             error: 'Insufficient balance',
           };
         }
@@ -878,7 +871,7 @@ export class EscrowService {
           status: escrowStatus, // 'active' if auto-signed, 'pending' if XUMM
           xrpl_escrow_id: xrplTxHash || null, // Store XRPL transaction hash if available
           description: escrowDescription,
-          transaction_type: request.transactionType || 'custom',
+          transaction_type: escrowTransactionType,
           industry: request.industry || null,
           progress: 0,
           escrow_sequence: nextSequence,
@@ -910,13 +903,13 @@ export class EscrowService {
         };
       }
 
-      // Credit 10% escrow fee (XRP) to platform balance; do not fail escrow creation on error
-      const ESCROW_FEE_PERCENT = 0.10;
-      const feeXrp = amountXrp * ESCROW_FEE_PERCENT;
-      try {
-        await adminClient.rpc('credit_escrow_fee', { amount_xrp: feeXrp });
-      } catch (feeErr) {
-        console.warn('[Escrow Create] Failed to credit escrow fee (non-fatal):', feeErr instanceof Error ? feeErr.message : feeErr);
+      // Credit configured creation fee (XRP) to platform balance; non-fatal if this step fails.
+      if (creationFeeXrp > 0) {
+        try {
+          await adminClient.rpc('credit_escrow_fee', { amount_xrp: creationFeeXrp });
+        } catch (feeErr) {
+          console.warn('[Escrow Create] Failed to credit escrow creation fee (non-fatal):', feeErr instanceof Error ? feeErr.message : feeErr);
+        }
       }
 
       // Create milestones if this is a milestone-based escrow
@@ -1093,6 +1086,11 @@ export class EscrowService {
               usd: parseFloat(amountUsd.toFixed(2)),
               xrp: parseFloat(amountXrp.toFixed(6)),
             },
+            transaction: {
+              creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
+              creationFeeXrp: parseFloat(creationFeeXrp.toFixed(6)),
+              totalPayableXrp: parseFloat(payableXrp.toFixed(6)),
+            },
             xrpHash: xrplTxHash,
             status: escrow.status,
             xrplEscrowId: xrplTxHash,
@@ -1108,6 +1106,11 @@ export class EscrowService {
             amount: {
               usd: parseFloat(amountUsd.toFixed(2)),
               xrp: parseFloat(amountXrp.toFixed(6)),
+            },
+            transaction: {
+              creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
+              creationFeeXrp: parseFloat(creationFeeXrp.toFixed(6)),
+              totalPayableXrp: parseFloat(payableXrp.toFixed(6)),
             },
             status: escrow.status,
             xummUrl: xummUrl,
