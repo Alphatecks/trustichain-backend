@@ -2403,11 +2403,33 @@ export class EscrowService {
             };
           }
 
-          const { data: destinationWallet } = await adminClient
-            .from('wallets')
-            .select('xrpl_address, encrypted_wallet_secret')
-            .eq('user_id', escrow.counterparty_id)
-            .single();
+          // Resolve destination wallet using the on-ledger destination address first.
+          // This avoids false "not found" results when a user has multiple wallet rows
+          // across suite contexts (personal/business).
+          let destinationWallet: { xrpl_address: string; encrypted_wallet_secret: string | null } | null = null;
+
+          if (escrowDetails.destination) {
+            const { data: walletByAddress } = await adminClient
+              .from('wallets')
+              .select('xrpl_address, encrypted_wallet_secret')
+              .eq('xrpl_address', escrowDetails.destination)
+              .maybeSingle();
+
+            if (walletByAddress) {
+              destinationWallet = walletByAddress;
+            }
+          }
+
+          if (!destinationWallet) {
+            const { data: candidateWallets } = await adminClient
+              .from('wallets')
+              .select('xrpl_address, encrypted_wallet_secret')
+              .eq('user_id', escrow.counterparty_id);
+
+            if (candidateWallets?.length) {
+              destinationWallet = candidateWallets.find((w) => w.xrpl_address === escrowDetails.destination) || candidateWallets[0];
+            }
+          }
 
           if (!destinationWallet) {
             return {
