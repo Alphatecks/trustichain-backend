@@ -43,7 +43,7 @@ export class PortfolioService {
       const { data: escrows, error } = await adminClient
         .from('escrows')
         .select('created_at, amount_usd')
-        .eq('user_id', userId)
+        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
         .or('suite_context.is.null,suite_context.eq.personal')
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString())
@@ -62,7 +62,7 @@ export class PortfolioService {
 
       for (const row of escrows || []) {
         const createdAt = new Date(row.created_at);
-        const month = createdAt.getMonth();
+        const month = createdAt.getUTCMonth();
         const amount = parseFloat(String(row.amount_usd));
         if (!Number.isFinite(amount)) continue;
         monthTotals.set(month, (monthTotals.get(month) || 0) + amount);
