@@ -1222,10 +1222,19 @@ export class EscrowService {
       const offset = filters.offset || 0;
 
       // Build query
+      // Payroll visibility rule:
+      // - For personal payroll list (transactionType=payroll), only the receiver/counterparty sees the payroll escrow.
+      // - This prevents business-created payroll escrows from showing on the creator's personal payroll list.
       let query = adminClient
         .from('escrows')
-        .select('*', { count: 'exact' })
-        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
+        .select('*', { count: 'exact' });
+
+      const isPayrollFilter = String(filters.transactionType || '').toLowerCase() === 'payroll';
+      if (isPayrollFilter) {
+        query = query.eq('counterparty_id', userId);
+      } else {
+        query = query.or(`user_id.eq.${userId},counterparty_id.eq.${userId}`);
+      }
 
       // Apply status filter (active = pending or active)
       if (filters.status && filters.status !== 'all') {
