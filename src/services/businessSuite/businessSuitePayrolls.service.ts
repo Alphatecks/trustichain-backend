@@ -601,17 +601,28 @@ export class BusinessSuitePayrollsService {
 
     const { data: linkedItems } = await client
       .from('business_payroll_items')
-      .select('id')
+      .select('escrow_id')
       .eq('payroll_id', payrollId)
       .not('escrow_id', 'is', null)
-      .limit(1);
+      .limit(200);
 
     if (linkedItems && linkedItems.length > 0) {
-      return {
-        success: false,
-        message: 'Cannot delete payroll with created escrows. Remove or resolve linked escrows first.',
-        error: 'Has linked escrows',
-      };
+      const escrowIds = [...new Set(linkedItems.map((r: { escrow_id: string | null }) => r.escrow_id).filter(Boolean))] as string[];
+      if (escrowIds.length > 0) {
+        const { data: linkedEscrows } = await client
+          .from('escrows')
+          .select('id, status')
+          .in('id', escrowIds);
+
+        const blocking = (linkedEscrows || []).filter((e: { status: string }) => !['completed', 'cancelled'].includes(e.status));
+        if (blocking.length > 0) {
+          return {
+            success: false,
+            message: 'Cannot delete payroll while linked escrows are still active. Complete or cancel those escrows first.',
+            error: 'Has active linked escrows',
+          };
+        }
+      }
     }
 
     const { error } = await client
