@@ -169,7 +169,7 @@ export interface BusinessPayrollTransactionsResponse {
 export interface BusinessPayrollTransactionDetailResponse {
   success: boolean;
   message: string;
-  data?: PayrollTransactionListItem & { counterpartyEmail: string; escrowId: string | null };
+  data?: PayrollTransactionListItem & { counterpartyEmail: string; escrowId: string | null; xrpHash?: string | null };
   error?: string;
 }
 

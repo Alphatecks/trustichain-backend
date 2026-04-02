@@ -786,6 +786,9 @@ export class BusinessSuitePayrollsService {
     const { data: payroll } = await client.from('business_payrolls').select('id, name').eq('id', item.payroll_id).eq('business_id', businessId).single();
     if (!payroll) return { success: false, message: 'Transaction not found', error: 'Not found' };
     const { data: counterparty } = await client.from('users').select('full_name, email').eq('id', item.counterparty_id).single();
+    const { data: escrow } = item.escrow_id
+      ? await client.from('escrows').select('xrpl_escrow_id').eq('id', item.escrow_id).maybeSingle()
+      : { data: null };
     const out = {
       id: item.id,
       transactionId: formatTransactionId(item.payroll_id, item.id),
@@ -798,6 +801,7 @@ export class BusinessSuitePayrollsService {
       counterpartyName: counterparty?.full_name || '—',
       counterpartyEmail: counterparty?.email || '',
       escrowId: item.escrow_id,
+      xrpHash: escrow?.xrpl_escrow_id ?? null,
       createdAt: item.created_at,
     };
     return { success: true, message: 'Transaction detail retrieved', data: out };
