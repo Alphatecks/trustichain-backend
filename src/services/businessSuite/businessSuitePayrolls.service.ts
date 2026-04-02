@@ -209,8 +209,12 @@ export class BusinessSuitePayrollsService {
     releaseDate: string | null
   ): Promise<{ success: boolean; message: string; data?: { xrpHashes: string[] }; error?: string }> {
     if (!client) return { success: false, message: 'Database unavailable', error: 'Database' };
-    const { data: items } = await client.from('business_payroll_items').select('*').eq('payroll_id', payrollId).eq('status', 'pending');
-    if (!items?.length) return { success: false, message: 'No pending items to create escrows for', error: 'No items' };
+    const { data: items } = await client
+      .from('business_payroll_items')
+      .select('*')
+      .eq('payroll_id', payrollId)
+      .is('escrow_id', null);
+    if (!items?.length) return { success: true, message: 'No payroll items require escrow creation', data: { xrpHashes: [] } };
 
     const { data: businessWallet } = await client
       .from('wallets')
@@ -308,9 +312,27 @@ export class BusinessSuitePayrollsService {
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        const debugContext: Record<string, unknown> = {
+          payrollId,
+          payrollItemId: item.id,
+          counterpartyId: item.counterparty_id,
+          fromAddress: businessWallet.xrpl_address,
+          toAddress,
+          amountXrp,
+        };
+        try {
+          const permissionCheck = await xrplEscrowService.diagnoseEscrowCreatePermission({
+            fromAddress: businessWallet.xrpl_address,
+            toAddress,
+          });
+          debugContext.permissionCheck = permissionCheck.data || null;
+        } catch (diagErr) {
+          debugContext.permissionCheckError = diagErr instanceof Error ? diagErr.message : String(diagErr);
+        }
+        console.error('[Payroll Escrow Create] XRPL escrow creation failed with runtime pair debug:', debugContext);
         return {
           success: false,
-          message: `Failed to create XRPL escrow for team member wallet ${toAddress}: ${msg}`,
+          message: `Failed to create XRPL escrow for team member wallet ${toAddress}: ${msg}. Debug from=${businessWallet.xrpl_address} to=${toAddress}`,
           error: 'XRPL escrow failed',
         };
       }
@@ -486,6 +508,47 @@ export class BusinessSuitePayrollsService {
     return { success: true, message: 'Payroll updated' };
   }
 
+  async deletePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; error?: string }> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    const client = supabaseAdmin!;
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) return { success: false, message: 'No registered business for this account', error: 'No business' };
+
+    const { data: payroll } = await client
+      .from('business_payrolls')
+      .select('id, status')
+      .eq('id', payrollId)
+      .eq('business_id', businessId)
+      .single();
+
+    if (!payroll) return { success: false, message: 'Payroll not found', error: 'Not found' };
+
+    const { data: linkedItems } = await client
+      .from('business_payroll_items')
+      .select('id')
+      .eq('payroll_id', payrollId)
+      .not('escrow_id', 'is', null)
+      .limit(1);
+
+    if (linkedItems && linkedItems.length > 0) {
+      return {
+        success: false,
+        message: 'Cannot delete payroll with created escrows. Remove or resolve linked escrows first.',
+        error: 'Has linked escrows',
+      };
+    }
+
+    const { error } = await client
+      .from('business_payrolls')
+      .delete()
+      .eq('id', payrollId)
+      .eq('business_id', businessId);
+
+    if (error) return { success: false, message: error.message, error: error.message };
+    return { success: true, message: 'Payroll deleted' };
+  }
+
   async releasePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; data?: { xrpHashesCreated?: string[] }; error?: string }> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
     if (!check.allowed) return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
@@ -512,7 +575,13 @@ export class BusinessSuitePayrollsService {
       const { data: escrow } = await client.from('escrows').select('id, status').eq('id', escrowId).single();
       if (!escrow || escrow.status !== 'active') continue;
       const result = await escrowService.releaseEscrow(userId, escrowId);
-      if (!result.success) return { success: false, message: result.message || 'Failed to release escrow', error: result.error };
+      if (!result.success) {
+        const recoverableErrors = new Set(['Escrow already finished', 'Escrow already cancelled']);
+        if (result.error && recoverableErrors.has(result.error)) {
+          continue;
+        }
+        return { success: false, message: result.message || 'Failed to release escrow', error: result.error };
+      }
       finishedCount += 1;
     }
 

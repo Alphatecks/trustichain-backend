@@ -2773,6 +2773,64 @@ export class EscrowService {
             finisherAddress: finisherAddress,
             isFinishingAsDestination,
           });
+
+          // Reconcile with ledger on permission/not-found style errors; escrow may already be finished/cancelled.
+          const shouldReconcile =
+            errorMessage.includes('tecNO_PERMISSION') ||
+            errorMessage.includes('tecNO_ENTRY') ||
+            errorMessage.toLowerCase().includes('already been finished') ||
+            errorMessage.toLowerCase().includes('already been cancelled') ||
+            errorMessage.toLowerCase().includes('already been canceled');
+
+          if (shouldReconcile) {
+            try {
+              const verification = await xrplEscrowService.verifyEscrowExists({
+                ownerAddress: actualOwnerAddress,
+                escrowSequence: escrowDetails.sequence,
+                finisherAddress,
+                expectedTxHash: escrow.xrpl_escrow_id || undefined,
+              });
+
+              if (verification.alreadyFinished) {
+                await adminClient
+                  .from('escrows')
+                  .update({
+                    status: 'completed',
+                    progress: 100,
+                    completed_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', escrowId);
+
+                const refreshed = await this.getEscrowById(userId, escrowId);
+                return {
+                  success: true,
+                  message: 'Escrow was already finished on XRPL. Local status has been synchronized.',
+                  data: refreshed.success ? refreshed.data : undefined,
+                };
+              }
+
+              if (verification.alreadyCancelled) {
+                await adminClient
+                  .from('escrows')
+                  .update({
+                    status: 'cancelled',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', escrowId);
+
+                const refreshed = await this.getEscrowById(userId, escrowId);
+                return {
+                  success: true,
+                  message: 'Escrow was already cancelled on XRPL. Local status has been synchronized.',
+                  data: refreshed.success ? refreshed.data : undefined,
+                };
+              }
+            } catch (reconcileError) {
+              console.error('[Escrow Release] Reconciliation check failed:', reconcileError);
+            }
+          }
+
           throw new Error(`Failed to finish escrow on XRPL: ${errorMessage}`);
         }
 

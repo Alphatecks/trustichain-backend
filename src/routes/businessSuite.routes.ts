@@ -745,6 +745,15 @@ router.patch('/payrolls/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   DELETE /api/business-suite/payrolls/:id
+ * @desc    Delete payroll (blocked if linked escrows already exist)
+ * @access  Private (business suite only)
+ */
+router.delete('/payrolls/:id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.deletePayroll(req, res);
+}));
+
+/**
  * @route   POST /api/business-suite/payrolls/:id/release
  * @desc    Release payroll now
  * @access  Private (business suite only)

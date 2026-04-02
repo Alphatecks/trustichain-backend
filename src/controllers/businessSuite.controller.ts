@@ -1186,6 +1186,17 @@ export class BusinessSuiteController {
     else res.status(400).json(result);
   }
 
+  /** Delete payroll. DELETE /api/business-suite/payrolls/:id */
+  async deletePayroll(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const payrollId = req.params.id;
+    if (!payrollId) { res.status(400).json({ success: false, message: 'Payroll ID required' }); return; }
+    const result = await businessSuitePayrollsService.deletePayroll(userId, payrollId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(400).json(result);
+  }
+
   /** Release payroll now. POST /api/business-suite/payrolls/:id/release */
   async releasePayroll(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;
@@ -1193,7 +1204,7 @@ export class BusinessSuiteController {
     if (!payrollId) { res.status(400).json({ success: false, message: 'Payroll ID required' }); return; }
     const result = await businessSuitePayrollsService.releasePayroll(userId, payrollId);
     if (result.success) res.status(200).json(result);
-    else if (result.error === 'Payroll not found') res.status(404).json(result);
+    else if (result.error === 'Payroll not found' || result.error === 'Not found') res.status(404).json(result);
     else res.status(400).json(result);
   }
 
