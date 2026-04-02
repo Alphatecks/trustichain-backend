@@ -606,6 +606,7 @@ export class BusinessSuitePayrollsService {
       .not('escrow_id', 'is', null)
       .limit(200);
 
+    let activeLinkedEscrowCount = 0;
     if (linkedItems && linkedItems.length > 0) {
       const escrowIds = [...new Set(linkedItems.map((r: { escrow_id: string | null }) => r.escrow_id).filter(Boolean))] as string[];
       if (escrowIds.length > 0) {
@@ -614,14 +615,8 @@ export class BusinessSuitePayrollsService {
           .select('id, status')
           .in('id', escrowIds);
 
-        const blocking = (linkedEscrows || []).filter((e: { status: string }) => !['completed', 'cancelled'].includes(e.status));
-        if (blocking.length > 0) {
-          return {
-            success: false,
-            message: 'Cannot delete payroll while linked escrows are still active. Complete or cancel those escrows first.',
-            error: 'Has active linked escrows',
-          };
-        }
+        const activeLinkedEscrows = (linkedEscrows || []).filter((e: { status: string }) => !['completed', 'cancelled'].includes(e.status));
+        activeLinkedEscrowCount = activeLinkedEscrows.length;
       }
     }
 
@@ -632,7 +627,12 @@ export class BusinessSuitePayrollsService {
       .eq('business_id', businessId);
 
     if (error) return { success: false, message: error.message, error: error.message };
-    return { success: true, message: 'Payroll deleted' };
+    return {
+      success: true,
+      message: activeLinkedEscrowCount > 0
+        ? `Payroll deleted. Note: ${activeLinkedEscrowCount} linked escrow(s) are still active and remain in escrow records.`
+        : 'Payroll deleted',
+    };
   }
 
   async releasePayroll(userId: string, payrollId: string): Promise<{ success: boolean; message: string; data?: { xrpHashesCreated?: string[] }; error?: string }> {
