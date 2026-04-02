@@ -321,8 +321,9 @@ export class BusinessSuitePayrollsService {
       }
     }
     if (finishAfter == null) {
-      // Release now: use a time already passed so owner can EscrowFinish immediately
-      finishAfter = Math.floor(Date.now() / 1000) - 60 - RIPPLE_EPOCH_OFFSET;
+      // Align with personal escrow flow: use a near-future FinishAfter for immediate usability
+      // while staying compatible with XRPL EscrowCreate validation rules.
+      finishAfter = Math.floor(Date.now() / 1000) + 10 - RIPPLE_EPOCH_OFFSET;
     }
 
     const itemAmountsXrp: Array<{ item: any; amountUsd: number; amountXrp: number }> = [];
