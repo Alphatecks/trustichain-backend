@@ -55,3 +55,23 @@ export interface AdminSendPushResponse {
   data?: { sentCount: number; failureCount: number };
   error?: string;
 }
+
+export interface AdminEscrowFeeSettings {
+  personalFreelancerEscrowCreationFeeUsd: number;
+  supplierEscrowCreationFeeUsd: number;
+  payrollEscrowCreationFeeUsd: number;
+  updatedAt?: string;
+}
+
+export interface AdminEscrowFeeSettingsResponse {
+  success: boolean;
+  message: string;
+  data?: AdminEscrowFeeSettings;
+  error?: string;
+}
+
+export interface AdminUpdateEscrowFeeSettingsRequest {
+  personalFreelancerEscrowCreationFeeUsd: number;
+  supplierEscrowCreationFeeUsd: number;
+  payrollEscrowCreationFeeUsd: number;
+}

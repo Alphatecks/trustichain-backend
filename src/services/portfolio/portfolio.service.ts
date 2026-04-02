@@ -6,6 +6,16 @@
 import { supabase, supabaseAdmin } from '../../config/supabase';
 
 export class PortfolioService {
+  private parseAmountUsd(raw: unknown): number {
+    const direct = Number(raw);
+    if (Number.isFinite(direct)) return direct;
+
+    // Safeguard against formatted strings (e.g., "1,250.50") so valid months do not collapse to 0.
+    const normalized = String(raw ?? '').replace(/,/g, '').trim();
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+
   /**
    * Get portfolio performance data for a specific timeframe.
    * Optional year filters data to that year (e.g. 2024 => Jan 1 - Dec 31 of 2024).
@@ -31,20 +41,23 @@ export class PortfolioService {
       const adminClient = supabaseAdmin || supabase;
       const now = new Date();
       const requestedTimeframe = timeframe;
-      const currentYear = now.getFullYear();
+      const currentYear = now.getUTCFullYear();
       const targetYear = year ?? currentYear;
 
       // Gross total escrowed per month for personal suite (escrows created by user).
-      const startDate = new Date(targetYear, 0, 1, 0, 0, 0, 0);
+      const startDate = new Date(Date.UTC(targetYear, 0, 1, 0, 0, 0, 0));
       const endDate = targetYear === currentYear
         ? now
-        : new Date(targetYear, 11, 31, 23, 59, 59, 999);
+        : new Date(Date.UTC(targetYear, 11, 31, 23, 59, 59, 999));
+
+      const personalScope = 'or(suite_context.is.null,suite_context.eq.personal)';
+      const participantAndScopeFilter =
+        `and(user_id.eq.${userId},${personalScope}),and(counterparty_id.eq.${userId},${personalScope})`;
 
       const { data: escrows, error } = await adminClient
         .from('escrows')
         .select('created_at, amount_usd')
-        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
-        .or('suite_context.is.null,suite_context.eq.personal')
+        .or(participantAndScopeFilter)
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString())
         .order('created_at', { ascending: true });
@@ -63,12 +76,13 @@ export class PortfolioService {
       for (const row of escrows || []) {
         const createdAt = new Date(row.created_at);
         const month = createdAt.getUTCMonth();
-        const amount = parseFloat(String(row.amount_usd));
+        const amount = this.parseAmountUsd(row.amount_usd);
         if (!Number.isFinite(amount)) continue;
         monthTotals.set(month, (monthTotals.get(month) || 0) + amount);
       }
 
-      const maxMonth = targetYear === currentYear ? now.getMonth() : 11;
+      // Keep chart length aligned to current UTC month for current year.
+      const maxMonth = targetYear === currentYear ? now.getUTCMonth() : 11;
       const formattedData = Array.from({ length: maxMonth + 1 }, (_, month) => {
         const date = new Date(targetYear, month, 1);
         return {

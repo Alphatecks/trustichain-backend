@@ -10,9 +10,17 @@ import type {
   AdminNotificationSettingsResponse,
   AdminUpdateNotificationSettingsRequest,
   AdminSendPushResponse,
+  AdminEscrowFeeSettingsResponse,
+  AdminUpdateEscrowFeeSettingsRequest,
 } from '../../types/api/adminSettings.types';
 
 export class AdminSettingsService {
+  private normalizeUsdFee(raw: unknown): number | null {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return parseFloat(n.toFixed(2));
+  }
+
   private getClient() {
     const client = supabaseAdmin || supabase;
     if (!supabaseAdmin) {
@@ -254,6 +262,109 @@ export class AdminSettingsService {
       return {
         success: false,
         message: e instanceof Error ? e.message : 'Failed to send push notification',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Get escrow creation fee settings used by admin fee configuration UI.
+   */
+  async getEscrowFeeSettings(): Promise<AdminEscrowFeeSettingsResponse> {
+    try {
+      const client = this.getClient();
+      const { data: row, error } = await client
+        .from('platform_escrow_fee_settings')
+        .select('personal_freelancer_fee_usd, supplier_fee_usd, payroll_fee_usd, updated_at')
+        .eq('id', 'default')
+        .maybeSingle();
+
+      if (error) {
+        return {
+          success: false,
+          message: error.message || 'Failed to fetch escrow fee settings',
+          error: error.message || 'Failed to fetch escrow fee settings',
+        };
+      }
+
+      if (!row) {
+        return {
+          success: true,
+          message: 'Escrow fee settings retrieved',
+          data: {
+            personalFreelancerEscrowCreationFeeUsd: 0,
+            supplierEscrowCreationFeeUsd: 0,
+            payrollEscrowCreationFeeUsd: 0,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Escrow fee settings retrieved',
+        data: {
+          personalFreelancerEscrowCreationFeeUsd: Number(row.personal_freelancer_fee_usd) || 0,
+          supplierEscrowCreationFeeUsd: Number(row.supplier_fee_usd) || 0,
+          payrollEscrowCreationFeeUsd: Number(row.payroll_fee_usd) || 0,
+          updatedAt: row.updated_at || undefined,
+        },
+      };
+    } catch (e) {
+      console.error('Admin settings getEscrowFeeSettings error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to fetch escrow fee settings',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Update escrow creation fee settings (USD values).
+   */
+  async updateEscrowFeeSettings(
+    adminId: string,
+    body: AdminUpdateEscrowFeeSettingsRequest
+  ): Promise<AdminEscrowFeeSettingsResponse> {
+    try {
+      const personalFee = this.normalizeUsdFee(body.personalFreelancerEscrowCreationFeeUsd);
+      const supplierFee = this.normalizeUsdFee(body.supplierEscrowCreationFeeUsd);
+      const payrollFee = this.normalizeUsdFee(body.payrollEscrowCreationFeeUsd);
+
+      if (personalFee == null || supplierFee == null || payrollFee == null) {
+        return {
+          success: false,
+          message: 'All fees must be valid non-negative numbers',
+          error: 'Validation error',
+        };
+      }
+
+      const client = this.getClient();
+      const { error } = await client
+        .from('platform_escrow_fee_settings')
+        .upsert({
+          id: 'default',
+          personal_freelancer_fee_usd: personalFee,
+          supplier_fee_usd: supplierFee,
+          payroll_fee_usd: payrollFee,
+          updated_by: adminId,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+
+      if (error) {
+        return {
+          success: false,
+          message: error.message || 'Failed to update escrow fee settings',
+          error: error.message || 'Failed to update escrow fee settings',
+        };
+      }
+
+      return this.getEscrowFeeSettings();
+    } catch (e) {
+      console.error('Admin settings updateEscrowFeeSettings error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to update escrow fee settings',
         error: e instanceof Error ? e.message : 'Unknown error',
       };
     }

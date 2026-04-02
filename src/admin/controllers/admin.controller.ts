@@ -58,6 +58,7 @@ import type {
   AdminSettingsProfileResponse,
   AdminNotificationSettingsResponse,
   AdminSendPushResponse,
+  AdminEscrowFeeSettingsResponse,
 } from '../../types/api/adminSettings.types';
 import { adminEscrowManagementService } from '../services/adminEscrowManagement.service';
 import { adminBusinessManagementService } from '../services/adminBusinessManagement.service';
@@ -829,6 +830,51 @@ export class AdminController {
       return;
     }
     const result = await adminSettingsService.sendPushNotification(body.title, body.message, 'all');
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async getEscrowFeeSettings(req: Request, res: Response<AdminEscrowFeeSettingsResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const result = await adminSettingsService.getEscrowFeeSettings();
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
+  async updateEscrowFeeSettings(req: Request, res: Response<AdminEscrowFeeSettingsResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+
+    const body = req.body as {
+      personalFreelancerEscrowCreationFeeUsd?: number;
+      supplierEscrowCreationFeeUsd?: number;
+      payrollEscrowCreationFeeUsd?: number;
+    };
+
+    if (
+      body.personalFreelancerEscrowCreationFeeUsd == null ||
+      body.supplierEscrowCreationFeeUsd == null ||
+      body.payrollEscrowCreationFeeUsd == null
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'personalFreelancerEscrowCreationFeeUsd, supplierEscrowCreationFeeUsd, payrollEscrowCreationFeeUsd are required',
+        error: 'Bad request',
+      });
+      return;
+    }
+
+    const result = await adminSettingsService.updateEscrowFeeSettings(adminId, {
+      personalFreelancerEscrowCreationFeeUsd: Number(body.personalFreelancerEscrowCreationFeeUsd),
+      supplierEscrowCreationFeeUsd: Number(body.supplierEscrowCreationFeeUsd),
+      payrollEscrowCreationFeeUsd: Number(body.payrollEscrowCreationFeeUsd),
+    });
+
     res.status(result.success ? 200 : 400).json(result);
   }
 }
