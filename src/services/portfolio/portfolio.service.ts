@@ -6,6 +6,48 @@
 import { supabase, supabaseAdmin } from '../../config/supabase';
 
 export class PortfolioService {
+  private async fetchEscrowsForRange(
+    userId: string,
+    startIso: string,
+    endIso: string
+  ): Promise<{
+    data: Array<{ created_at: string; amount_usd: unknown }> | null;
+    error: string | null;
+  }> {
+    const adminClient = supabaseAdmin || supabase;
+    const personalScope = 'or(suite_context.is.null,suite_context.eq.personal)';
+    const participantAndScopeFilter =
+      `and(user_id.eq.${userId},${personalScope}),and(counterparty_id.eq.${userId},${personalScope})`;
+
+    const pageSize = 1000;
+    let from = 0;
+    const allRows: Array<{ created_at: string; amount_usd: unknown }> = [];
+
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await adminClient
+        .from('escrows')
+        .select('created_at, amount_usd')
+        .or(participantAndScopeFilter)
+        .gte('created_at', startIso)
+        .lte('created_at', endIso)
+        .order('created_at', { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        return { data: null, error: error.message || 'Failed to fetch escrow totals' };
+      }
+
+      const rows = (data || []) as Array<{ created_at: string; amount_usd: unknown }>;
+      allRows.push(...rows);
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return { data: allRows, error: null };
+  }
+
   private parseAmountUsd(raw: unknown): number {
     const direct = Number(raw);
     if (Number.isFinite(direct)) return direct;
@@ -38,7 +80,6 @@ export class PortfolioService {
     error?: string;
   }> {
     try {
-      const adminClient = supabaseAdmin || supabase;
       const now = new Date();
       const requestedTimeframe = timeframe;
       const currentYear = now.getUTCFullYear();
@@ -50,17 +91,11 @@ export class PortfolioService {
         ? now
         : new Date(Date.UTC(targetYear, 11, 31, 23, 59, 59, 999));
 
-      const personalScope = 'or(suite_context.is.null,suite_context.eq.personal)';
-      const participantAndScopeFilter =
-        `and(user_id.eq.${userId},${personalScope}),and(counterparty_id.eq.${userId},${personalScope})`;
-
-      const { data: escrows, error } = await adminClient
-        .from('escrows')
-        .select('created_at, amount_usd')
-        .or(participantAndScopeFilter)
-        .gte('created_at', startDate.toISOString())
-        .lte('created_at', endDate.toISOString())
-        .order('created_at', { ascending: true });
+      const { data: escrows, error } = await this.fetchEscrowsForRange(
+        userId,
+        startDate.toISOString(),
+        endDate.toISOString()
+      );
 
       if (error) {
         return {
@@ -84,9 +119,9 @@ export class PortfolioService {
       // Keep chart length aligned to current UTC month for current year.
       const maxMonth = targetYear === currentYear ? now.getUTCMonth() : 11;
       const formattedData = Array.from({ length: maxMonth + 1 }, (_, month) => {
-        const date = new Date(targetYear, month, 1);
+        const date = new Date(Date.UTC(targetYear, month, 1, 0, 0, 0, 0));
         return {
-          period: date.toLocaleDateString('en-US', { month: 'short' }),
+          period: date.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }),
           value: parseFloat((monthTotals.get(month) || 0).toFixed(2)),
         };
       });
