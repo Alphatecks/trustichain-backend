@@ -1267,6 +1267,7 @@ export class BusinessSuiteController {
         message: result.message,
         data: { balance: result.data.balance },
         xrplAddress: result.xrpl_address ?? '',
+        rlusdAddress: result.rlusd_xrpl_address ?? result.xrpl_address ?? '',
       });
     } else {
       res.status(200).json({

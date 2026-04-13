@@ -43,6 +43,7 @@ export class WalletService {
       };
     };
     xrpl_address?: string | null;
+    rlusd_xrpl_address?: string | null;
     error?: string;
   }> {
     try {
@@ -59,7 +60,7 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: wallet, error } = await adminClient
         .from('wallets')
-        .select('id, balance_xrp, balance_usdt, balance_usdc, balance_rlusd, xrpl_address')
+        .select('id, balance_xrp, balance_usdt, balance_usdc, balance_rlusd, xrpl_address, rlusd_xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', suiteContext)
         .maybeSingle();
@@ -85,7 +86,12 @@ export class WalletService {
       // This ensures external deposits are reflected immediately
       if (wallet.xrpl_address) {
         try {
-          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+          await this.syncBalancesFromXRPL(
+            userId,
+            wallet.id,
+            wallet.xrpl_address,
+            wallet.rlusd_xrpl_address ?? undefined
+          );
           // Also sync incoming payments to track external deposits in transaction history
           this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch((err) => {
             console.warn('Failed to sync incoming payments:', err);
@@ -117,6 +123,7 @@ export class WalletService {
                 },
               },
               xrpl_address: wallet.xrpl_address,
+              rlusd_xrpl_address: wallet.rlusd_xrpl_address ?? wallet.xrpl_address,
             };
           }
         } catch (syncError) {
@@ -144,6 +151,7 @@ export class WalletService {
           },
         },
         xrpl_address: wallet.xrpl_address ?? null,
+        rlusd_xrpl_address: wallet.rlusd_xrpl_address ?? wallet.xrpl_address ?? null,
       };
     } catch (error) {
       console.error('Error getting wallet balance:', error);
@@ -186,7 +194,12 @@ export class WalletService {
    * Internal swaps (database-only) update the database but not XRPL,
    * so we need to preserve token balances from the database when syncing
    */
-  private async syncBalancesFromXRPL(userId: string, walletId: string, xrplAddress: string): Promise<void> {
+  private async syncBalancesFromXRPL(
+    userId: string,
+    walletId: string,
+    xrplAddress: string,
+    rlusdXrplAddress?: string
+  ): Promise<void> {
     const adminClient = supabaseAdmin || supabase;
 
     // Check if user has any completed internal swaps to preserve
@@ -212,8 +225,16 @@ export class WalletService {
       .eq('id', walletId)
       .single();
 
-    // Get balances from XRPL
+    // Get balances from primary XRPL wallet address
     const balances = await xrplWalletService.getAllBalances(xrplAddress);
+    let rlusdBalance = balances.rlusd;
+    if (rlusdXrplAddress && rlusdXrplAddress !== xrplAddress) {
+      try {
+        rlusdBalance = await xrplWalletService.getRLUSDBalance(rlusdXrplAddress);
+      } catch (rlusdError) {
+        console.warn('[Sync] RLUSD dedicated address sync failed, using primary address RLUSD balance', rlusdError);
+      }
+    }
 
     // Update balances: sync XRP always, but preserve token balances if internal swaps exist
     if (hasInternalSwaps && wallet) {
@@ -226,7 +247,7 @@ export class WalletService {
         dbRlusd: wallet.balance_rlusd,
         xrplUsdt: balances.usdt,
         xrplUsdc: balances.usdc,
-        xrplRlusd: balances.rlusd,
+        xrplRlusd: rlusdBalance,
       });
       await adminClient
         .from('wallets')
@@ -235,7 +256,7 @@ export class WalletService {
           // Preserve token balances from database (internal swaps)
           balance_usdt: wallet.balance_usdt || balances.usdt,
           balance_usdc: wallet.balance_usdc || balances.usdc,
-          balance_rlusd: wallet.balance_rlusd || balances.rlusd,
+          balance_rlusd: wallet.balance_rlusd || rlusdBalance,
           updated_at: new Date().toISOString(),
         })
         .eq('id', walletId);
@@ -252,7 +273,7 @@ export class WalletService {
           balance_xrp: balances.xrp,
           balance_usdt: balances.usdt,
           balance_usdc: balances.usdc,
-          balance_rlusd: balances.rlusd,
+          balance_rlusd: rlusdBalance,
           updated_at: new Date().toISOString(),
         })
         .eq('id', walletId);
@@ -411,7 +432,7 @@ export class WalletService {
   async createWallet(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
-    data?: { xrpl_address: string };
+    data?: { xrpl_address: string; rlusd_xrpl_address: string };
     error?: string;
   }> {
     try {
@@ -428,25 +449,47 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: existing } = await adminClient
         .from('wallets')
-        .select('xrpl_address')
+        .select('xrpl_address, rlusd_xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', suiteContext)
         .maybeSingle();
       if (existing?.xrpl_address) {
+        if (!existing.rlusd_xrpl_address) {
+          const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
+          const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
+          await adminClient
+            .from('wallets')
+            .update({
+              rlusd_xrpl_address: rlusdAddress,
+              encrypted_rlusd_wallet_secret: encryptedRlusdSecret,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId)
+            .eq('suite_context', suiteContext);
+          return {
+            success: true,
+            message: 'Wallet already exists and RLUSD wallet created successfully',
+            data: { xrpl_address: existing.xrpl_address, rlusd_xrpl_address: rlusdAddress },
+          };
+        }
         return {
           success: true,
           message: 'Wallet already exists',
-          data: { xrpl_address: existing.xrpl_address },
+          data: { xrpl_address: existing.xrpl_address, rlusd_xrpl_address: existing.rlusd_xrpl_address },
         };
       }
       const { address, secret } = await xrplWalletService.generateWallet();
+      const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
       const encryptedSecret = encryptionService.encrypt(secret);
+      const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
       const { error: insertError } = await adminClient
         .from('wallets')
         .insert({
           user_id: userId,
           xrpl_address: address,
+          rlusd_xrpl_address: rlusdAddress,
           encrypted_wallet_secret: encryptedSecret,
+          encrypted_rlusd_wallet_secret: encryptedRlusdSecret,
           balance_xrp: 0,
           balance_usdt: 0,
           balance_usdc: 0,
@@ -463,7 +506,7 @@ export class WalletService {
       return {
         success: true,
         message: 'Wallet created successfully',
-        data: { xrpl_address: address },
+        data: { xrpl_address: address, rlusd_xrpl_address: rlusdAddress },
       };
     } catch (error) {
       return {
@@ -601,9 +644,13 @@ export class WalletService {
         };
       }
 
+      const destinationAddress = currency === 'RLUSD'
+        ? (wallet.rlusd_xrpl_address || wallet.xrpl_address)
+        : wallet.xrpl_address;
+
       // Prepare payment transaction (from user's Xaman wallet to their connected wallet)
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
-        wallet.xrpl_address, // Destination: user's connected wallet address
+        destinationAddress, // Destination: user's connected wallet address
         request.amount,
         currency
       );
@@ -659,7 +706,7 @@ export class WalletService {
           qrCode: xummPayload.refs.qr_png,
           qrUri: xummPayload.refs.qr_uri,
           amount: request.amount,
-          destinationAddress: wallet.xrpl_address,
+          destinationAddress: destinationAddress,
           instructions: `Sign this transaction in Xaman app to deposit ${request.amount} ${currency} to your wallet`,
         },
       };
@@ -788,13 +835,13 @@ export class WalletService {
         if (status === 'completed') {
           const { data: wallet } = await adminClient
             .from('wallets')
-            .select('id, xrpl_address')
+            .select('id, xrpl_address, rlusd_xrpl_address')
             .eq('user_id', userId)
             .eq('suite_context', 'personal')
             .single();
 
           if (wallet) {
-            await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+            await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
           }
         }
 
@@ -826,13 +873,13 @@ export class WalletService {
         // Update wallet balance (personal suite)
         const { data: wallet } = await adminClient
           .from('wallets')
-          .select('id, xrpl_address')
+          .select('id, xrpl_address, rlusd_xrpl_address')
           .eq('user_id', userId)
           .eq('suite_context', 'personal')
           .single();
 
         if (wallet) {
-          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
         }
 
         return {
@@ -1683,7 +1730,7 @@ export class WalletService {
           .eq('id', transaction.id);
 
         // Sync balances from XRPL, but preserve internal swap balances
-        await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+        await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
 
         // Create notification
         try {
@@ -1915,9 +1962,12 @@ export class WalletService {
       // - Other USD-pegged tokens (USDT/USDC) → Use MetaMask+XRPL Snap (browser wallet)
       const currency = request.currency === 'USD' ? 'XRP' : request.currency;
       const amount = currency === 'XRP' ? amountXrp : amountToken;
+      const destinationAddress = currency === 'RLUSD'
+        ? (wallet.rlusd_xrpl_address || wallet.xrpl_address)
+        : wallet.xrpl_address;
       
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
-        wallet.xrpl_address,
+        destinationAddress,
         amount,
         currency as 'XRP' | 'USDT' | 'USDC' | 'RLUSD'
       );
@@ -1980,7 +2030,7 @@ export class WalletService {
           // Transaction for wallet signing (always present)
           transaction: preparedTx.transaction,
           transactionBlob: preparedTx.transactionBlob,
-          destinationAddress: wallet.xrpl_address,
+          destinationAddress: destinationAddress,
           amountXrp: parseFloat(amountXrp.toFixed(6)),
           amountToken: currency !== 'XRP' ? parseFloat(amountToken.toFixed(6)) : undefined,
           status: 'pending',
@@ -2102,13 +2152,13 @@ export class WalletService {
           // #endregion
           const { data: wallet } = await adminClient
             .from('wallets')
-            .select('id, xrpl_address')
+            .select('id, xrpl_address, rlusd_xrpl_address')
             .eq('user_id', userId)
             .eq('suite_context', 'personal')
             .single();
 
           if (wallet) {
-            await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+            await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
             // #region agent log
             fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:381',message:'getXUMMPayloadStatus: Updated wallet balance in DB',data:{walletId:wallet.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
             // #endregion
@@ -2156,13 +2206,13 @@ export class WalletService {
         // #endregion
         const { data: wallet } = await adminClient
           .from('wallets')
-          .select('id, xrpl_address')
+          .select('id, xrpl_address, rlusd_xrpl_address')
           .eq('user_id', userId)
           .eq('suite_context', 'personal')
           .single();
 
         if (wallet) {
-          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+          await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
           // #region agent log
           fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'wallet.service.ts:459',message:'getXUMMPayloadStatus: Updated wallet balance in DB (auto-submitted)',data:{walletId:wallet.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
           // #endregion
@@ -2757,7 +2807,7 @@ export class WalletService {
       // Update result check removed (variable no longer declared)
 
       // Update wallet balance after withdrawal
-      await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+      await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
 
       // Create transaction record for the receiver (if destination is a TrustiChain user)
       try {
@@ -3076,7 +3126,7 @@ export class WalletService {
       // Get user's wallet address (personal suite)
       const { data: wallet } = await adminClient
         .from('wallets')
-        .select('id, xrpl_address')
+        .select('id, xrpl_address, rlusd_xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', 'personal')
         .single();
@@ -3162,7 +3212,7 @@ export class WalletService {
                 });
 
               // Update wallet balance
-              await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address);
+              await this.syncBalancesFromXRPL(userId, wallet.id, wallet.xrpl_address, wallet.rlusd_xrpl_address ?? undefined);
             }
           } finally {
             await client.disconnect();

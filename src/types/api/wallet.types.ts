@@ -15,6 +15,7 @@ export interface WalletBalanceResponse {
       usd: number; // Total USD equivalent (XRP converted + USDT + USDC + RLUSD)
     };
     xrplAddress: string;
+    rlusdAddress?: string;
   };
   error?: string;
 }
