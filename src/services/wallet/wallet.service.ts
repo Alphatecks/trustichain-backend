@@ -82,6 +82,27 @@ export class WalletService {
         };
       }
 
+      let resolvedRlusdAddress = wallet.rlusd_xrpl_address ?? null;
+      if (!resolvedRlusdAddress) {
+        try {
+          const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
+          const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
+          const { error: rlusdUpdateError } = await adminClient
+            .from('wallets')
+            .update({
+              rlusd_xrpl_address: rlusdAddress,
+              encrypted_rlusd_wallet_secret: encryptedRlusdSecret,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', wallet.id);
+          if (!rlusdUpdateError) {
+            resolvedRlusdAddress = rlusdAddress;
+          }
+        } catch (rlusdAddressError) {
+          console.warn('Failed to auto-create dedicated RLUSD wallet address:', rlusdAddressError);
+        }
+      }
+
       // CRITICAL FIX: Sync balance from XRPL before returning
       // This ensures external deposits are reflected immediately
       if (wallet.xrpl_address) {
@@ -90,7 +111,7 @@ export class WalletService {
             userId,
             wallet.id,
             wallet.xrpl_address,
-            wallet.rlusd_xrpl_address ?? undefined
+            resolvedRlusdAddress ?? undefined
           );
           // Also sync incoming payments to track external deposits in transaction history
           this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch((err) => {
@@ -123,7 +144,7 @@ export class WalletService {
                 },
               },
               xrpl_address: wallet.xrpl_address,
-              rlusd_xrpl_address: wallet.rlusd_xrpl_address ?? wallet.xrpl_address,
+              rlusd_xrpl_address: resolvedRlusdAddress,
             };
           }
         } catch (syncError) {
@@ -151,7 +172,7 @@ export class WalletService {
           },
         },
         xrpl_address: wallet.xrpl_address ?? null,
-        rlusd_xrpl_address: wallet.rlusd_xrpl_address ?? wallet.xrpl_address ?? null,
+        rlusd_xrpl_address: resolvedRlusdAddress,
       };
     } catch (error) {
       console.error('Error getting wallet balance:', error);
@@ -344,7 +365,7 @@ export class WalletService {
       }
       const { data: currentWallet, error: walletError } = await adminClient
         .from('wallets')
-        .select('xrpl_address')
+        .select('xrpl_address, rlusd_xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', suiteContext)
         .maybeSingle();
@@ -353,18 +374,38 @@ export class WalletService {
         return { success: false, message: 'Failed to check wallet', error: 'Database error' };
       }
       if (!currentWallet) {
+        const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
+        const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
         const { error: createError } = await adminClient
           .from('wallets')
-          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0, balance_rlusd: 0, suite_context: suiteContext });
+          .insert({
+            user_id: userId,
+            xrpl_address: walletAddress,
+            rlusd_xrpl_address: rlusdAddress,
+            encrypted_rlusd_wallet_secret: encryptedRlusdSecret,
+            balance_xrp: 0,
+            balance_usdt: 0,
+            balance_usdc: 0,
+            balance_rlusd: 0,
+            suite_context: suiteContext,
+          });
         if (createError) {
           return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
         }
         return { success: true, message: 'MetaMask wallet connected successfully. You can now fund your wallet from this connected wallet.', data: { walletAddress } };
       }
       const previousAddress = currentWallet.xrpl_address;
+      let rlusdUpdate: { rlusd_xrpl_address?: string; encrypted_rlusd_wallet_secret?: string } = {};
+      if (!currentWallet.rlusd_xrpl_address) {
+        const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
+        rlusdUpdate = {
+          rlusd_xrpl_address: rlusdAddress,
+          encrypted_rlusd_wallet_secret: encryptionService.encrypt(rlusdSecret),
+        };
+      }
       const { error: updateError } = await adminClient
         .from('wallets')
-        .update({ xrpl_address: walletAddress, updated_at: new Date().toISOString() })
+        .update({ xrpl_address: walletAddress, ...rlusdUpdate, updated_at: new Date().toISOString() })
         .eq('user_id', userId)
         .eq('suite_context', suiteContext);
       if (updateError) {

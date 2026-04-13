@@ -16,7 +16,7 @@ export class WalletController {
             balance: result.data.balance,
           },
           xrplAddress: result.xrpl_address ?? '',
-          rlusdAddress: result.rlusd_xrpl_address ?? result.xrpl_address ?? '',
+          rlusdAddress: result.rlusd_xrpl_address ?? '',
         });
       } else {
         res.json({
