@@ -547,9 +547,9 @@ export class WalletService {
   /**
    * Fund wallet via XUMM (Xaman app)
    * Creates a XUMM payload for the user to sign a payment transaction
-   * This will debit XRP from the user's Xaman wallet to their connected wallet address
+   * This will debit XRP or RLUSD from the user's Xaman wallet to their connected wallet address
    */
-  async fundWalletViaXUMM(userId: string, request: { amount: number }): Promise<{
+  async fundWalletViaXUMM(userId: string, request: { amount: number; currency?: 'XRP' | 'RLUSD' }): Promise<{
     success: boolean,
     message: string,
     data?: {
@@ -566,6 +566,7 @@ export class WalletService {
   }> {
     try {
       const adminClient = supabaseAdmin || supabase;
+      const currency = request.currency || 'XRP';
 
       // Get user's wallet (personal suite)
       const { data: wallet } = await adminClient
@@ -592,12 +593,36 @@ export class WalletService {
         };
       }
 
+      if (currency !== 'XRP' && currency !== 'RLUSD') {
+        return {
+          success: false,
+          message: 'Invalid currency. Only XRP and RLUSD are supported for Xaman deposits.',
+          error: 'Invalid currency',
+        };
+      }
+
       // Prepare payment transaction (from user's Xaman wallet to their connected wallet)
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
         wallet.xrpl_address, // Destination: user's connected wallet address
         request.amount,
-        'XRP'
+        currency
       );
+
+      // Compute transaction record amounts
+      let amountUsd = request.amount;
+      let amountXrp = request.amount;
+      if (currency === 'RLUSD') {
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        if (!exchangeRates.success || !exchangeRates.data) {
+          throw new Error('Failed to fetch exchange rates for RLUSD conversion');
+        }
+        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+        if (!usdRate || usdRate <= 0) {
+          throw new Error('XRP/USD exchange rate not available');
+        }
+        amountXrp = request.amount / usdRate;
+        amountUsd = request.amount;
+      }
 
       // Create XUMM payload
       const xummPayload = await xummService.createPayload(preparedTx.transaction);
@@ -608,10 +633,10 @@ export class WalletService {
         .insert({
           user_id: userId,
           type: 'deposit',
-          amount_xrp: request.amount,
-          amount_usd: 0, // Will be calculated later if needed
+          amount_xrp: amountXrp,
+          amount_usd: amountUsd,
           status: 'pending',
-          description: `XUMM deposit ${request.amount} XRP | XUMM_UUID:${xummPayload.uuid}`,
+          description: `XUMM deposit ${request.amount} ${currency} | XUMM_UUID:${xummPayload.uuid}`,
         })
         .select()
         .single();
@@ -635,7 +660,7 @@ export class WalletService {
           qrUri: xummPayload.refs.qr_uri,
           amount: request.amount,
           destinationAddress: wallet.xrpl_address,
-          instructions: `Sign this transaction in Xaman app to deposit ${request.amount} XRP to your wallet`,
+          instructions: `Sign this transaction in Xaman app to deposit ${request.amount} ${currency} to your wallet`,
         },
       };
     } catch (error) {
@@ -776,7 +801,7 @@ export class WalletService {
         return {
           success: true,
           message: status === 'completed' 
-            ? 'Payment completed successfully. XRP has been debited from your Xaman wallet.'
+            ? 'Payment completed successfully. Funds have been debited from your Xaman wallet.'
             : 'Payment transaction failed',
           data: {
             signed: true,
@@ -812,7 +837,7 @@ export class WalletService {
 
         return {
           success: true,
-          message: 'Payment completed successfully. XRP has been debited from your Xaman wallet.',
+          message: 'Payment completed successfully. Funds have been debited from your Xaman wallet.',
           data: {
             signed: true,
             xummUuid,
@@ -1886,7 +1911,8 @@ export class WalletService {
 
       // Determine wallet flow based on currency:
       // - XRP → Use Xaman/XUMM (mobile app)
-      // - USD-pegged tokens (USDT/USDC/RLUSD) → Use MetaMask+XRPL Snap (browser wallet)
+      // - RLUSD → Use Xaman/XUMM (mobile app)
+      // - Other USD-pegged tokens (USDT/USDC) → Use MetaMask+XRPL Snap (browser wallet)
       const currency = request.currency === 'USD' ? 'XRP' : request.currency;
       const amount = currency === 'XRP' ? amountXrp : amountToken;
       
@@ -1896,13 +1922,13 @@ export class WalletService {
         currency as 'XRP' | 'USDT' | 'USDC' | 'RLUSD'
       );
 
-      // XRP: Use Xaman/XUMM flow
-      // USD-pegged tokens: Use MetaMask flow (no XUMM)
+      // XRP and RLUSD: Use Xaman/XUMM flow
+      // Other USD-pegged tokens: Use MetaMask flow (no XUMM)
       let xummPayload = null;
       let xummError = null;
       
-      if (currency === 'XRP') {
-        // For XRP, try to create XUMM payload (Xaman mobile app)
+      if (currency === 'XRP' || currency === 'RLUSD') {
+        // For XRP/RLUSD, try to create XUMM payload (Xaman mobile app)
         try {
           xummPayload = await xummService.createPayload(preparedTx.transaction);
         } catch (error) {
@@ -1910,7 +1936,7 @@ export class WalletService {
           console.log('XUMM not configured or error:', xummError);
         }
       } else {
-        // For USD-pegged tokens, use MetaMask (no XUMM)
+        // For USDT/USDC, use MetaMask (no XUMM)
         console.log(`Using MetaMask flow for ${currency} deposit`);
       }
 
@@ -1928,10 +1954,10 @@ export class WalletService {
         .eq('id', transaction.id);
 
       // Determine wallet type and message
-      const walletType = currency === 'XRP' ? 'Xaman' : 'MetaMask';
+      const walletType = currency === 'XRP' || currency === 'RLUSD' ? 'Xaman' : 'MetaMask';
       const message = xummPayload 
         ? `Transaction prepared. Please sign in ${walletType} app.`
-        : currency === 'XRP'
+        : currency === 'XRP' || currency === 'RLUSD'
         ? 'Transaction prepared. Please sign with your XRPL wallet (Xaman, Crossmark, etc.).'
         : `Transaction prepared. Please sign with MetaMask (XRPL Snap) for ${currency} deposit.`;
 
@@ -1960,8 +1986,8 @@ export class WalletService {
           status: 'pending',
           // Wallet type indicator
           ...(!xummPayload && {
-            walletType: currency === 'XRP' ? 'browser' : 'metamask',
-            note: currency === 'XRP' 
+            walletType: currency === 'XRP' || currency === 'RLUSD' ? 'browser' : 'metamask',
+            note: currency === 'XRP' || currency === 'RLUSD'
               ? 'XUMM not available, use browser wallet instead'
               : `Use MetaMask with XRPL Snap to sign ${currency} transaction`,
           }),

@@ -154,9 +154,9 @@ router.get('/connect/xumm/status', authenticate, asyncHandler(async (req, res) =
 
 /**
  * @route   POST /api/wallet/fund/xumm
- * @desc    Fund wallet via XUMM (Xaman app) - debits XRP from user's Xaman wallet
+ * @desc    Fund wallet via XUMM (Xaman app) - debits XRP or RLUSD from user's Xaman wallet
  * @access  Private
- * @body    { amount: number } (amount in XRP)
+ * @body    { amount: number, currency?: 'XRP' | 'RLUSD' } (currency defaults to XRP)
  */
 router.post('/fund/xumm', authenticate, asyncHandler(async (req, res) => {
   await walletController.fundWalletViaXUMM(req, res);

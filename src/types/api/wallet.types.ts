@@ -230,7 +230,8 @@ export interface ConnectXUMMStatusResponse {
 }
 
 export interface FundXUMMRequest {
-  amount: number; // Amount in XRP
+  amount: number;
+  currency?: 'XRP' | 'RLUSD'; // Defaults to XRP
 }
 
 export interface FundXUMMResponse {
@@ -242,7 +243,7 @@ export interface FundXUMMResponse {
     xummUuid: string;
     qrCode?: string;
     qrUri?: string;
-    amount: number; // Amount in XRP
+    amount: number;
     destinationAddress: string;
     instructions: string;
   };

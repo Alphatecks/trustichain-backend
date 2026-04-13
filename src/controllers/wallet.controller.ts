@@ -394,6 +394,15 @@ export class WalletController {
   async fundWalletViaXUMM(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as Request & { userId?: string }).userId!;
+      const { currency } = req.body || {};
+      if (currency && currency !== 'XRP' && currency !== 'RLUSD') {
+        res.json({
+          success: false,
+          message: 'Invalid currency. Currency must be either "XRP" or "RLUSD" for Xaman deposits.',
+          error: 'Invalid currency',
+        });
+        return;
+      }
       const result = await walletService.fundWalletViaXUMM(userId, req.body);
       res.json(result);
     } catch (error) {
