@@ -38,6 +38,7 @@ export class WalletService {
         xrp: number;
         usdt: number;
         usdc: number;
+        rlusd: number;
         usd: number;
       };
     };
@@ -58,7 +59,7 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: wallet, error } = await adminClient
         .from('wallets')
-        .select('id, balance_xrp, balance_usdt, balance_usdc, xrpl_address')
+        .select('id, balance_xrp, balance_usdt, balance_usdc, balance_rlusd, xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', suiteContext)
         .maybeSingle();
@@ -93,7 +94,7 @@ export class WalletService {
           // Fetch updated balance after sync
           const { data: updatedWallet } = await adminClient
             .from('wallets')
-            .select('balance_xrp, balance_usdt, balance_usdc')
+            .select('balance_xrp, balance_usdt, balance_usdc, balance_rlusd')
             .eq('id', wallet.id)
             .single();
           
@@ -101,7 +102,8 @@ export class WalletService {
             const xrp = updatedWallet.balance_xrp ?? 0;
             const usdt = updatedWallet.balance_usdt ?? 0;
             const usdc = updatedWallet.balance_usdc ?? 0;
-            const usd = await this.computeUsdEquivalent(xrp, usdt, usdc);
+            const rlusd = updatedWallet.balance_rlusd ?? 0;
+            const usd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
             return {
               success: true,
               message: 'Balance retrieved successfully',
@@ -110,6 +112,7 @@ export class WalletService {
                   xrp,
                   usdt,
                   usdc,
+                  rlusd,
                   usd,
                 },
               },
@@ -126,7 +129,8 @@ export class WalletService {
       const xrp = wallet.balance_xrp ?? 0;
       const usdt = wallet.balance_usdt ?? 0;
       const usdc = wallet.balance_usdc ?? 0;
-      const usd = await this.computeUsdEquivalent(xrp, usdt, usdc);
+      const rlusd = wallet.balance_rlusd ?? 0;
+      const usd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
       return {
         success: true,
         message: 'Balance retrieved successfully',
@@ -135,6 +139,7 @@ export class WalletService {
             xrp,
             usdt,
             usdc,
+            rlusd,
             usd,
           },
         },
@@ -151,13 +156,14 @@ export class WalletService {
   }
 
   /**
-   * Compute total USD equivalent from XRP (via live rate), USDT, and USDC (1:1 USD).
+   * Compute total USD equivalent from XRP (via live rate), USDT, USDC, and RLUSD (1:1 USD).
    * Balances may be strings from DB; we coerce to number. Returns 0 only when rate is unavailable.
    */
-  private async computeUsdEquivalent(xrp: number, usdt: number, usdc: number): Promise<number> {
+  private async computeUsdEquivalent(xrp: number, usdt: number, usdc: number, rlusd: number): Promise<number> {
     const x = Number(xrp) || 0;
     const u = Number(usdt) || 0;
     const c = Number(usdc) || 0;
+    const r = Number(rlusd) || 0;
     const rates = await exchangeService.getLiveExchangeRates();
     if (!rates.success || !rates.data) {
       console.warn('[Wallet] computeUsdEquivalent: exchange rates unavailable (success or data missing)');
@@ -171,14 +177,14 @@ export class WalletService {
       });
       return 0;
     }
-    const total = x * usdRate + u + c;
+    const total = x * usdRate + u + c + r;
     return Math.round(total * 100) / 100;
   }
 
   /**
    * Sync balances from XRPL while preserving internal swap balances
    * Internal swaps (database-only) update the database but not XRPL,
-   * so we need to preserve USDT/USDC balances from the database when syncing
+   * so we need to preserve token balances from the database when syncing
    */
   private async syncBalancesFromXRPL(userId: string, walletId: string, xrplAddress: string): Promise<void> {
     const adminClient = supabaseAdmin || supabase;
@@ -202,7 +208,7 @@ export class WalletService {
     // Get current wallet balances from database (needed to preserve internal swap balances)
     const { data: wallet } = await adminClient
       .from('wallets')
-      .select('balance_usdt, balance_usdc')
+      .select('balance_usdt, balance_usdc, balance_rlusd')
       .eq('id', walletId)
       .single();
 
@@ -217,16 +223,19 @@ export class WalletService {
         hasInternalSwaps: true,
         dbUsdt: wallet.balance_usdt,
         dbUsdc: wallet.balance_usdc,
+        dbRlusd: wallet.balance_rlusd,
         xrplUsdt: balances.usdt,
         xrplUsdc: balances.usdc,
+        xrplRlusd: balances.rlusd,
       });
       await adminClient
         .from('wallets')
         .update({
           balance_xrp: balances.xrp,  // Always sync XRP from XRPL
-          // Preserve USDT/USDC from database (internal swaps)
+          // Preserve token balances from database (internal swaps)
           balance_usdt: wallet.balance_usdt || balances.usdt,
           balance_usdc: wallet.balance_usdc || balances.usdc,
+          balance_rlusd: wallet.balance_rlusd || balances.rlusd,
           updated_at: new Date().toISOString(),
         })
         .eq('id', walletId);
@@ -243,6 +252,7 @@ export class WalletService {
           balance_xrp: balances.xrp,
           balance_usdt: balances.usdt,
           balance_usdc: balances.usdc,
+          balance_rlusd: balances.rlusd,
           updated_at: new Date().toISOString(),
         })
         .eq('id', walletId);
@@ -324,7 +334,7 @@ export class WalletService {
       if (!currentWallet) {
         const { error: createError } = await adminClient
           .from('wallets')
-          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0, suite_context: suiteContext });
+          .insert({ user_id: userId, xrpl_address: walletAddress, balance_xrp: 0, balance_usdt: 0, balance_usdc: 0, balance_rlusd: 0, suite_context: suiteContext });
         if (createError) {
           return { success: false, message: 'Failed to connect wallet', error: 'Failed to create wallet record' };
         }
@@ -440,6 +450,7 @@ export class WalletService {
           balance_xrp: 0,
           balance_usdt: 0,
           balance_usdc: 0,
+          balance_rlusd: 0,
           suite_context: suiteContext,
         });
       if (insertError) {
@@ -1814,7 +1825,7 @@ export class WalletService {
       // Convert amounts based on currency
       let amountXrp = request.amount;
       let amountUsd = request.amount;
-      let amountToken: number = request.amount; // For USDT/USDC
+      let amountToken: number = request.amount; // For USD-pegged tokens (USDT/USDC/RLUSD)
 
       if (request.currency === 'USD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
@@ -1836,8 +1847,8 @@ export class WalletService {
           throw new Error('XRP/USD exchange rate not available');
         }
         amountUsd = request.amount * usdRate;
-      } else if (request.currency === 'USDT' || request.currency === 'USDC') {
-        // For USDT/USDC, amount is already in USD value
+      } else if (request.currency === 'USDT' || request.currency === 'USDC' || request.currency === 'RLUSD') {
+        // For USD-pegged tokens, amount is already in USD value
         amountUsd = request.amount;
         amountToken = request.amount;
         const exchangeRates = await exchangeService.getLiveExchangeRates();
@@ -1875,18 +1886,18 @@ export class WalletService {
 
       // Determine wallet flow based on currency:
       // - XRP → Use Xaman/XUMM (mobile app)
-      // - USDT/USDC → Use MetaMask+XRPL Snap (browser wallet)
+      // - USD-pegged tokens (USDT/USDC/RLUSD) → Use MetaMask+XRPL Snap (browser wallet)
       const currency = request.currency === 'USD' ? 'XRP' : request.currency;
       const amount = currency === 'XRP' ? amountXrp : amountToken;
       
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
         wallet.xrpl_address,
         amount,
-        currency as 'XRP' | 'USDT' | 'USDC'
+        currency as 'XRP' | 'USDT' | 'USDC' | 'RLUSD'
       );
 
       // XRP: Use Xaman/XUMM flow
-      // USDT/USDC: Use MetaMask flow (no XUMM)
+      // USD-pegged tokens: Use MetaMask flow (no XUMM)
       let xummPayload = null;
       let xummError = null;
       
@@ -1899,7 +1910,7 @@ export class WalletService {
           console.log('XUMM not configured or error:', xummError);
         }
       } else {
-        // For USDT/USDC, use MetaMask (no XUMM)
+        // For USD-pegged tokens, use MetaMask (no XUMM)
         console.log(`Using MetaMask flow for ${currency} deposit`);
       }
 
@@ -2252,6 +2263,7 @@ export class WalletService {
               balance_xrp: balances.xrp,
               balance_usdt: balances.usdt,
               balance_usdc: balances.usdc,
+              balance_rlusd: balances.rlusd,
               updated_at: new Date().toISOString(),
             })
             .eq('user_id', userId)

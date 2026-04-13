@@ -58,7 +58,7 @@ router.post('/fund/submit', authenticate, asyncHandler(async (req, res) => {
  * @route   POST /api/wallet/fund
  * @desc    Fund wallet (deposit)
  * @access  Private
- * @body    { amount: number, currency: 'USD' | 'XRP' }
+ * @body    { amount: number, currency: 'USD' | 'XRP' | 'USDT' | 'USDC' | 'RLUSD' }
  */
 router.post('/fund', authenticate, asyncHandler(async (req, res) => {
   await walletController.fundWallet(req, res);

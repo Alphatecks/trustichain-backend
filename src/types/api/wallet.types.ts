@@ -11,7 +11,8 @@ export interface WalletBalanceResponse {
       xrp: number;
       usdt: number;
       usdc: number;
-      usd: number; // Total USD equivalent (XRP converted + USDT + USDC)
+      rlusd: number;
+      usd: number; // Total USD equivalent (XRP converted + USDT + USDC + RLUSD)
     };
     xrplAddress: string;
   };
@@ -83,7 +84,7 @@ export interface SwapExecuteResponse {
 
 export interface FundWalletRequest {
   amount: number;
-  currency: 'USD' | 'XRP' | 'USDT' | 'USDC';
+  currency: 'USD' | 'XRP' | 'USDT' | 'USDC' | 'RLUSD';
 }
 
 export interface FundWalletResponse {

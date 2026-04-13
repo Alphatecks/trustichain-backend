@@ -27,19 +27,26 @@ export class XRPLWalletService {
     ? 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY' // Circle (USDC) on mainnet - UPDATE with actual Circle issuer address
     : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet issuer - UPDATE with actual testnet issuer
 
+  private readonly RLUSD_ISSUER = this.XRPL_NETWORK === 'mainnet'
+    ? (process.env.RLUSD_ISSUER_MAINNET || '') // Must be configured in production
+    : (process.env.RLUSD_ISSUER_TESTNET || 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'); // Testnet fallback
+
   /**
    * Get issuer address for a given network
    */
-  private getIssuerForNetwork(network: 'testnet' | 'mainnet', token: 'USDT' | 'USDC'): string {
+  private getIssuerForNetwork(network: 'testnet' | 'mainnet', token: 'USDT' | 'USDC' | 'RLUSD'): string {
     if (token === 'USDT') {
       return network === 'mainnet'
         ? 'rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B' // Tether (USDT) on mainnet
         : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet issuer
-    } else {
+    } else if (token === 'USDC') {
       return network === 'mainnet'
         ? 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY' // Circle (USDC) on mainnet
         : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet issuer
     }
+    return network === 'mainnet'
+      ? (process.env.RLUSD_ISSUER_MAINNET || '')
+      : (process.env.RLUSD_ISSUER_TESTNET || 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY');
   }
 
   /**
@@ -254,7 +261,7 @@ export class XRPLWalletService {
   async preparePaymentTransaction(
     destinationAddress: string,
     amount: number,
-    currency: 'XRP' | 'USDT' | 'USDC'
+    currency: 'XRP' | 'USDT' | 'USDC' | 'RLUSD'
   ): Promise<{
     transaction: any;
     transactionBlob: string;
@@ -271,13 +278,20 @@ export class XRPLWalletService {
           Amount: xrpToDrops(amount.toString()),
         };
       } else {
-        // Token Payment (USDT or USDC)
-        const issuer = currency === 'USDT' ? this.USDT_ISSUER : this.USDC_ISSUER;
+        // Token Payment (USDT, USDC, or RLUSD)
+        const issuer = currency === 'USDT'
+          ? this.USDT_ISSUER
+          : currency === 'USDC'
+            ? this.USDC_ISSUER
+            : this.RLUSD_ISSUER;
+        if (currency === 'RLUSD' && !issuer) {
+          throw new Error('RLUSD issuer is not configured. Set RLUSD_ISSUER_MAINNET (and RLUSD_ISSUER_TESTNET for testnet).');
+        }
         paymentTx = {
           TransactionType: 'Payment',
           Destination: destinationAddress,
           Amount: {
-            currency: 'USD', // XRPL uses 'USD' for both USDT and USDC
+            currency: 'USD', // XRPL uses 'USD' for USDT/USDC/RLUSD
             value: amount.toString(),
             issuer: issuer,
           },
@@ -882,15 +896,26 @@ export class XRPLWalletService {
   }
 
   /**
-   * Get all balances (XRP, USDT, USDC) for an XRPL address
+   * Get RLUSD balance for an XRPL address
+   */
+  async getRLUSDBalance(xrplAddress: string): Promise<number> {
+    if (!this.RLUSD_ISSUER) {
+      return 0;
+    }
+    return this.getTokenBalance(xrplAddress, 'USD', this.RLUSD_ISSUER);
+  }
+
+  /**
+   * Get all balances (XRP, USDT, USDC, RLUSD) for an XRPL address
    */
   async getAllBalances(xrplAddress: string): Promise<{
     xrp: number;
     usdt: number;
     usdc: number;
+    rlusd: number;
   }> {
     try {
-      const [xrp, usdt, usdc] = await Promise.all([
+      const [xrp, usdt, usdc, rlusd] = await Promise.all([
         this.getBalance(xrplAddress).catch(err => {
           console.error('[XRPL] Error getting XRP balance:', err);
           return 0; // Return 0 for individual failures, but continue
@@ -903,6 +928,10 @@ export class XRPLWalletService {
           console.error('[XRPL] Error getting USDC balance:', err);
           return 0;
         }),
+        this.getRLUSDBalance(xrplAddress).catch(err => {
+          console.error('[XRPL] Error getting RLUSD balance:', err);
+          return 0;
+        }),
       ]);
 
       console.log('[XRPL] getAllBalances result:', {
@@ -910,6 +939,7 @@ export class XRPLWalletService {
         xrp,
         usdt,
         usdc,
+        rlusd,
         network: this.XRPL_NETWORK,
       });
 
@@ -917,6 +947,7 @@ export class XRPLWalletService {
         xrp,
         usdt,
         usdc,
+        rlusd,
       };
     } catch (error) {
       console.error('[XRPL] Critical error getting all balances:', {
@@ -929,6 +960,7 @@ export class XRPLWalletService {
         xrp: 0,
         usdt: 0,
         usdc: 0,
+        rlusd: 0,
       };
     }
   }

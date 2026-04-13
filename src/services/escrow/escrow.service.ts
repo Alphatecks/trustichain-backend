@@ -2916,6 +2916,7 @@ export class EscrowService {
                   balance_xrp: senderBalances.xrp,
                   balance_usdt: senderBalances.usdt,
                   balance_usdc: senderBalances.usdc,
+                  balance_rlusd: senderBalances.rlusd,
                   updated_at: new Date().toISOString(),
                 })
                 .eq('user_id', updatedEscrow.user_id);
@@ -2941,6 +2942,7 @@ export class EscrowService {
                     balance_xrp: receiverBalances.xrp,
                     balance_usdt: receiverBalances.usdt,
                     balance_usdc: receiverBalances.usdc,
+                    balance_rlusd: receiverBalances.rlusd,
                     updated_at: new Date().toISOString(),
                   })
                   .eq('user_id', updatedEscrow.counterparty_id);
@@ -3457,6 +3459,7 @@ export class EscrowService {
                   balance_xrp: senderBalances.xrp,
                   balance_usdt: senderBalances.usdt,
                   balance_usdc: senderBalances.usdc,
+                  balance_rlusd: senderBalances.rlusd,
                   updated_at: new Date().toISOString(),
                 })
                 .eq('user_id', updatedEscrow.user_id);
@@ -3482,6 +3485,7 @@ export class EscrowService {
                     balance_xrp: receiverBalances.xrp,
                     balance_usdt: receiverBalances.usdt,
                     balance_usdc: receiverBalances.usdc,
+                    balance_rlusd: receiverBalances.rlusd,
                     updated_at: new Date().toISOString(),
                   })
                   .eq('user_id', updatedEscrow.counterparty_id);
