@@ -11,7 +11,7 @@ export class PortfolioService {
     startIso: string,
     endIso: string
   ): Promise<{
-    data: Array<{ created_at: string; amount_usd: unknown }> | null;
+    data: Array<{ id: string; created_at: string; updated_at: string | null; amount_usd: unknown }> | null;
     error: string | null;
   }> {
     const adminClient = supabaseAdmin || supabase;
@@ -21,16 +21,19 @@ export class PortfolioService {
 
     const pageSize = 1000;
     let from = 0;
-    const allRows: Array<{ created_at: string; amount_usd: unknown }> = [];
+    const allRows: Array<{ id: string; created_at: string; updated_at: string | null; amount_usd: unknown }> = [];
 
     while (true) {
       const to = from + pageSize - 1;
       const { data, error } = await adminClient
         .from('escrows')
-        .select('created_at, amount_usd')
+        .select('id, created_at, updated_at, amount_usd')
         .or(participantAndScopeFilter)
-        .gte('created_at', startIso)
+        // Fetch escrows whose lifecycle overlaps the requested window.
+        // We then apply exact activity-month checks in memory to avoid missing
+        // escrows created before the year but updated within it.
         .lte('created_at', endIso)
+        .gte('updated_at', startIso)
         .order('created_at', { ascending: true })
         .range(from, to);
 
@@ -38,7 +41,7 @@ export class PortfolioService {
         return { data: null, error: error.message || 'Failed to fetch escrow totals' };
       }
 
-      const rows = (data || []) as Array<{ created_at: string; amount_usd: unknown }>;
+      const rows = (data || []) as Array<{ id: string; created_at: string; updated_at: string | null; amount_usd: unknown }>;
       allRows.push(...rows);
 
       if (rows.length < pageSize) break;
@@ -108,12 +111,39 @@ export class PortfolioService {
       const monthTotals = new Map<number, number>();
       for (let month = 0; month < 12; month++) monthTotals.set(month, 0);
 
+      const startMs = startDate.getTime();
+      const endMs = endDate.getTime();
+      const rowMonthSeen = new Set<string>();
+
       for (const row of escrows || []) {
-        const createdAt = new Date(row.created_at);
-        const month = createdAt.getUTCMonth();
         const amount = this.parseAmountUsd(row.amount_usd);
         if (!Number.isFinite(amount)) continue;
-        monthTotals.set(month, (monthTotals.get(month) || 0) + amount);
+
+        const activityMonths = new Set<number>();
+        const createdAt = new Date(row.created_at);
+        if (Number.isFinite(createdAt.getTime())) {
+          const createdMs = createdAt.getTime();
+          if (createdMs >= startMs && createdMs <= endMs && createdAt.getUTCFullYear() === targetYear) {
+            activityMonths.add(createdAt.getUTCMonth());
+          }
+        }
+
+        if (row.updated_at) {
+          const updatedAt = new Date(row.updated_at);
+          if (Number.isFinite(updatedAt.getTime())) {
+            const updatedMs = updatedAt.getTime();
+            if (updatedMs >= startMs && updatedMs <= endMs && updatedAt.getUTCFullYear() === targetYear) {
+              activityMonths.add(updatedAt.getUTCMonth());
+            }
+          }
+        }
+
+        for (const month of activityMonths) {
+          const seenKey = `${row.id}:${month}`;
+          if (rowMonthSeen.has(seenKey)) continue;
+          rowMonthSeen.add(seenKey);
+          monthTotals.set(month, (monthTotals.get(month) || 0) + amount);
+        }
       }
 
       // Keep chart length aligned to current UTC month for current year.
