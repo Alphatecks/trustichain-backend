@@ -788,6 +788,25 @@ export class AdminController {
     res.status(result.success ? 200 : 400).json(result);
   }
 
+  async uploadSettingsProfilePhoto(req: Request, res: Response<AdminSettingsProfileResponse>): Promise<void> {
+    const adminId = req.admin?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, message: 'Admin auth required', error: 'Unauthorized' });
+      return;
+    }
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({
+        success: false,
+        message: 'Image file is required (multipart field name: photo)',
+        error: 'Bad request',
+      });
+      return;
+    }
+    const result = await adminSettingsService.uploadProfilePhoto(adminId, file);
+    res.status(result.success ? 200 : 400).json(result);
+  }
+
   async removeSettingsProfilePhoto(req: Request, res: Response<AdminSettingsProfileResponse>): Promise<void> {
     const adminId = req.admin?.id;
     if (!adminId) {

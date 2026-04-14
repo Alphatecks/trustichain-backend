@@ -4,6 +4,7 @@
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { sendFcmToTokens } from '../../services/fcm.service';
+import { storageService } from '../../services/storage/storage.service';
 import type {
   AdminSettingsProfileResponse,
   AdminUpdateProfileRequest,
@@ -27,6 +28,13 @@ export class AdminSettingsService {
       console.warn('Admin settings using anon client; RLS may restrict.');
     }
     return client;
+  }
+
+  private async resolveAvatarUrl(stored: string | null | undefined): Promise<string | null> {
+    if (stored == null || !String(stored).trim()) return null;
+    const trimmed = String(stored).trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    return storageService.getSignedUrlForUserProfilePhoto(trimmed);
   }
 
   /**
@@ -54,7 +62,7 @@ export class AdminSettingsService {
         data: {
           fullName: row.full_name || '',
           email: row.email || '',
-          avatarUrl: row.avatar_url ?? null,
+          avatarUrl: await this.resolveAvatarUrl(row.avatar_url ?? null),
           emailNotificationsEnabled: row.email_notifications_enabled !== false,
           pushNotificationsEnabled: row.push_notifications_enabled !== false,
         },
@@ -119,6 +127,48 @@ export class AdminSettingsService {
       return {
         success: false,
         message: e instanceof Error ? e.message : 'Failed to update photo',
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Upload admin profile photo (multipart image) and update avatar_url.
+   */
+  async uploadProfilePhoto(
+    adminId: string,
+    file: Express.Multer.File
+  ): Promise<AdminSettingsProfileResponse> {
+    try {
+      const upload = await storageService.uploadUserProfilePhoto(adminId, file);
+      if (!upload.success || !upload.data?.fileUrl) {
+        return {
+          success: false,
+          message: upload.message || 'Upload failed',
+          error: upload.error || 'Upload failed',
+        };
+      }
+
+      const client = this.getClient();
+      const storedRef = upload.data.fileUrl;
+      const { error } = await client
+        .from('admins')
+        .update({ avatar_url: storedRef, updated_at: new Date().toISOString() })
+        .eq('id', adminId);
+      if (error) {
+        return {
+          success: false,
+          message: error.message || 'Failed to save profile photo',
+          error: error.message || 'Database error',
+        };
+      }
+
+      return this.getProfile(adminId);
+    } catch (e) {
+      console.error('Admin settings uploadProfilePhoto error:', e);
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to upload profile photo',
         error: e instanceof Error ? e.message : 'Unknown error',
       };
     }

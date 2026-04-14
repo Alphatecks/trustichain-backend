@@ -1,10 +1,15 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { adminController } from '../controllers/admin.controller';
 import { validateAdminLogin } from '../middleware/adminValidation';
 import { adminAuthenticate } from '../middleware/adminAuth';
 import { asyncHandler } from '../../utils/asyncHandler';
 
 const router = Router();
+const adminProfilePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
 
 /**
  * @route   POST /api/admin/login
@@ -490,6 +495,15 @@ router.get('/settings/profile', adminAuthenticate, asyncHandler(async (req, res)
  */
 router.put('/settings/profile', adminAuthenticate, asyncHandler(async (req, res) => {
   await adminController.updateSettingsProfile(req, res);
+}));
+
+/**
+ * @route   POST /api/admin/settings/profile/photo/upload
+ * @desc    Upload admin profile photo (multipart field "photo")
+ * @access  Private (admin)
+ */
+router.post('/settings/profile/photo/upload', adminAuthenticate, adminProfilePhotoUpload.single('photo'), asyncHandler(async (req, res) => {
+  await adminController.uploadSettingsProfilePhoto(req, res);
 }));
 
 /**
