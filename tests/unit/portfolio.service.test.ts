@@ -39,6 +39,8 @@ describe('PortfolioService personal monthly aggregation', () => {
       { id: 'escrow-b', created_at: '2024-02-05T12:00:00.000Z', updated_at: '2024-03-06T15:00:00.000Z', amount_usd: '200' },
       // Created and updated in Mar => counted only once in Mar.
       { id: 'escrow-c', created_at: '2024-03-08T09:00:00.000Z', updated_at: '2024-03-08T18:00:00.000Z', amount_usd: '1,250.50' },
+      // Created in Mar with null updated_at => must still count for Mar.
+      { id: 'escrow-d', created_at: '2024-03-15T09:00:00.000Z', updated_at: null, amount_usd: 50 },
     ];
 
     const query = createEscrowQueryMock(rows);
@@ -58,6 +60,6 @@ describe('PortfolioService personal monthly aggregation', () => {
 
     expect(jan?.value).toBe(100);
     expect(feb?.value).toBe(200);
-    expect(mar?.value).toBe(1450.5);
+    expect(mar?.value).toBe(1500.5);
   });
 });

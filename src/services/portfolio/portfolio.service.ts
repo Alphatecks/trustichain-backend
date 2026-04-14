@@ -8,7 +8,7 @@ import { supabase, supabaseAdmin } from '../../config/supabase';
 export class PortfolioService {
   private async fetchEscrowsForRange(
     userId: string,
-    startIso: string,
+    _startIso: string,
     endIso: string
   ): Promise<{
     data: Array<{ id: string; created_at: string; updated_at: string | null; amount_usd: unknown }> | null;
@@ -29,11 +29,9 @@ export class PortfolioService {
         .from('escrows')
         .select('id, created_at, updated_at, amount_usd')
         .or(participantAndScopeFilter)
-        // Fetch escrows whose lifecycle overlaps the requested window.
-        // We then apply exact activity-month checks in memory to avoid missing
-        // escrows created before the year but updated within it.
+        // Keep the SQL filter broad and do exact activity-month checks in memory.
+        // This avoids dropping rows when updated_at is null or not refreshed.
         .lte('created_at', endIso)
-        .gte('updated_at', startIso)
         .order('created_at', { ascending: true })
         .range(from, to);
 
