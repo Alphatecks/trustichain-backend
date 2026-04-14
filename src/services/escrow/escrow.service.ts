@@ -15,7 +15,7 @@ import { notificationService } from '../notification/notification.service';
 import { encryptionService } from '../encryption/encryption.service';
 import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
-import { getEscrowCreationFeeSettings, resolveEscrowCreationFeeUsdByType } from './escrowCreationFee.service';
+import { getEscrowCreationFeeSettings, resolveEscrowCreationFeePercentageByType } from './escrowCreationFee.service';
 
 async function resolveAvatarUrl(stored: string | null | undefined): Promise<string | null> {
   if (stored == null || !String(stored).trim()) return null;
@@ -624,7 +624,8 @@ export class EscrowService {
       }
 
       const feeSettings = await getEscrowCreationFeeSettings();
-      const creationFeeUsd = resolveEscrowCreationFeeUsdByType(escrowTransactionType, feeSettings);
+      const creationFeePercentage = resolveEscrowCreationFeePercentageByType(escrowTransactionType, feeSettings);
+      const creationFeeUsd = amountUsd * (Math.max(0, creationFeePercentage) / 100);
       const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / usdRate).toFixed(6)) : 0;
       const payableXrp = amountXrp + creationFeeXrp;
 
@@ -656,7 +657,7 @@ export class EscrowService {
         if (userBalanceXrp < requiredTotalXrp) {
           return {
             success: false,
-            message: `Insufficient XRP balance. You have ${userBalanceXrp.toFixed(6)} XRP but need ${requiredTotalXrp.toFixed(6)} XRP (${amountXrp.toFixed(6)} XRP escrow + ${creationFeeXrp.toFixed(6)} XRP creation fee + ${transactionFeeXrp.toFixed(6)} XRP network fee).`,
+            message: `Insufficient XRP balance. You have ${userBalanceXrp.toFixed(6)} XRP but need ${requiredTotalXrp.toFixed(6)} XRP (${amountXrp.toFixed(6)} XRP escrow + ${creationFeeXrp.toFixed(6)} XRP platform fee + ${transactionFeeXrp.toFixed(6)} XRP network fee).`,
             error: 'Insufficient balance',
           };
         }

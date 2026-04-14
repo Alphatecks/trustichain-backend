@@ -214,7 +214,7 @@ router.get('/escrow-management/stats', adminAuthenticate, asyncHandler(async (re
 
 /**
  * @route   GET /api/admin/escrow-management/fees
- * @desc    Platform escrow fee balance (XRP) from 10% of each escrow creation
+ * @desc    Platform escrow fee balance (XRP) accrued from configured escrow fee percentages
  * @access  Private (admin)
  */
 router.get('/escrow-management/fees', adminAuthenticate, asyncHandler(async (req, res) => {
@@ -530,7 +530,7 @@ router.put('/settings/notifications', adminAuthenticate, asyncHandler(async (req
 
 /**
  * @route   GET /api/admin/settings/escrow-fees
- * @desc    Get admin-configured escrow creation fees (USD) by type
+ * @desc    Get admin-configured escrow creation fee percentages by type
  * @access  Private (admin)
  */
 router.get('/settings/escrow-fees', adminAuthenticate, asyncHandler(async (req, res) => {
@@ -539,7 +539,7 @@ router.get('/settings/escrow-fees', adminAuthenticate, asyncHandler(async (req, 
 
 /**
  * @route   PUT /api/admin/settings/escrow-fees
- * @desc    Update escrow creation fees (USD). Body: personalFreelancerEscrowCreationFeeUsd, supplierEscrowCreationFeeUsd, payrollEscrowCreationFeeUsd
+ * @desc    Update escrow creation fee percentages. Body: personalFreelancerEscrowFeePercentage, supplierEscrowFeePercentage, payrollEscrowFeePercentage
  * @access  Private (admin)
  */
 router.put('/settings/escrow-fees', adminAuthenticate, asyncHandler(async (req, res) => {

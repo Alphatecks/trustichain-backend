@@ -328,8 +328,7 @@ export class BusinessSuitePayrollsService {
     }
 
     const feeSettings = await getEscrowCreationFeeSettings();
-    const payrollFeeUsd = Math.max(0, Number(feeSettings.payrollFeeUsd) || 0);
-    const payrollFeeXrpPerItem = payrollFeeUsd > 0 ? parseFloat((payrollFeeUsd / usdRate).toFixed(6)) : 0;
+    const payrollFeePercentage = Math.max(0, Number(feeSettings.payrollFeePercentage) || 0);
 
     const itemAmountsXrp: Array<{ item: any; amountUsd: number; amountXrp: number; creationFeeXrp: number }> = [];
     for (const item of items as any[]) {
@@ -351,7 +350,9 @@ export class BusinessSuitePayrollsService {
         };
       }
 
-      itemAmountsXrp.push({ item, amountUsd: usd, amountXrp, creationFeeXrp: payrollFeeXrpPerItem });
+      const payrollFeeUsd = usd * (payrollFeePercentage / 100);
+      const payrollFeeXrp = payrollFeeUsd > 0 ? parseFloat((payrollFeeUsd / usdRate).toFixed(6)) : 0;
+      itemAmountsXrp.push({ item, amountUsd: usd, amountXrp, creationFeeXrp: payrollFeeXrp });
     }
     const totalXrp = itemAmountsXrp.reduce((s, x) => s + x.amountXrp, 0);
     const totalCreationFeeXrp = itemAmountsXrp.reduce((s, x) => s + x.creationFeeXrp, 0);

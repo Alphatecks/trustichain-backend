@@ -14,7 +14,7 @@ export interface AdminEscrowManagementStats {
   completedCountChangePercent?: number;
   disputedCount: number;
   disputedCountChangePercent?: number;
-  /** Platform escrow fee balance (XRP) from 10% of each escrow creation; withdrawable by admin */
+  /** Platform escrow fee balance (XRP) from configured escrow fee percentages; withdrawable by admin */
   escrowFeesBalanceXrp: number;
 }
 

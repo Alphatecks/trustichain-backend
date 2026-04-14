@@ -15,10 +15,10 @@ import type {
 } from '../../types/api/adminSettings.types';
 
 export class AdminSettingsService {
-  private normalizeUsdFee(raw: unknown): number | null {
+  private normalizeFeePercentage(raw: unknown): number | null {
     const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) return null;
-    return parseFloat(n.toFixed(2));
+    if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+    return parseFloat(n.toFixed(4));
   }
 
   private getClient() {
@@ -275,7 +275,7 @@ export class AdminSettingsService {
       const client = this.getClient();
       const { data: row, error } = await client
         .from('platform_escrow_fee_settings')
-        .select('personal_freelancer_fee_usd, supplier_fee_usd, payroll_fee_usd, updated_at')
+        .select('personal_freelancer_fee_percentage, supplier_fee_percentage, payroll_fee_percentage, updated_at')
         .eq('id', 'default')
         .maybeSingle();
 
@@ -292,9 +292,9 @@ export class AdminSettingsService {
           success: true,
           message: 'Escrow fee settings retrieved',
           data: {
-            personalFreelancerEscrowCreationFeeUsd: 0,
-            supplierEscrowCreationFeeUsd: 0,
-            payrollEscrowCreationFeeUsd: 0,
+            personalFreelancerEscrowFeePercentage: 0,
+            supplierEscrowFeePercentage: 0,
+            payrollEscrowFeePercentage: 0,
           },
         };
       }
@@ -303,9 +303,9 @@ export class AdminSettingsService {
         success: true,
         message: 'Escrow fee settings retrieved',
         data: {
-          personalFreelancerEscrowCreationFeeUsd: Number(row.personal_freelancer_fee_usd) || 0,
-          supplierEscrowCreationFeeUsd: Number(row.supplier_fee_usd) || 0,
-          payrollEscrowCreationFeeUsd: Number(row.payroll_fee_usd) || 0,
+          personalFreelancerEscrowFeePercentage: Number(row.personal_freelancer_fee_percentage) || 0,
+          supplierEscrowFeePercentage: Number(row.supplier_fee_percentage) || 0,
+          payrollEscrowFeePercentage: Number(row.payroll_fee_percentage) || 0,
           updatedAt: row.updated_at || undefined,
         },
       };
@@ -320,21 +320,21 @@ export class AdminSettingsService {
   }
 
   /**
-   * Update escrow creation fee settings (USD values).
+   * Update escrow creation fee settings (percentage values).
    */
   async updateEscrowFeeSettings(
     adminId: string,
     body: AdminUpdateEscrowFeeSettingsRequest
   ): Promise<AdminEscrowFeeSettingsResponse> {
     try {
-      const personalFee = this.normalizeUsdFee(body.personalFreelancerEscrowCreationFeeUsd);
-      const supplierFee = this.normalizeUsdFee(body.supplierEscrowCreationFeeUsd);
-      const payrollFee = this.normalizeUsdFee(body.payrollEscrowCreationFeeUsd);
+      const personalFee = this.normalizeFeePercentage(body.personalFreelancerEscrowFeePercentage);
+      const supplierFee = this.normalizeFeePercentage(body.supplierEscrowFeePercentage);
+      const payrollFee = this.normalizeFeePercentage(body.payrollEscrowFeePercentage);
 
       if (personalFee == null || supplierFee == null || payrollFee == null) {
         return {
           success: false,
-          message: 'All fees must be valid non-negative numbers',
+          message: 'All fee percentages must be valid numbers between 0 and 100',
           error: 'Validation error',
         };
       }
@@ -344,9 +344,9 @@ export class AdminSettingsService {
         .from('platform_escrow_fee_settings')
         .upsert({
           id: 'default',
-          personal_freelancer_fee_usd: personalFee,
-          supplier_fee_usd: supplierFee,
-          payroll_fee_usd: payrollFee,
+          personal_freelancer_fee_percentage: personalFee,
+          supplier_fee_percentage: supplierFee,
+          payroll_fee_percentage: payrollFee,
           updated_by: adminId,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'id' });

@@ -57,9 +57,9 @@ export interface AdminSendPushResponse {
 }
 
 export interface AdminEscrowFeeSettings {
-  personalFreelancerEscrowCreationFeeUsd: number;
-  supplierEscrowCreationFeeUsd: number;
-  payrollEscrowCreationFeeUsd: number;
+  personalFreelancerEscrowFeePercentage: number;
+  supplierEscrowFeePercentage: number;
+  payrollEscrowFeePercentage: number;
   updatedAt?: string;
 }
 
@@ -71,7 +71,7 @@ export interface AdminEscrowFeeSettingsResponse {
 }
 
 export interface AdminUpdateEscrowFeeSettingsRequest {
-  personalFreelancerEscrowCreationFeeUsd: number;
-  supplierEscrowCreationFeeUsd: number;
-  payrollEscrowCreationFeeUsd: number;
+  personalFreelancerEscrowFeePercentage: number;
+  supplierEscrowFeePercentage: number;
+  payrollEscrowFeePercentage: number;
 }

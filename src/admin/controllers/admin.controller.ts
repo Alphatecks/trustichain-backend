@@ -851,28 +851,28 @@ export class AdminController {
     }
 
     const body = req.body as {
-      personalFreelancerEscrowCreationFeeUsd?: number;
-      supplierEscrowCreationFeeUsd?: number;
-      payrollEscrowCreationFeeUsd?: number;
+      personalFreelancerEscrowFeePercentage?: number;
+      supplierEscrowFeePercentage?: number;
+      payrollEscrowFeePercentage?: number;
     };
 
     if (
-      body.personalFreelancerEscrowCreationFeeUsd == null ||
-      body.supplierEscrowCreationFeeUsd == null ||
-      body.payrollEscrowCreationFeeUsd == null
+      body.personalFreelancerEscrowFeePercentage == null ||
+      body.supplierEscrowFeePercentage == null ||
+      body.payrollEscrowFeePercentage == null
     ) {
       res.status(400).json({
         success: false,
-        message: 'personalFreelancerEscrowCreationFeeUsd, supplierEscrowCreationFeeUsd, payrollEscrowCreationFeeUsd are required',
+        message: 'personalFreelancerEscrowFeePercentage, supplierEscrowFeePercentage, payrollEscrowFeePercentage are required',
         error: 'Bad request',
       });
       return;
     }
 
     const result = await adminSettingsService.updateEscrowFeeSettings(adminId, {
-      personalFreelancerEscrowCreationFeeUsd: Number(body.personalFreelancerEscrowCreationFeeUsd),
-      supplierEscrowCreationFeeUsd: Number(body.supplierEscrowCreationFeeUsd),
-      payrollEscrowCreationFeeUsd: Number(body.payrollEscrowCreationFeeUsd),
+      personalFreelancerEscrowFeePercentage: Number(body.personalFreelancerEscrowFeePercentage),
+      supplierEscrowFeePercentage: Number(body.supplierEscrowFeePercentage),
+      payrollEscrowFeePercentage: Number(body.payrollEscrowFeePercentage),
     });
 
     res.status(result.success ? 200 : 400).json(result);
