@@ -15,16 +15,20 @@ export class NotificationService {
     type: NotificationType;
     title: string;
     message: string;
+    /** Shorthand for structured data stored in DB `metadata` JSONB. */
+    details?: Record<string, any>;
     metadata?: Record<string, any>;
   }): Promise<void> {
     const adminClient = supabaseAdmin || supabase;
+    const merged = { ...(params.metadata || {}), ...(params.details || {}) };
+    const metadataValue = Object.keys(merged).length > 0 ? merged : null;
 
     await adminClient.from('notifications').insert({
       user_id: params.userId,
       type: params.type,
       title: params.title,
       message: params.message,
-      metadata: params.metadata || null,
+      metadata: metadataValue,
     });
 
     // Send FCM push to user's registered device tokens
@@ -37,8 +41,8 @@ export class NotificationService {
       if (tokens.length > 0) {
         const data: Record<string, string> = {
           type: params.type,
-          ...(params.metadata && Object.keys(params.metadata).length
-            ? { metadata: JSON.stringify(params.metadata) }
+          ...(metadataValue
+            ? { details: JSON.stringify(metadataValue), metadata: JSON.stringify(metadataValue) }
             : {}),
         };
         await sendFcmToTokens(tokens, {
@@ -147,15 +151,22 @@ export class NotificationService {
       }
 
       const notifications =
-        rows?.map((n: any) => ({
-          id: n.id,
-          type: n.type as NotificationType,
-          title: n.title,
-          message: n.message,
-          isRead: n.is_read,
-          createdAt: n.created_at,
-          metadata: n.metadata || undefined,
-        })) || [];
+        rows?.map((n: any) => {
+          const details =
+            n.metadata && typeof n.metadata === 'object' && !Array.isArray(n.metadata)
+              ? n.metadata
+              : undefined;
+          return {
+            id: n.id,
+            type: n.type as NotificationType,
+            title: n.title,
+            message: n.message,
+            isRead: n.is_read,
+            createdAt: n.created_at,
+            details,
+            metadata: details,
+          };
+        }) || [];
 
       return {
         success: true,

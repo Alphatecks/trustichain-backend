@@ -16,6 +16,9 @@ export interface NotificationItem {
   message: string;
   isRead: boolean;
   createdAt: string;
+  /** Structured payload (amounts, ids, tx hashes, etc.); same data as `metadata`, preferred name. */
+  details?: Record<string, any>;
+  /** @deprecated Use `details`; kept for clients that still read `metadata`. */
   metadata?: Record<string, any>;
 }
 
