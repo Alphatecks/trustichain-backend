@@ -12,6 +12,7 @@ import {
   SavingsSummaryResponse,
   SavingsCashflowResponse,
   SavingsWalletsResponse,
+  SavingsTotalWalletResponse,
   SavingsTransactionsResponse,
   SavingsTransactionDirection,
   SavingsTransferResponse,
@@ -416,6 +417,39 @@ export class SavingsService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get savings wallets',
         error: error instanceof Error ? error.message : 'Failed to get savings wallets',
+      };
+    }
+  }
+
+  /**
+   * Get total savings amount across all user savings wallets
+   * GET /api/savings/wallets/total
+   */
+  async getTotalWallet(userId: string): Promise<SavingsTotalWalletResponse> {
+    try {
+      const walletsResult = await this.getWallets(userId);
+      if (!walletsResult.success || !walletsResult.data) {
+        return {
+          success: false,
+          message: walletsResult.message || 'Failed to fetch total savings wallet',
+          error: walletsResult.error || 'Failed to fetch total savings wallet',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Total savings wallet retrieved successfully',
+        data: {
+          totalUsd: walletsResult.data.totalUsd,
+          walletCount: walletsResult.data.wallets.length,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting total savings wallet:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get total savings wallet',
+        error: error instanceof Error ? error.message : 'Failed to get total savings wallet',
       };
     }
   }

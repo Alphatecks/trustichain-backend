@@ -38,6 +38,19 @@ router.get(
 );
 
 /**
+ * @route   GET /api/savings/wallets/total
+ * @desc    Get total savings amount across all savings wallets
+ * @access  Private
+ */
+router.get(
+  '/wallets/total',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await savingsController.getTotalWallet(req, res);
+  })
+);
+
+/**
  * @route   GET /api/savings/wallets
  * @desc    Get list of savings wallets for the user
  * @access  Private

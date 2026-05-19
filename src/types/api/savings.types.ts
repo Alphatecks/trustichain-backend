@@ -56,6 +56,16 @@ export interface SavingsWalletsResponse {
   error?: string;
 }
 
+export interface SavingsTotalWalletResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    totalUsd: number;
+    walletCount: number;
+  };
+  error?: string;
+}
+
 export type SavingsTransactionDirection = 'received' | 'spent';
 
 export interface SavingsTransactionItem {
