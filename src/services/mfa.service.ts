@@ -4,6 +4,8 @@ import { supabaseAdmin } from '../config/supabase';
 
 const AES = 'aes-256-gcm';
 const MFA_LOGIN_TTL_SEC = 10 * 60; // 10 minutes
+const DEFAULT_TOTP_WINDOW_STEPS = 1;
+const MAX_TOTP_WINDOW_STEPS = 3;
 
 export interface MfaLoginPayload {
   userId: string;
@@ -80,6 +82,33 @@ function requireAdmin() {
     throw new Error('MFA requires Supabase service role (supabaseAdmin) to be configured.');
   }
   return supabaseAdmin;
+}
+
+/** Allow small clock drift between client authenticator app and server. */
+function getTotpWindowSteps(): number {
+  const raw = process.env.MFA_TOTP_WINDOW_STEPS;
+  if (raw == null || raw.trim() === '') {
+    return DEFAULT_TOTP_WINDOW_STEPS;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_TOTP_WINDOW_STEPS;
+  }
+  return Math.min(parsed, MAX_TOTP_WINDOW_STEPS);
+}
+
+function verifyTotp(secret: string, token: string): boolean {
+  const window = getTotpWindowSteps();
+  const periodSeconds = 30;
+  const toleranceSeconds = window * periodSeconds;
+  const result = verifySync({
+    secret,
+    token,
+    period: periodSeconds,
+    // Accept the current code plus a small past/future tolerance to handle skew.
+    epochTolerance: [toleranceSeconds, toleranceSeconds],
+  });
+  return result.valid;
 }
 
 export class MfaService {
@@ -196,12 +225,8 @@ export class MfaService {
       return { success: false, message: 'Failed to read pending secret', error: 'Decryption failed' };
     }
 
-    const result = verifySync({
-      secret: secretPlain,
-      token: normalized,
-    });
-
-    if (!result.valid) {
+    const isValid = verifyTotp(secretPlain, normalized);
+    if (!isValid) {
       return { success: false, message: 'Invalid authenticator code', error: 'Invalid code' };
     }
 
@@ -264,12 +289,8 @@ export class MfaService {
       return { success: false, message: 'Failed to read MFA secret', error: 'Decryption failed' };
     }
 
-    const result = verifySync({
-      secret: secretPlain,
-      token: normalized,
-    });
-
-    if (!result.valid) {
+    const isValid = verifyTotp(secretPlain, normalized);
+    if (!isValid) {
       return { success: false, message: 'Invalid authenticator code', error: 'Invalid code' };
     }
 
@@ -322,11 +343,7 @@ export class MfaService {
       return false;
     }
 
-    const result = verifySync({
-      secret: secretPlain,
-      token: normalized,
-    });
-    return result.valid;
+    return verifyTotp(secretPlain, normalized);
   }
 
 }
