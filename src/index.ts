@@ -21,12 +21,20 @@ import cardyfieRoutes from './routes/cardyfie.routes';
 import businessSuiteRoutes from './routes/businessSuite.routes';
 import lookupRoutes from './routes/lookup.routes';
 import cronRoutes from './routes/cron.routes';
+import paymentsRoutes from './routes/payments.routes';
 import adminRoutes from './admin/routes/admin.routes';
+import { paymentsController } from './controllers/payments.controller';
+import { asyncHandler } from './utils/asyncHandler';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Stripe webhooks must be parsed as raw payload before JSON middleware
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+  await paymentsController.handleStripeWebhook(req, res);
+}));
 
 // Middleware
 app.use(cors());
@@ -229,6 +237,7 @@ app.use('/api/cardyfie', cardyfieRoutes);
 app.use('/api/business-suite', businessSuiteRoutes);
 app.use('/api/lookup', lookupRoutes);
 app.use('/api/cron', cronRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // Incoming webhook receiver (e.g. when dashboard URL is set to this server: https://yourserver.com/webhooks/trustichain)
 app.post('/webhooks/trustichain', (req: Request, res: Response) => {
