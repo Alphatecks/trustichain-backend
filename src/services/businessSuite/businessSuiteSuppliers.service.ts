@@ -49,6 +49,14 @@ export interface CreateSupplierRequest {
 }
 
 export class BusinessSuiteSuppliersService {
+  private normalizeCompanyName(value: string): string {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ');
+  }
+
   /**
    * Create a new supplier. POST /api/business-suite/suppliers
    * Supports Add supplier UI: name, walletAddress, country, kycStatus, contractType, tags.
@@ -246,8 +254,7 @@ export class BusinessSuiteSuppliersService {
       businessSuiteService.getBusinessId(userId),
       client
         .from('businesses')
-        .select('id, company_name')
-        .eq('status', 'Verified')
+        .select('id, company_name, status')
         .not('company_name', 'is', null)
         .ilike('company_name', `%${trimmedQuery}%`)
         .limit(100),
@@ -257,22 +264,35 @@ export class BusinessSuiteSuppliersService {
       return { success: false, message: error.message || 'Failed to fetch supplier suggestions', error: error.message };
     }
 
-    const loweredQuery = trimmedQuery.toLowerCase();
+    const normalizedQuery = this.normalizeCompanyName(trimmedQuery);
     const items: SupplierAutocompleteItem[] = (rows || [])
       .filter((row) => row.company_name && row.id && row.id !== ownBusinessId)
-      .map((row) => ({
-        businessId: row.id as string,
-        companyName: String(row.company_name).trim(),
-      }))
+      .map((row) => {
+        const companyName = String(row.company_name).trim();
+        const normalizedName = this.normalizeCompanyName(companyName);
+        const status = typeof (row as any).status === 'string' ? String((row as any).status) : '';
+        const isVerified = status.toLowerCase() === 'verified';
+        const startsWith = normalizedName.startsWith(normalizedQuery);
+        const includes = normalizedName.includes(normalizedQuery);
+        const score = startsWith ? 0 : includes ? 1 : 2;
+        return {
+          businessId: row.id as string,
+          companyName,
+          normalizedName,
+          score,
+          isVerified,
+        };
+      })
+      .filter((item) => item.normalizedName.includes(normalizedQuery))
       .filter((item) => item.companyName.length > 0)
       .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        if (a.isVerified !== b.isVerified) return a.isVerified ? -1 : 1;
         const aName = a.companyName.toLowerCase();
         const bName = b.companyName.toLowerCase();
-        const aStarts = aName.startsWith(loweredQuery);
-        const bStarts = bName.startsWith(loweredQuery);
-        if (aStarts !== bStarts) return aStarts ? -1 : 1;
         return aName.localeCompare(bName);
       })
+      .map(({ businessId, companyName }) => ({ businessId, companyName }))
       .slice(0, cappedLimit);
 
     return {
