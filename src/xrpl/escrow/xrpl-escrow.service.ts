@@ -17,10 +17,19 @@ console.log('[XRPL] Using server:', XRPL_SERVER);
 export class XRPLEscrowService {
   private readonly XRPL_NETWORK = XRPL_NETWORK;
   private readonly XRPL_SERVER = XRPL_SERVER;
+  private readonly XRP_DECIMAL_PLACES = 6;
 
   constructor() {
     console.log('[XRPL] Using network:', this.XRPL_NETWORK);
     console.log('[XRPL] Using server:', this.XRPL_SERVER);
+  }
+
+  private formatXrpAmountForDrops(amountXrp: number): string {
+    const normalized = Number(amountXrp);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      throw new Error('Invalid XRP amount. Amount must be greater than 0.');
+    }
+    return normalized.toFixed(this.XRP_DECIMAL_PLACES);
   }
 
   /**
@@ -203,7 +212,7 @@ export class XRPLEscrowService {
           TransactionType: 'EscrowCreate',
           Account: wallet.classicAddress,
           Destination: params.toAddress,
-          Amount: xrpToDrops(params.amountXrp.toString()),
+          Amount: xrpToDrops(this.formatXrpAmountForDrops(params.amountXrp)),
         };
 
         if (params.finishAfter) {
@@ -1524,7 +1533,7 @@ export class XRPLEscrowService {
         TransactionType: 'EscrowCreate',
         Account: params.fromAddress,
         Destination: params.toAddress,
-        Amount: xrpToDrops(params.amountXrp.toString()),
+        Amount: xrpToDrops(this.formatXrpAmountForDrops(params.amountXrp)),
       };
 
       if (params.finishAfter) {

@@ -25,6 +25,10 @@ async function resolveAvatarUrl(stored: string | null | undefined): Promise<stri
 }
 
 export class EscrowService {
+  private normalizeXrpAmount(value: number): number {
+    return parseFloat(value.toFixed(6));
+  }
+
   /**
    * Format escrow ID as #ESC-YYYY-XXX
    */
@@ -622,12 +626,14 @@ export class EscrowService {
       } else {
         amountUsd = escrowAmount * usdRate;
       }
+      amountXrp = this.normalizeXrpAmount(amountXrp);
+      amountUsd = parseFloat(amountUsd.toFixed(2));
 
       const feeSettings = await getEscrowCreationFeeSettings();
       const creationFeePercentage = resolveEscrowCreationFeePercentageByType(escrowTransactionType, feeSettings);
       const creationFeeUsd = amountUsd * (Math.max(0, creationFeePercentage) / 100);
       const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / usdRate).toFixed(6)) : 0;
-      const payableXrp = amountXrp + creationFeeXrp;
+      const payableXrp = this.normalizeXrpAmount(amountXrp + creationFeeXrp);
 
       // Use user's wallet address (payerWallet already fetched above)
       const userWalletAddress = payerWallet.xrpl_address;
