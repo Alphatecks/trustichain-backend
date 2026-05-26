@@ -230,17 +230,16 @@ export class BusinessSuiteSuppliersService {
     }
 
     const trimmedQuery = typeof query === 'string' ? query.trim() : '';
-    if (trimmedQuery.length < 2) {
+    if (trimmedQuery.length < 1) {
       return {
         success: true,
-        message: 'Type at least 2 characters',
+        message: 'Type at least 1 character',
         data: { items: [] },
       };
     }
 
     const rawLimit = limit === undefined || limit === null || !Number.isFinite(Number(limit)) ? 10 : Math.floor(Number(limit));
     const cappedLimit = Math.min(20, Math.max(1, rawLimit));
-    const escaped = trimmedQuery.replace(/[%_]/g, '\\$&');
     const client = supabaseAdmin!;
 
     const [ownBusinessId, { data: rows, error }] = await Promise.all([
@@ -250,7 +249,7 @@ export class BusinessSuiteSuppliersService {
         .select('id, company_name')
         .eq('status', 'Verified')
         .not('company_name', 'is', null)
-        .ilike('company_name', `%${escaped}%`)
+        .ilike('company_name', `%${trimmedQuery}%`)
         .limit(100),
     ]);
 

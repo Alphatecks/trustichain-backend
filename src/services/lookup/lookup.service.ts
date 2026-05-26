@@ -16,6 +16,7 @@ export interface BusinessEmailByNameResult {
   success: boolean;
   message: string;
   data?: {
+    matchedBusinessName?: string | null;
     businessEmail: string | null;
     hasBusinessEmail: boolean;
     businessXrpAddress: string | null;
@@ -25,6 +26,10 @@ export interface BusinessEmailByNameResult {
 }
 
 export class LookupService {
+  private normalizeBusinessName(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
   /**
    * Get business (company) name for the user account associated with the given email.
    * Uses businesses.company_name, with fallback to business_suite_kyc.company_name.
@@ -142,18 +147,39 @@ export class LookupService {
     }
 
     try {
+      const normalizedInput = this.normalizeBusinessName(trimmed);
       const { data: businesses } = await client
         .from('businesses')
         .select('id, owner_user_id, company_name, business_email')
-        .not('company_name', 'is', null);
-      const biz = (businesses || []).find(
-        (b) => b.company_name && b.company_name.trim().toLowerCase() === trimmed.toLowerCase()
-      );
+        .not('company_name', 'is', null)
+        .ilike('company_name', `%${trimmed}%`)
+        .limit(50);
+
+      const ranked = (businesses || [])
+        .filter((b) => b.company_name && String(b.company_name).trim().length > 0)
+        .map((b) => {
+          const companyName = String(b.company_name).trim();
+          const normalizedName = this.normalizeBusinessName(companyName);
+          const isExact = normalizedName === normalizedInput;
+          const startsWith = normalizedName.startsWith(normalizedInput);
+          const includes = normalizedName.includes(normalizedInput);
+          const score = isExact ? 0 : startsWith ? 1 : includes ? 2 : 3;
+          return { ...b, companyName, normalizedName, score };
+        })
+        .filter((b) => b.score < 3)
+        .sort((a, b) => {
+          if (a.score !== b.score) return a.score - b.score;
+          if (a.companyName.length !== b.companyName.length) return a.companyName.length - b.companyName.length;
+          return a.companyName.localeCompare(b.companyName);
+        });
+
+      const biz = ranked[0];
       if (!biz) {
         return {
           success: true,
           message: 'No business found with that name',
           data: {
+            matchedBusinessName: null,
             businessEmail: null,
             hasBusinessEmail: false,
             businessXrpAddress: null,
@@ -174,10 +200,22 @@ export class LookupService {
           .eq('user_id', ownerUserId)
           .eq('suite_context', 'business')
           .maybeSingle();
-        businessXrpAddress =
-          wallet?.xrpl_address && String(wallet.xrpl_address).trim().length > 0
-            ? String(wallet.xrpl_address).trim()
-            : null;
+        if (wallet?.xrpl_address && String(wallet.xrpl_address).trim().length > 0) {
+          businessXrpAddress = String(wallet.xrpl_address).trim();
+        } else {
+          // Fallback for older rows that may not have suite_context populated.
+          const { data: fallbackWallet } = await client
+            .from('wallets')
+            .select('xrpl_address')
+            .eq('user_id', ownerUserId)
+            .not('xrpl_address', 'is', null)
+            .limit(1)
+            .maybeSingle();
+          businessXrpAddress =
+            fallbackWallet?.xrpl_address && String(fallbackWallet.xrpl_address).trim().length > 0
+              ? String(fallbackWallet.xrpl_address).trim()
+              : null;
+        }
       }
       const hasBusinessXrpAddress = businessXrpAddress != null;
 
@@ -186,6 +224,7 @@ export class LookupService {
           success: true,
           message: 'This business email is not set',
           data: {
+            matchedBusinessName: biz.companyName,
             businessEmail: null,
             hasBusinessEmail: false,
             businessXrpAddress,
@@ -198,6 +237,7 @@ export class LookupService {
         success: true,
         message: 'Business email and XRP address retrieved',
         data: {
+          matchedBusinessName: biz.companyName,
           businessEmail,
           hasBusinessEmail: true,
           businessXrpAddress,

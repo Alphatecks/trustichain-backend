@@ -41,7 +41,14 @@ export class LookupController {
    */
   async getBusinessEmailByName(req: Request, res: Response): Promise<void> {
     try {
-      const businessName = (req.query.businessName as string) ?? (req.query.business_name as string) ?? (req.body?.business_name as string) ?? '';
+      const businessName =
+        (req.query.businessName as string) ??
+        (req.query.business_name as string) ??
+        (req.query.q as string) ??
+        (req.query.query as string) ??
+        (req.body?.business_name as string) ??
+        (req.body?.businessName as string) ??
+        '';
       const result = await lookupService.getBusinessEmailByName(businessName);
 
       if (!result.success) {
