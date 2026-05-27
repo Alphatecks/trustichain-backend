@@ -1268,6 +1268,11 @@ export class BusinessSuiteController {
         data: { balance: result.data.balance },
         xrplAddress: result.xrpl_address ?? '',
         rlusdAddress: result.rlusd_xrpl_address ?? '',
+        depositAddresses: result.deposit_addresses ?? {
+          xrp: result.xrpl_address ?? '',
+          rlusd: result.rlusd_xrpl_address ?? result.xrpl_address ?? '',
+        },
+        stablecoinAddresses: result.stablecoin_addresses ?? { USDT: {}, USDC: {} },
       });
     } else {
       res.status(200).json({

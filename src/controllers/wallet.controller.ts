@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { walletService } from '../services/wallet/wallet.service';
+import { multichainWalletService } from '../services/wallet/multichain-wallet.service';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
 
 
@@ -17,6 +18,12 @@ export class WalletController {
           },
           xrplAddress: result.xrpl_address ?? '',
           rlusdAddress: result.rlusd_xrpl_address ?? '',
+          depositAddresses: result.deposit_addresses ?? {
+            xrp: result.xrpl_address ?? '',
+            rlusd: result.rlusd_xrpl_address ?? result.xrpl_address ?? '',
+          },
+          stablecoinAddresses: result.stablecoin_addresses ?? { USDT: {}, USDC: {} },
+          multichainNetwork: result.multichain_network,
         });
       } else {
         res.json({
@@ -399,7 +406,7 @@ export class WalletController {
       if (currency && currency !== 'XRP' && currency !== 'RLUSD') {
         res.json({
           success: false,
-          message: 'Invalid currency. Currency must be either "XRP" or "RLUSD" for Xaman deposits.',
+          message: 'Xaman supports XRP and RLUSD only. Use GET /api/wallet/deposit-address for USDT/USDC.',
           error: 'Invalid currency',
         });
         return;
@@ -413,6 +420,37 @@ export class WalletController {
         message: errorMessage,
         error: 'Internal server error',
       });
+    }
+  }
+
+  async getDepositAddress(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const asset = String(req.query.asset ?? '').toUpperCase();
+      const network = String(req.query.network ?? '').toUpperCase();
+      if (!asset || !network) {
+        res.status(400).json({
+          success: false,
+          message: 'Query params asset (USDT|USDC) and network (ERC20|TRC20|BEP20|SOLANA) are required',
+        });
+        return;
+      }
+      const result = await walletService.getStablecoinDepositAddress(
+        userId,
+        asset,
+        network
+      );
+      if (result.success) {
+        res.json({
+          ...result,
+          multichainNetwork: multichainWalletService.getNetworkInfo(),
+        });
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({ success: false, message: errorMessage, error: 'Internal server error' });
     }
   }
 

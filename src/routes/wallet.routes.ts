@@ -15,6 +15,16 @@ router.get('/balance', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/wallet/deposit-address
+ * @desc    Deposit address for USDT (ERC20|TRC20|BEP20) or USDC (BEP20|SOLANA)
+ * @access  Private
+ * @query   asset=USDT|USDC, network=ERC20|TRC20|BEP20|SOLANA
+ */
+router.get('/deposit-address', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getDepositAddress(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/swap/quote
  * @desc    Get quote for swapping between XRP, USDT, and USDC
  * @access  Private
@@ -154,9 +164,9 @@ router.get('/connect/xumm/status', authenticate, asyncHandler(async (req, res) =
 
 /**
  * @route   POST /api/wallet/fund/xumm
- * @desc    Fund wallet via XUMM (Xaman app) - debits XRP or RLUSD from user's Xaman wallet
+ * @desc    Fund wallet via XUMM (Xaman app) - XRP or RLUSD only
  * @access  Private
- * @body    { amount: number, currency?: 'XRP' | 'RLUSD' } (currency defaults to XRP)
+ * @body    { amount: number, currency?: 'XRP' | 'RLUSD' } (defaults to XRP)
  */
 router.post('/fund/xumm', authenticate, asyncHandler(async (req, res) => {
   await walletController.fundWalletViaXUMM(req, res);

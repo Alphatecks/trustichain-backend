@@ -16,6 +16,8 @@ export interface WalletBalanceResponse {
     };
     xrplAddress: string;
     rlusdAddress?: string;
+    depositAddresses?: WalletXrplDepositAddresses;
+    stablecoinAddresses?: StablecoinDepositAddressMap;
   };
   error?: string;
 }
@@ -109,6 +111,7 @@ export interface FundWalletResponse {
     walletType?: 'xaman' | 'metamask' | 'browser';
     note?: string;
     status: string;
+    stablecoinAddresses?: StablecoinDepositAddressMap;
   };
   error?: string;
 }
@@ -230,9 +233,21 @@ export interface ConnectXUMMStatusResponse {
   error?: string;
 }
 
+export type WalletFundingCurrency = 'XRP' | 'RLUSD' | 'USDT' | 'USDC';
+
+export interface WalletXrplDepositAddresses {
+  xrp: string;
+  rlusd: string;
+}
+
+export interface StablecoinDepositAddressMap {
+  USDT: Partial<Record<'ERC20' | 'TRC20' | 'BEP20', string>>;
+  USDC: Partial<Record<'BEP20' | 'SOLANA', string>>;
+}
+
 export interface FundXUMMRequest {
   amount: number;
-  currency?: 'XRP' | 'RLUSD'; // Defaults to XRP
+  currency?: WalletFundingCurrency; // Defaults to XRP
 }
 
 export interface FundXUMMResponse {

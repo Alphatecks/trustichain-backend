@@ -23,10 +23,34 @@ import { encryptionService } from '../encryption/encryption.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 import { businessSuiteService } from '../businessSuite/businessSuite.service';
+import {
+  multichainWalletService,
+  type MultichainNetworkInfo,
+  type StablecoinDepositAddressMap,
+} from './multichain-wallet.service';
 
 export type WalletSuiteContext = 'personal' | 'business';
 
+type WalletDepositCurrency = 'XRP' | 'RLUSD';
+
 export class WalletService {
+  private buildXrplDepositAddresses(wallet: {
+    xrpl_address: string | null;
+    rlusd_xrpl_address?: string | null;
+  }): { xrp: string; rlusd: string } {
+    const main = wallet.xrpl_address ?? '';
+    return { xrp: main, rlusd: wallet.rlusd_xrpl_address || main };
+  }
+
+  private resolveDepositAddress(
+    wallet: { xrpl_address: string | null; rlusd_xrpl_address?: string | null },
+    currency: WalletDepositCurrency
+  ): string | null {
+    if (currency === 'RLUSD') {
+      return wallet.rlusd_xrpl_address || wallet.xrpl_address;
+    }
+    return wallet.xrpl_address;
+  }
   /**
    * Get wallet balance for a user. Use suiteContext 'business' for business suite (separate wallet).
    */
@@ -44,6 +68,9 @@ export class WalletService {
     };
     xrpl_address?: string | null;
     rlusd_xrpl_address?: string | null;
+    deposit_addresses?: { xrp: string; rlusd: string };
+    stablecoin_addresses?: StablecoinDepositAddressMap;
+    multichain_network?: MultichainNetworkInfo;
     error?: string;
   }> {
     try {
@@ -64,6 +91,11 @@ export class WalletService {
         .eq('user_id', userId)
         .eq('suite_context', suiteContext)
         .maybeSingle();
+
+      const loadStablecoinAddresses = async (walletId: string) => {
+        await multichainWalletService.provisionDepositAddresses(userId, walletId, suiteContext);
+        return multichainWalletService.getStablecoinDepositAddresses(userId, suiteContext);
+      };
 
       if (error) {
         console.error('Error fetching wallet:', error);
@@ -131,6 +163,7 @@ export class WalletService {
             const usdc = updatedWallet.balance_usdc ?? 0;
             const rlusd = updatedWallet.balance_rlusd ?? 0;
             const usd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
+            const stablecoin_addresses = await loadStablecoinAddresses(wallet.id);
             return {
               success: true,
               message: 'Balance retrieved successfully',
@@ -145,6 +178,12 @@ export class WalletService {
               },
               xrpl_address: wallet.xrpl_address,
               rlusd_xrpl_address: resolvedRlusdAddress,
+              deposit_addresses: this.buildXrplDepositAddresses({
+                xrpl_address: wallet.xrpl_address,
+                rlusd_xrpl_address: resolvedRlusdAddress,
+              }),
+              stablecoin_addresses,
+              multichain_network: multichainWalletService.getNetworkInfo(),
             };
           }
         } catch (syncError) {
@@ -159,6 +198,7 @@ export class WalletService {
       const usdc = wallet.balance_usdc ?? 0;
       const rlusd = wallet.balance_rlusd ?? 0;
       const usd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
+      const stablecoin_addresses = await loadStablecoinAddresses(wallet.id);
       return {
         success: true,
         message: 'Balance retrieved successfully',
@@ -173,6 +213,12 @@ export class WalletService {
         },
         xrpl_address: wallet.xrpl_address ?? null,
         rlusd_xrpl_address: resolvedRlusdAddress,
+        deposit_addresses: this.buildXrplDepositAddresses({
+          xrpl_address: wallet.xrpl_address,
+          rlusd_xrpl_address: resolvedRlusdAddress,
+        }),
+        stablecoin_addresses,
+        multichain_network: multichainWalletService.getNetworkInfo(),
       };
     } catch (error) {
       console.error('Error getting wallet balance:', error);
@@ -490,11 +536,12 @@ export class WalletService {
       const adminClient = supabaseAdmin || supabase;
       const { data: existing } = await adminClient
         .from('wallets')
-        .select('xrpl_address, rlusd_xrpl_address')
+        .select('id, xrpl_address, rlusd_xrpl_address')
         .eq('user_id', userId)
         .eq('suite_context', suiteContext)
         .maybeSingle();
       if (existing?.xrpl_address) {
+        await multichainWalletService.provisionDepositAddresses(userId, existing.id, suiteContext);
         if (!existing.rlusd_xrpl_address) {
           const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
           const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
@@ -523,7 +570,7 @@ export class WalletService {
       const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
       const encryptedSecret = encryptionService.encrypt(secret);
       const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
-      const { error: insertError } = await adminClient
+      const { data: inserted, error: insertError } = await adminClient
         .from('wallets')
         .insert({
           user_id: userId,
@@ -536,14 +583,17 @@ export class WalletService {
           balance_usdc: 0,
           balance_rlusd: 0,
           suite_context: suiteContext,
-        });
-      if (insertError) {
+        })
+        .select('id')
+        .single();
+      if (insertError || !inserted) {
         return {
           success: false,
           message: 'Failed to create wallet',
-          error: insertError.message || 'Database insert failed',
+          error: insertError?.message || 'Database insert failed',
         };
       }
+      await multichainWalletService.provisionDepositAddresses(userId, inserted.id, suiteContext);
       return {
         success: true,
         message: 'Wallet created successfully',
@@ -629,6 +679,70 @@ export class WalletService {
   }
 
   /**
+   * Deposit address for USDT / USDC on a specific network (non-XRPL).
+   */
+  async getStablecoinDepositAddress(
+    userId: string,
+    asset: string,
+    network: string,
+    suiteContext: WalletSuiteContext = 'personal'
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { asset: string; network: string; address: string };
+    error?: string;
+  }> {
+    const assetUpper = asset.toUpperCase();
+    const networkUpper = network.toUpperCase();
+    if (!multichainWalletService.validateAssetNetwork(assetUpper, networkUpper)) {
+      return {
+        success: false,
+        message:
+          'Invalid pair. USDT: ERC20, TRC20, BEP20. USDC: BEP20, SOLANA.',
+        error: 'Invalid asset/network',
+      };
+    }
+
+    const adminClient = supabaseAdmin || supabase;
+    const { data: wallet } = await adminClient
+      .from('wallets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('suite_context', suiteContext)
+      .maybeSingle();
+
+    if (!wallet) {
+      return {
+        success: false,
+        message: 'Wallet not found. Create a wallet first.',
+        error: 'Wallet not found',
+      };
+    }
+
+    await multichainWalletService.provisionDepositAddresses(userId, wallet.id, suiteContext);
+    const result = await multichainWalletService.getDepositAddress(
+      userId,
+      assetUpper as 'USDT' | 'USDC',
+      networkUpper as 'ERC20' | 'TRC20' | 'BEP20' | 'SOLANA',
+      suiteContext
+    );
+
+    if (!result.success || !result.address) {
+      return {
+        success: false,
+        message: result.message ?? 'Deposit address not available',
+        error: result.error,
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Deposit address retrieved',
+      data: { asset: assetUpper, network: networkUpper, address: result.address },
+    };
+  }
+
+  /**
    * Fund wallet via XUMM (Xaman app)
    * Creates a XUMM payload for the user to sign a payment transaction
    * This will debit XRP or RLUSD from the user's Xaman wallet to their connected wallet address
@@ -680,14 +794,20 @@ export class WalletService {
       if (currency !== 'XRP' && currency !== 'RLUSD') {
         return {
           success: false,
-          message: 'Invalid currency. Only XRP and RLUSD are supported for Xaman deposits.',
+          message:
+            'Xaman funding supports XRP and RLUSD only. For USDT (ERC-20/TRC-20/BEP-20) or USDC (BEP-20/Solana), use GET /api/wallet/deposit-address.',
           error: 'Invalid currency',
         };
       }
 
-      const destinationAddress = currency === 'RLUSD'
-        ? (wallet.rlusd_xrpl_address || wallet.xrpl_address)
-        : wallet.xrpl_address;
+      const destinationAddress = this.resolveDepositAddress(wallet, currency);
+      if (!destinationAddress) {
+        return {
+          success: false,
+          message: 'Wallet address not found. Create or connect a wallet first.',
+          error: 'Missing wallet address',
+        };
+      }
 
       // Prepare payment transaction (from user's Xaman wallet to their connected wallet)
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
@@ -702,7 +822,7 @@ export class WalletService {
       if (currency === 'RLUSD') {
         const exchangeRates = await exchangeService.getLiveExchangeRates();
         if (!exchangeRates.success || !exchangeRates.data) {
-          throw new Error('Failed to fetch exchange rates for RLUSD conversion');
+          throw new Error(`Failed to fetch exchange rates for ${currency} conversion`);
         }
         const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
         if (!usdRate || usdRate <= 0) {
@@ -710,6 +830,14 @@ export class WalletService {
         }
         amountXrp = request.amount / usdRate;
         amountUsd = request.amount;
+      } else if (currency === 'XRP') {
+        const exchangeRates = await exchangeService.getLiveExchangeRates();
+        if (exchangeRates.success && exchangeRates.data) {
+          const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
+          if (usdRate && usdRate > 0) {
+            amountUsd = request.amount * usdRate;
+          }
+        }
       }
 
       // Create XUMM payload
@@ -1913,6 +2041,7 @@ export class WalletService {
       walletType?: 'xaman' | 'metamask' | 'browser';
       note?: string;
       status: string;
+      stablecoinAddresses?: StablecoinDepositAddressMap;
     };
     error?: string;
   }> {
@@ -1932,6 +2061,24 @@ export class WalletService {
           success: false,
           message: 'Wallet not found',
           error: 'Wallet not found',
+        };
+      }
+
+      if (request.currency === 'USDT' || request.currency === 'USDC') {
+        await multichainWalletService.provisionDepositAddresses(userId, wallet.id, 'personal');
+        const stablecoinAddresses =
+          await multichainWalletService.getStablecoinDepositAddresses(userId, 'personal');
+        return {
+          success: true,
+          message:
+            'USDT and USDC deposit on ERC-20, TRC-20, BEP-20, or Solana. Send from your external wallet to the address for the network you selected in the app.',
+          data: {
+            transactionId: '',
+            amount: { usd: request.amount, xrp: 0 },
+            currency: request.currency,
+            stablecoinAddresses,
+            status: 'awaiting_onchain_deposit',
+          },
         };
       }
 
@@ -1960,7 +2107,7 @@ export class WalletService {
           throw new Error('XRP/USD exchange rate not available');
         }
         amountUsd = request.amount * usdRate;
-      } else if (request.currency === 'USDT' || request.currency === 'USDC' || request.currency === 'RLUSD') {
+      } else if (request.currency === 'RLUSD') {
         // For USD-pegged tokens, amount is already in USD value
         amountUsd = request.amount;
         amountToken = request.amount;
@@ -1997,38 +2144,33 @@ export class WalletService {
         };
       }
 
-      // Determine wallet flow based on currency:
-      // - XRP → Use Xaman/XUMM (mobile app)
-      // - RLUSD → Use Xaman/XUMM (mobile app)
-      // - Other USD-pegged tokens (USDT/USDC) → Use MetaMask+XRPL Snap (browser wallet)
       const currency = request.currency === 'USD' ? 'XRP' : request.currency;
       const amount = currency === 'XRP' ? amountXrp : amountToken;
-      const destinationAddress = currency === 'RLUSD'
-        ? (wallet.rlusd_xrpl_address || wallet.xrpl_address)
-        : wallet.xrpl_address;
-      
+      const destinationAddress = this.resolveDepositAddress(wallet, currency as WalletDepositCurrency);
+      if (!destinationAddress) {
+        return {
+          success: false,
+          message: 'Wallet address not found',
+          error: 'Missing wallet address',
+        };
+      }
+
       const preparedTx = await xrplWalletService.preparePaymentTransaction(
         destinationAddress,
         amount,
-        currency as 'XRP' | 'USDT' | 'USDC' | 'RLUSD'
+        currency as 'XRP' | 'RLUSD'
       );
 
-      // XRP and RLUSD: Use Xaman/XUMM flow
-      // Other USD-pegged tokens: Use MetaMask flow (no XUMM)
       let xummPayload = null;
       let xummError = null;
-      
+
       if (currency === 'XRP' || currency === 'RLUSD') {
-        // For XRP/RLUSD, try to create XUMM payload (Xaman mobile app)
         try {
           xummPayload = await xummService.createPayload(preparedTx.transaction);
         } catch (error) {
           xummError = error instanceof Error ? error.message : 'XUMM not configured';
           console.log('XUMM not configured or error:', xummError);
         }
-      } else {
-        // For USDT/USDC, use MetaMask (no XUMM)
-        console.log(`Using MetaMask flow for ${currency} deposit`);
       }
 
       // Store transaction info
@@ -2045,12 +2187,10 @@ export class WalletService {
         .eq('id', transaction.id);
 
       // Determine wallet type and message
-      const walletType = currency === 'XRP' || currency === 'RLUSD' ? 'Xaman' : 'MetaMask';
-      const message = xummPayload 
+      const walletType = 'Xaman';
+      const message = xummPayload
         ? `Transaction prepared. Please sign in ${walletType} app.`
-        : currency === 'XRP' || currency === 'RLUSD'
-        ? 'Transaction prepared. Please sign with your XRPL wallet (Xaman, Crossmark, etc.).'
-        : `Transaction prepared. Please sign with MetaMask (XRPL Snap) for ${currency} deposit.`;
+        : `Transaction prepared. Please sign with your XRPL wallet (Xaman, Crossmark, or MetaMask XRPL Snap) for ${currency} deposit.`;
 
       return {
         success: true,
@@ -2077,10 +2217,8 @@ export class WalletService {
           status: 'pending',
           // Wallet type indicator
           ...(!xummPayload && {
-            walletType: currency === 'XRP' || currency === 'RLUSD' ? 'browser' : 'metamask',
-            note: currency === 'XRP' || currency === 'RLUSD'
-              ? 'XUMM not available, use browser wallet instead'
-              : `Use MetaMask with XRPL Snap to sign ${currency} transaction`,
+            walletType: 'browser',
+            note: 'XUMM not available, use browser wallet instead',
           }),
           // Include XUMM error info if XUMM failed (for debugging)
           ...(xummError && {
