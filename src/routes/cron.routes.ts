@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { escrowService } from '../services/escrow/escrow.service';
+import { multichainDepositMonitorService } from '../services/wallet/multichain-deposit-monitor.service';
 
 const router = Router();
 
@@ -58,6 +59,24 @@ router.post(
   cronSecretAuth,
   asyncHandler(async (_req: Request, res: Response) => {
     const result = await escrowService.backfillSupplySupplierTransactionHistory();
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  })
+);
+
+/**
+ * @route   POST /api/cron/sync-multichain-deposits
+ * @desc    Scan ERC20/TRC20/BEP20/Solana deposit addresses and credit USDT/USDC balances. Requires CRON_SECRET.
+ * @access  X-Cron-Secret or Authorization: Bearer <CRON_SECRET>
+ */
+router.post(
+  '/sync-multichain-deposits',
+  cronSecretAuth,
+  asyncHandler(async (_req: Request, res: Response) => {
+    const result = await multichainDepositMonitorService.syncAllDeposits();
     if (result.success) {
       res.status(200).json(result);
     } else {

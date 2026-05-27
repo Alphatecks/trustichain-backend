@@ -28,6 +28,7 @@ import {
   type MultichainNetworkInfo,
   type StablecoinDepositAddressMap,
 } from './multichain-wallet.service';
+import { multichainDepositMonitorService } from './multichain-deposit-monitor.service';
 
 export type WalletSuiteContext = 'personal' | 'business';
 
@@ -94,6 +95,9 @@ export class WalletService {
 
       const loadStablecoinAddresses = async (walletId: string) => {
         await multichainWalletService.provisionDepositAddresses(userId, walletId, suiteContext);
+        multichainDepositMonitorService.syncDepositsForUser(userId, suiteContext).catch((err) => {
+          console.warn('[Wallet] multichain deposit sync failed:', err);
+        });
         return multichainWalletService.getStablecoinDepositAddresses(userId, suiteContext);
       };
 
@@ -303,48 +307,21 @@ export class WalletService {
       }
     }
 
-    // Update balances: sync XRP always, but preserve token balances if internal swaps exist
-    if (hasInternalSwaps && wallet) {
-      // Preserve internal swap balances for tokens, but sync XRP
-      console.log('[Sync] Preserving internal swap balances:', {
-        userId,
-        hasInternalSwaps: true,
-        dbUsdt: wallet.balance_usdt,
-        dbUsdc: wallet.balance_usdc,
-        dbRlusd: wallet.balance_rlusd,
-        xrplUsdt: balances.usdt,
-        xrplUsdc: balances.usdc,
-        xrplRlusd: rlusdBalance,
-      });
-      await adminClient
-        .from('wallets')
-        .update({
-          balance_xrp: balances.xrp,  // Always sync XRP from XRPL
-          // Preserve token balances from database (internal swaps)
-          balance_usdt: wallet.balance_usdt || balances.usdt,
-          balance_usdc: wallet.balance_usdc || balances.usdc,
-          balance_rlusd: wallet.balance_rlusd || rlusdBalance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', walletId);
-    } else {
-      // No internal swaps, safe to sync all from XRPL
-      console.log('[Sync] No internal swaps found, syncing all balances from XRPL:', {
-        userId,
-        hasInternalSwaps: false,
-        xrplBalances: balances,
-      });
-      await adminClient
-        .from('wallets')
-        .update({
-          balance_xrp: balances.xrp,
-          balance_usdt: balances.usdt,
-          balance_usdc: balances.usdc,
-          balance_rlusd: rlusdBalance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', walletId);
-    }
+    // USDT/USDC are credited via multichain deposit monitor (ERC20/TRC20/BEP20/Solana), not XRPL ledger.
+    const dbUsdt = wallet?.balance_usdt ?? 0;
+    const dbUsdc = wallet?.balance_usdc ?? 0;
+    const dbRlusd = hasInternalSwaps && wallet ? wallet.balance_rlusd : null;
+
+    await adminClient
+      .from('wallets')
+      .update({
+        balance_xrp: balances.xrp,
+        balance_usdt: dbUsdt,
+        balance_usdc: dbUsdc,
+        balance_rlusd: dbRlusd ?? rlusdBalance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', walletId);
   }
 
   /**
