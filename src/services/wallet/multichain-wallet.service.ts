@@ -69,11 +69,31 @@ function isValidAssetNetwork(asset: StablecoinAsset, network: DepositNetwork): b
   return (USDC_DEPOSIT_NETWORKS as string[]).includes(network);
 }
 
+/** tronweb v6 exports { TronWeb }, not a default constructor. */
+function createTronWebInstance(): {
+  address: { fromPrivateKey: (privateKey: string) => string };
+} {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const tronwebModule = require('tronweb') as {
+    TronWeb?: new (opts: { fullHost: string }) => {
+      address: { fromPrivateKey: (privateKey: string) => string };
+    };
+    default?: { TronWeb?: new (opts: { fullHost: string }) => {
+      address: { fromPrivateKey: (privateKey: string) => string };
+    } };
+  };
+  const TronWebCtor =
+    tronwebModule.TronWeb ??
+    tronwebModule.default?.TronWeb;
+  if (!TronWebCtor) {
+    throw new Error('TronWeb constructor not found in tronweb package');
+  }
+  return new TronWebCtor({ fullHost: getTronGridHost() });
+}
+
 /** Tron base58 address from secp256k1 private key (TRC-20 deposits). */
 function tronAddressFromPrivateKey(privateKeyHex: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const TronWeb = require('tronweb');
-  const tronWeb = new TronWeb({ fullHost: getTronGridHost() });
+  const tronWeb = createTronWebInstance();
   return tronWeb.address.fromPrivateKey(privateKeyHex.replace(/^0x/, ''));
 }
 
