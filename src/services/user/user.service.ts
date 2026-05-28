@@ -172,6 +172,90 @@ export class UserService {
   }
 
   /**
+   * Update user's Trustitag handle.
+   */
+  async updateTrustitag(
+    userId: string,
+    rawTrustitag: unknown
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { trustitag: string };
+    error?: string;
+  }> {
+    try {
+      const normalized = trustitagService.normalizeTrustitag(String(rawTrustitag ?? ''));
+      if (!normalized) {
+        return {
+          success: false,
+          message: 'Invalid trustitag. Use 3-32 chars: lowercase letters, numbers, underscore.',
+          error: 'Validation failed',
+        };
+      }
+
+      const adminClient = supabaseAdmin || supabase;
+      const { data: existingUser, error: existingUserError } = await adminClient
+        .from('users')
+        .select('id, trustitag')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (existingUserError || !existingUser) {
+        return {
+          success: false,
+          message: 'User not found',
+          error: 'User not found',
+        };
+      }
+
+      if (existingUser.trustitag === normalized) {
+        return {
+          success: true,
+          message: 'Trustitag updated successfully',
+          data: { trustitag: normalized },
+        };
+      }
+
+      const { error: updateError } = await adminClient
+        .from('users')
+        .update({
+          trustitag: normalized,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        if (updateError.code === '23505') {
+          return {
+            success: false,
+            message: 'This trustitag is already taken',
+            error: 'Trustitag already exists',
+          };
+        }
+
+        return {
+          success: false,
+          message: updateError.message || 'Failed to update trustitag',
+          error: updateError.message || 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Trustitag updated successfully',
+        data: { trustitag: normalized },
+      };
+    } catch (error) {
+      console.error('updateTrustitag error:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to update trustitag',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
    * Get linked accounts for a user
    */
   async getLinkedAccounts(_userId: string): Promise<{

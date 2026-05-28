@@ -78,6 +78,30 @@ export class UserController {
   }
 
   /**
+   * Update trustitag handle
+   * PATCH /api/user/trustitag
+   */
+  async updateTrustitag(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const { trustitag } = req.body ?? {};
+      const result = await userService.updateTrustitag(userId, trustitag);
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Get linked accounts
    * GET /api/user/linked-accounts
    */

@@ -22,6 +22,16 @@ router.get('/profile', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   PATCH /api/user/trustitag
+ * @desc    Update authenticated user's trustitag
+ * @access  Private
+ * @body    { trustitag: string }
+ */
+router.patch('/trustitag', authenticate, asyncHandler(async (req, res) => {
+  await userController.updateTrustitag(req, res);
+}));
+
+/**
  * @route   POST /api/user/mfa/setup
  * @desc    Start TOTP enrollment — returns secret + otpauth URL for authenticator app
  * @access  Private
