@@ -122,6 +122,55 @@ export class EscrowService {
   }
 
   /**
+   * Resolve counterparty name/email without pairing a business display name with the owner's personal login email.
+   */
+  private async resolveCounterpartyContact(
+    escrow: {
+      counterparty_id?: string | null;
+      counterparty_name?: string | null;
+      counterparty_email?: string | null;
+      counterparty_phone?: string | null;
+    },
+    cpUser?: { full_name?: string | null; email?: string | null } | null
+  ): Promise<{ name: string | null; email: string | null; phoneNumber: string | null }> {
+    const adminClient = supabaseAdmin || supabase;
+    const escrowName = escrow.counterparty_name?.trim() || null;
+    const escrowEmail = escrow.counterparty_email?.trim() || null;
+    const phoneNumber = escrow.counterparty_phone ?? null;
+    const personalName = cpUser?.full_name?.trim() || null;
+    const personalEmail = cpUser?.email?.trim() || null;
+
+    const usingBusinessStyleName =
+      !!escrowName && !!personalName && escrowName.toLowerCase() !== personalName.toLowerCase();
+
+    if (!usingBusinessStyleName) {
+      return {
+        name: escrowName ?? personalName ?? null,
+        email: escrowEmail ?? personalEmail ?? null,
+        phoneNumber,
+      };
+    }
+
+    let email: string | null = escrowEmail;
+    if (!email && escrow.counterparty_id) {
+      const { data: biz } = await adminClient
+        .from('businesses')
+        .select('business_email')
+        .eq('owner_user_id', escrow.counterparty_id)
+        .maybeSingle();
+      if (biz?.business_email?.trim()) {
+        email = biz.business_email.trim();
+      }
+    }
+
+    return {
+      name: escrowName,
+      email,
+      phoneNumber,
+    };
+  }
+
+  /**
    * Get party names and avatar URLs for escrow parties.
    */
   private async getPartyProfiles(userIds: string[]): Promise<Record<string, { name: string; avatarUrl: string | null }>> {
@@ -1584,11 +1633,13 @@ export class EscrowService {
           .eq('id', escrow.counterparty_id)
           .maybeSingle();
 
+        const cpContact = await this.resolveCounterpartyContact(escrow, cpUser);
+
         counterparty = {
           xrpWalletAddress: cpWallet?.xrpl_address ?? null,
-          name: escrow.counterparty_name ?? cpUser?.full_name ?? null,
-          email: escrow.counterparty_email ?? cpUser?.email ?? null,
-          phoneNumber: escrow.counterparty_phone ?? null,
+          name: cpContact.name,
+          email: cpContact.email,
+          phoneNumber: cpContact.phoneNumber,
         };
       } else {
         counterparty = {
