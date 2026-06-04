@@ -121,8 +121,55 @@ export class EscrowService {
     return error ? null : data ?? null;
   }
 
+  private normalizeEmail(email: string | null | undefined): string | null {
+    const v = email?.trim().toLowerCase();
+    return v || null;
+  }
+
+  private async findBusinessByCompanyName(
+    companyName: string
+  ): Promise<{ company_name: string; business_email: string | null; owner_user_id: string } | null> {
+    const adminClient = supabaseAdmin || supabase;
+    const target = companyName.trim().toLowerCase();
+    if (!target) return null;
+
+    const { data: rows } = await adminClient
+      .from('businesses')
+      .select('company_name, business_email, owner_user_id')
+      .not('company_name', 'is', null);
+
+    const match = (rows || []).find(
+      (b) => b.company_name && b.company_name.trim().toLowerCase() === target
+    );
+    return match ?? null;
+  }
+
+  private async findBusinessByWalletAddress(
+    xrplAddress: string
+  ): Promise<{ company_name: string | null; business_email: string | null; owner_user_id: string } | null> {
+    const adminClient = supabaseAdmin || supabase;
+    const address = xrplAddress.trim();
+    if (!address) return null;
+
+    const { data: wallet } = await adminClient
+      .from('wallets')
+      .select('user_id')
+      .eq('xrpl_address', address)
+      .maybeSingle();
+
+    if (!wallet?.user_id) return null;
+
+    const { data: biz } = await adminClient
+      .from('businesses')
+      .select('company_name, business_email, owner_user_id')
+      .eq('owner_user_id', wallet.user_id)
+      .maybeSingle();
+
+    return biz ?? null;
+  }
+
   /**
-   * Resolve counterparty name/email without pairing a business display name with the owner's personal login email.
+   * Resolve counterparty name/email from the named business (supply supplier), not the payer's profile.
    */
   private async resolveCounterpartyContact(
     escrow: {
@@ -131,7 +178,8 @@ export class EscrowService {
       counterparty_email?: string | null;
       counterparty_phone?: string | null;
     },
-    cpUser?: { full_name?: string | null; email?: string | null } | null
+    cpUser?: { full_name?: string | null; email?: string | null } | null,
+    payerEmail?: string
   ): Promise<{ name: string | null; email: string | null; phoneNumber: string | null }> {
     const adminClient = supabaseAdmin || supabase;
     const escrowName = escrow.counterparty_name?.trim() || null;
@@ -139,31 +187,56 @@ export class EscrowService {
     const phoneNumber = escrow.counterparty_phone ?? null;
     const personalName = cpUser?.full_name?.trim() || null;
     const personalEmail = cpUser?.email?.trim() || null;
+    const payerNorm = this.normalizeEmail(payerEmail);
+
+    const matchedByName = escrowName ? await this.findBusinessByCompanyName(escrowName) : null;
 
     const usingBusinessStyleName =
-      !!escrowName && !!personalName && escrowName.toLowerCase() !== personalName.toLowerCase();
+      !!escrowName &&
+      (!!matchedByName || (!!personalName && escrowName.toLowerCase() !== personalName.toLowerCase()));
+
+    const rejectEmail = (candidate: string | null | undefined): string | null => {
+      const norm = this.normalizeEmail(candidate);
+      if (!norm) return null;
+      if (payerNorm && norm === payerNorm) return null;
+      return candidate!.trim();
+    };
 
     if (!usingBusinessStyleName) {
+      const email =
+        rejectEmail(escrowEmail) ?? rejectEmail(personalEmail) ?? null;
       return {
         name: escrowName ?? personalName ?? null,
-        email: escrowEmail ?? personalEmail ?? null,
+        email,
         phoneNumber,
       };
     }
 
-    let email: string | null = escrowEmail;
-    // Ignore escrow email when it is just the owner's personal login (common bad legacy data)
-    if (email && personalEmail && email.toLowerCase() === personalEmail.toLowerCase()) {
-      email = null;
+    let email: string | null = null;
+
+    if (matchedByName?.business_email?.trim()) {
+      email = rejectEmail(matchedByName.business_email);
     }
-    if (!email && escrow.counterparty_id) {
+
+    if (!email && escrowEmail) {
+      const differsFromPersonal =
+        !personalEmail || escrowEmail.toLowerCase() !== personalEmail.toLowerCase();
+      if (differsFromPersonal) {
+        email = rejectEmail(escrowEmail);
+      }
+    }
+
+    if (!email && !matchedByName && escrow.counterparty_id) {
       const { data: biz } = await adminClient
         .from('businesses')
-        .select('business_email')
+        .select('company_name, business_email')
         .eq('owner_user_id', escrow.counterparty_id)
         .maybeSingle();
-      if (biz?.business_email?.trim()) {
-        email = biz.business_email.trim();
+      const ownerBizName = biz?.company_name?.trim().toLowerCase();
+      const nameMatches =
+        !ownerBizName || !escrowName || ownerBizName === escrowName.toLowerCase();
+      if (nameMatches && biz?.business_email?.trim()) {
+        email = rejectEmail(biz.business_email);
       }
     }
 
@@ -1701,12 +1774,36 @@ export class EscrowService {
           .eq('id', escrow.counterparty_id)
           .maybeSingle();
 
-        const cpContact = await this.resolveCounterpartyContact(escrow, cpUser);
+        const cpContact = await this.resolveCounterpartyContact(escrow, cpUser, payerContact.email);
+
+        let counterpartyName = cpContact.name;
+        let counterpartyEmail = cpContact.email;
+
+        if (cpWalletAddress && escrow.counterparty_name) {
+          const walletBiz = await this.findBusinessByWalletAddress(cpWalletAddress);
+          if (walletBiz?.company_name) {
+            const walletCompany = walletBiz.company_name.trim();
+            const labelCompany = escrow.counterparty_name.trim();
+            if (walletCompany.toLowerCase() === labelCompany.toLowerCase()) {
+              counterpartyName = walletCompany;
+              const walletEmail = walletBiz.business_email?.trim();
+              if (walletEmail) {
+                const norm = this.normalizeEmail(walletEmail);
+                const payerNorm = this.normalizeEmail(payerContact.email);
+                if (!payerNorm || norm !== payerNorm) {
+                  counterpartyEmail = walletEmail;
+                } else {
+                  counterpartyEmail = null;
+                }
+              }
+            }
+          }
+        }
 
         counterparty = {
           xrpWalletAddress: cpWalletAddress,
-          name: cpContact.name,
-          email: cpContact.email,
+          name: counterpartyName,
+          email: counterpartyEmail,
           phoneNumber: cpContact.phoneNumber,
         };
       } else {
