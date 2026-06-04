@@ -92,6 +92,38 @@ export class DisputeService {
   }
 
   /**
+   * Dispute amount as filed (value + currency) and normalized XRP/USD amounts
+   */
+  private formatDisputeAmounts(row: {
+    dispute_amount?: string | number | null;
+    dispute_currency?: string | null;
+    amount_xrp: string | number;
+    amount_usd: string | number;
+  }): {
+    disputeAmount: number;
+    currency: 'USD' | 'XRP';
+    amount: { xrp: number; usd: number };
+  } {
+    const amount = {
+      xrp: parseFloat(String(row.amount_xrp)) || 0,
+      usd: parseFloat(String(row.amount_usd)) || 0,
+    };
+    const storedCurrency = row.dispute_currency === 'XRP' ? 'XRP' : row.dispute_currency === 'USD' ? 'USD' : null;
+    if (row.dispute_amount != null && storedCurrency) {
+      return {
+        disputeAmount: parseFloat(String(row.dispute_amount)) || 0,
+        currency: storedCurrency,
+        amount,
+      };
+    }
+    return {
+      disputeAmount: amount.usd,
+      currency: 'USD',
+      amount,
+    };
+  }
+
+  /**
    * Look up dispute by UUID or case_id (#DSP-YYYY-XXX)
    */
   private async lookupDispute(disputeIdInput: string): Promise<{ data: any; error: any }> {
@@ -336,15 +368,15 @@ export class DisputeService {
         const endTime = d.resolved_at ? new Date(d.resolved_at) : now;
         const durationSeconds = Math.max(0, (endTime.getTime() - openedAt.getTime()) / 1000);
 
+        const amounts = this.formatDisputeAmounts(d);
         return {
           id: d.id,
           caseId: d.case_id,
           initiatorName: partyNames[d.initiator_user_id] || 'Unknown',
           respondentName: partyNames[d.respondent_user_id] || 'Unknown',
-          amount: {
-            xrp: parseFloat(d.amount_xrp),
-            usd: parseFloat(d.amount_usd),
-          },
+          disputeAmount: amounts.disputeAmount,
+          currency: amounts.currency,
+          amount: amounts.amount,
           status: d.status as DisputeStatus,
           reason: d.reason,
           openedAt: d.opened_at,
@@ -421,6 +453,8 @@ export class DisputeService {
       const endTime = fullDispute.resolved_at ? new Date(fullDispute.resolved_at) : new Date();
       const durationSeconds = Math.max(0, (endTime.getTime() - openedAt.getTime()) / 1000);
 
+      const amounts = this.formatDisputeAmounts(fullDispute);
+
       return {
         success: true,
         message: 'Dispute retrieved successfully',
@@ -429,10 +463,9 @@ export class DisputeService {
           caseId: fullDispute.case_id,
           initiatorName: partyNames[fullDispute.initiator_user_id] || 'Unknown',
           respondentName: partyNames[fullDispute.respondent_user_id] || 'Unknown',
-          amount: {
-            xrp: parseFloat(fullDispute.amount_xrp),
-            usd: parseFloat(fullDispute.amount_usd),
-          },
+          disputeAmount: amounts.disputeAmount,
+          currency: amounts.currency,
+          amount: amounts.amount,
           status: fullDispute.status as DisputeStatus,
           reason: fullDispute.reason,
           openedAt: fullDispute.opened_at,
@@ -779,6 +812,8 @@ export class DisputeService {
           respondent_user_id: respondentUserId,
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
+          dispute_amount: request.amount,
+          dispute_currency: request.currency,
           status: 'pending',
           reason: request.disputeReason,
           description: request.description,

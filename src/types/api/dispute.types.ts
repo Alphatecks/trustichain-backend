@@ -32,6 +32,9 @@ export interface DisputeListItem {
   caseId: string; // Formatted as #DSP-YYYY-XXX
   initiatorName: string;
   respondentName: string;
+  /** Amount in dispute (same value/currency as entered when filing) */
+  disputeAmount: number;
+  currency: 'USD' | 'XRP';
   amount: {
     xrp: number;
     usd: number;
