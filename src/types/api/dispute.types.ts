@@ -34,6 +34,8 @@ export interface DisputeListItem {
   respondentName: string;
   /** Amount in dispute (same value/currency as entered when filing) */
   disputeAmount: number;
+  /** Alias for disputeAmount (UI label: "Disputed amount") */
+  disputedAmount: number;
   currency: 'USD' | 'XRP';
   amount: {
     xrp: number;

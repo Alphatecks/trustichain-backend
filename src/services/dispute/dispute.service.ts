@@ -123,31 +123,120 @@ export class DisputeService {
     };
   }
 
+  private normalizeDisputeCaseId(input: string): string {
+    const trimmed = input.trim();
+    const match = trimmed.match(/^#?DSP[-_]?(\d{4})[-_]?(\d{3})$/i);
+    if (match) {
+      return `#DSP-${match[1]}-${match[2]}`;
+    }
+    return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+  }
+
   /**
-   * Look up dispute by UUID or case_id (#DSP-YYYY-XXX)
+   * Resolve escrow row id (UUID) from UUID, #ESC-YYYY-XXX, or XRPL #hex id.
+   */
+  private async resolveEscrowUuid(escrowIdInput: string): Promise<string | null> {
+    const adminClient = supabaseAdmin || supabase;
+    const input = escrowIdInput.trim();
+
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input);
+    const isFormattedId =
+      /^#?ESC[-_]?\d{4}[-_]?\d{3}$/i.test(input) || /^#ESC-\d{4}-\d{3}$/i.test(input);
+    const isXrplEscrowId = /^#[0-9a-f]+$/i.test(input);
+
+    if (isUUID) {
+      const { data } = await adminClient.from('escrows').select('id').eq('id', input).maybeSingle();
+      return data?.id ?? null;
+    }
+
+    if (isXrplEscrowId) {
+      const xrplId = input.startsWith('#') ? input.substring(1) : input;
+      const { data } = await adminClient
+        .from('escrows')
+        .select('id')
+        .eq('xrpl_escrow_id', xrplId)
+        .maybeSingle();
+      return data?.id ?? null;
+    }
+
+    if (isFormattedId) {
+      let match = input.match(/^#?ESC[-_]?(\d{4})[-_]?(\d{3})$/i);
+      if (!match) {
+        match = input.match(/^#ESC-(\d{4})-(\d{3})$/i);
+      }
+      if (!match) return null;
+
+      const year = parseInt(match[1], 10);
+      const sequence = parseInt(match[2], 10);
+      const yearStart = new Date(year, 0, 1).toISOString();
+      const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999).toISOString();
+
+      const { data } = await adminClient
+        .from('escrows')
+        .select('id')
+        .eq('escrow_sequence', sequence)
+        .gte('created_at', yearStart)
+        .lte('created_at', yearEnd)
+        .maybeSingle();
+      return data?.id ?? null;
+    }
+
+    return null;
+  }
+
+  private async lookupDisputeByEscrowRef(
+    escrowUuid: string,
+    rawEscrowRef: string
+  ): Promise<{ data: any; error: any }> {
+    const adminClient = supabaseAdmin || supabase;
+    const fields = 'id, initiator_user_id, respondent_user_id, case_id';
+
+    const { data, error } = await adminClient
+      .from('disputes')
+      .select(fields)
+      .or(`escrow_id.eq.${escrowUuid},escrow_id.eq.${rawEscrowRef}`)
+      .order('opened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return { data, error: data ? null : error };
+  }
+
+  /**
+   * Look up dispute by dispute UUID, case_id (#DSP-YYYY-XXX), or linked escrow id
    */
   private async lookupDispute(disputeIdInput: string): Promise<{ data: any; error: any }> {
     const adminClient = supabaseAdmin || supabase;
-    const disputeId = disputeIdInput.trim();
+    const input = disputeIdInput.trim();
+    const fields = 'id, initiator_user_id, respondent_user_id, case_id';
 
-    // Check if it's a UUID
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(disputeId);
-    
-    if (isUUID) {
-      // Query by UUID
-      return await adminClient
-        .from('disputes')
-        .select('id, initiator_user_id, respondent_user_id, case_id')
-        .eq('id', disputeId)
-        .single();
-    } else {
-      // Query by case_id (e.g., #DSP-2025-001)
-      return await adminClient
-        .from('disputes')
-        .select('id, initiator_user_id, respondent_user_id, case_id')
-        .eq('case_id', disputeId)
-        .single();
+    if (/^#?DSP[-_]/i.test(input)) {
+      const caseId = this.normalizeDisputeCaseId(input);
+      return await adminClient.from('disputes').select(fields).eq('case_id', caseId).single();
     }
+
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input);
+
+    if (isUUID) {
+      const { data: byDisputeId } = await adminClient
+        .from('disputes')
+        .select(fields)
+        .eq('id', input)
+        .maybeSingle();
+
+      if (byDisputeId) {
+        return { data: byDisputeId, error: null };
+      }
+
+      return this.lookupDisputeByEscrowRef(input, input);
+    }
+
+    const escrowUuid = await this.resolveEscrowUuid(input);
+    if (escrowUuid) {
+      return this.lookupDisputeByEscrowRef(escrowUuid, input);
+    }
+
+    return await adminClient.from('disputes').select(fields).eq('case_id', input).single();
   }
 
   /**
@@ -375,6 +464,7 @@ export class DisputeService {
           initiatorName: partyNames[d.initiator_user_id] || 'Unknown',
           respondentName: partyNames[d.respondent_user_id] || 'Unknown',
           disputeAmount: amounts.disputeAmount,
+          disputedAmount: amounts.disputeAmount,
           currency: amounts.currency,
           amount: amounts.amount,
           status: d.status as DisputeStatus,
@@ -464,6 +554,7 @@ export class DisputeService {
           initiatorName: partyNames[fullDispute.initiator_user_id] || 'Unknown',
           respondentName: partyNames[fullDispute.respondent_user_id] || 'Unknown',
           disputeAmount: amounts.disputeAmount,
+          disputedAmount: amounts.disputeAmount,
           currency: amounts.currency,
           amount: amounts.amount,
           status: fullDispute.status as DisputeStatus,
@@ -807,7 +898,7 @@ export class DisputeService {
         .from('disputes')
         .insert({
           case_id: caseId,
-          escrow_id: request.escrowId,
+          escrow_id: escrow.id,
           initiator_user_id: userId,
           respondent_user_id: respondentUserId,
           amount_xrp: amountXrp,

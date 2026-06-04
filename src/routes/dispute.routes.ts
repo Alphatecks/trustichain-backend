@@ -387,7 +387,7 @@ router.get(
 
 /**
  * @route   GET /api/disputes/:id
- * @desc    Get dispute detail by ID
+ * @desc    Get dispute detail by dispute UUID, case id (#DSP-YYYY-XXX), or linked escrow id (UUID / #ESC-YYYY-XXX / XRPL #hex)
  * @access  Private
  */
 router.get(

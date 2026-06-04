@@ -114,6 +114,19 @@ export interface Escrow {
   disputeResolutionPeriod?: string;
   releaseConditions?: string;
   milestones?: Milestone[]; // Array of milestones for milestone-based escrows
+
+  /** Present when a dispute has been filed for this escrow */
+  dispute?: {
+    id: string;
+    caseId: string;
+    disputeAmount: number;
+    disputedAmount: number;
+    currency: 'USD' | 'XRP';
+    amount: { xrp: number; usd: number };
+    status: string;
+    reason: string;
+    openedAt: string;
+  };
 }
 
 export interface EscrowListResponse {

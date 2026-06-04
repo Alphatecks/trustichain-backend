@@ -1378,6 +1378,28 @@ export class EscrowService {
   /**
    * Get escrow by ID with full details
    */
+  private formatLinkedDisputeAmounts(row: {
+    dispute_amount?: string | number | null;
+    dispute_currency?: string | null;
+    amount_xrp: string | number;
+    amount_usd: string | number;
+  }): { disputeAmount: number; currency: 'USD' | 'XRP'; amount: { xrp: number; usd: number } } {
+    const amount = {
+      xrp: parseFloat(String(row.amount_xrp)) || 0,
+      usd: parseFloat(String(row.amount_usd)) || 0,
+    };
+    const storedCurrency =
+      row.dispute_currency === 'XRP' ? 'XRP' : row.dispute_currency === 'USD' ? 'USD' : null;
+    if (row.dispute_amount != null && storedCurrency) {
+      return {
+        disputeAmount: parseFloat(String(row.dispute_amount)) || 0,
+        currency: storedCurrency,
+        amount,
+      };
+    }
+    return { disputeAmount: amount.usd, currency: 'USD', amount };
+  }
+
   async getEscrowById(userId: string, escrowId: string): Promise<{
     success: boolean;
     message: string;
@@ -1387,15 +1409,9 @@ export class EscrowService {
     try {
       const adminClient = supabaseAdmin || supabase;
 
-      // Get escrow where user is initiator or counterparty
-      const { data: escrow, error } = await adminClient
-        .from('escrows')
-        .select('*')
-        .eq('id', escrowId)
-        .or(`user_id.eq.${userId},counterparty_id.eq.${userId}`)
-        .single();
+      const escrow = await this.getEscrowRowByIdentifier(userId, escrowId);
 
-      if (error || !escrow) {
+      if (!escrow) {
         return {
           success: false,
           message: 'Escrow not found or access denied',
@@ -1454,6 +1470,29 @@ export class EscrowService {
         releaseConditions: escrow.release_conditions || undefined,
         milestones: milestones.length > 0 ? milestones : undefined,
       };
+
+      const { data: disputeRow } = await adminClient
+        .from('disputes')
+        .select('*')
+        .or(`escrow_id.eq.${escrow.id},escrow_id.eq.${escrowId.trim()}`)
+        .order('opened_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (disputeRow) {
+        const disputeAmounts = this.formatLinkedDisputeAmounts(disputeRow);
+        formattedEscrow.dispute = {
+          id: disputeRow.id,
+          caseId: disputeRow.case_id,
+          disputeAmount: disputeAmounts.disputeAmount,
+          disputedAmount: disputeAmounts.disputeAmount,
+          currency: disputeAmounts.currency,
+          amount: disputeAmounts.amount,
+          status: disputeRow.status,
+          reason: disputeRow.reason,
+          openedAt: disputeRow.opened_at,
+        };
+      }
 
       return {
         success: true,
