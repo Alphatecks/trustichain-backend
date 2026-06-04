@@ -1519,7 +1519,13 @@ export class EscrowService {
   ): Promise<{
     success: boolean;
     message: string;
-    data?: { payer: EscrowPayerParty; counterparty: EscrowCounterpartyParty };
+    data?: {
+      id: string;
+      escrowId: string;
+      amount: { usd: number; xrp: number };
+      payer: EscrowPayerParty;
+      counterparty: EscrowCounterpartyParty;
+    };
     error?: string;
   }> {
     try {
@@ -1593,10 +1599,22 @@ export class EscrowService {
         };
       }
 
+      const year = new Date(escrow.created_at).getFullYear();
+      const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
+
       return {
         success: true,
         message: 'Escrow parties retrieved successfully',
-        data: { payer, counterparty },
+        data: {
+          id: escrow.id,
+          escrowId: formattedEscrowId,
+          amount: {
+            usd: parseFloat(String(escrow.amount_usd)) || 0,
+            xrp: parseFloat(String(escrow.amount_xrp)) || 0,
+          },
+          payer,
+          counterparty,
+        },
       };
     } catch (err) {
       console.error('Error getting escrow parties:', err);

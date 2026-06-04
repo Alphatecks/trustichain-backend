@@ -244,6 +244,12 @@ export interface EscrowPartiesResponse {
   success: boolean;
   message: string;
   data?: {
+    /** Escrow UUID (use as escrowId when creating a dispute) */
+    id: string;
+    /** Human-readable escrow id, e.g. #ESC-2026-001 */
+    escrowId: string;
+    /** Escrow held amount — use to prefill dispute amount on create */
+    amount: { usd: number; xrp: number };
     payer: EscrowPayerParty;
     counterparty: EscrowCounterpartyParty;
   };
