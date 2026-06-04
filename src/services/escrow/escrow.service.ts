@@ -152,6 +152,10 @@ export class EscrowService {
     }
 
     let email: string | null = escrowEmail;
+    // Ignore escrow email when it is just the owner's personal login (common bad legacy data)
+    if (email && personalEmail && email.toLowerCase() === personalEmail.toLowerCase()) {
+      email = null;
+    }
     if (!email && escrow.counterparty_id) {
       const { data: biz } = await adminClient
         .from('businesses')
@@ -168,6 +172,72 @@ export class EscrowService {
       email,
       phoneNumber,
     };
+  }
+
+  /**
+   * Resolve payer name/email for business escrows: align with business wallet and company profile.
+   */
+  private async resolvePayerContact(
+    escrow: {
+      user_id: string;
+      suite_context?: string | null;
+      payer_name?: string | null;
+      payer_email?: string | null;
+      payer_phone?: string | null;
+    },
+    payerUser?: { full_name?: string | null; email?: string | null } | null
+  ): Promise<{ name: string; email: string; phoneNumber: string | null }> {
+    const adminClient = supabaseAdmin || supabase;
+    const escrowName = escrow.payer_name?.trim() || null;
+    const escrowEmail = escrow.payer_email?.trim() || null;
+    const phoneNumber = escrow.payer_phone ?? null;
+    const personalName = payerUser?.full_name?.trim() || null;
+    const personalEmail = payerUser?.email?.trim() || null;
+
+    if (escrow.suite_context !== 'business') {
+      return {
+        name: escrowName ?? personalName ?? 'Unknown',
+        email: escrowEmail ?? personalEmail ?? '',
+        phoneNumber,
+      };
+    }
+
+    const { data: biz } = await adminClient
+      .from('businesses')
+      .select('company_name, business_email')
+      .eq('owner_user_id', escrow.user_id)
+      .maybeSingle();
+
+    const businessName = biz?.company_name?.trim() || null;
+    const businessEmail = biz?.business_email?.trim() || null;
+    const name = escrowName || businessName || personalName || 'Unknown';
+
+    let email = escrowEmail;
+    if (email && personalEmail && email.toLowerCase() === personalEmail.toLowerCase() && businessEmail) {
+      email = businessEmail;
+    } else if (!email) {
+      email = businessEmail || personalEmail || '';
+    }
+
+    return {
+      name,
+      email: email || '',
+      phoneNumber,
+    };
+  }
+
+  private async getWalletAddressForUser(
+    userId: string,
+    suiteContext: 'personal' | 'business'
+  ): Promise<string | null> {
+    const adminClient = supabaseAdmin || supabase;
+    const { data } = await adminClient
+      .from('wallets')
+      .select('xrpl_address')
+      .eq('user_id', userId)
+      .eq('suite_context', suiteContext)
+      .maybeSingle();
+    return data?.xrpl_address ?? null;
   }
 
   /**
@@ -1589,14 +1659,12 @@ export class EscrowService {
         };
       }
 
-      // Payer: user_id (account holder) — wallet by escrow suite_context
+      // Payer: wallet follows escrow suite_context (business vs personal)
       const payerSuite = (escrow.suite_context === 'business' ? 'business' : 'personal') as 'business' | 'personal';
-      const { data: payerWallet } = await adminClient
-        .from('wallets')
-        .select('xrpl_address')
-        .eq('user_id', escrow.user_id)
-        .eq('suite_context', payerSuite)
-        .maybeSingle();
+      const payerWalletAddress =
+        (await this.getWalletAddressForUser(escrow.user_id, payerSuite)) ||
+        (await this.getWalletAddressForUser(escrow.user_id, 'personal')) ||
+        '';
 
       const { data: payerUser } = await adminClient
         .from('users')
@@ -1604,11 +1672,13 @@ export class EscrowService {
         .eq('id', escrow.user_id)
         .maybeSingle();
 
+      const payerContact = await this.resolvePayerContact(escrow, payerUser);
+
       const payer: EscrowPayerParty = {
-        walletAddress: payerWallet?.xrpl_address ?? '',
-        name: escrow.payer_name ?? payerUser?.full_name ?? 'Unknown',
-        email: escrow.payer_email ?? payerUser?.email ?? '',
-        phoneNumber: escrow.payer_phone ?? null,
+        walletAddress: payerWalletAddress,
+        name: payerContact.name,
+        email: payerContact.email,
+        phoneNumber: payerContact.phoneNumber,
       };
 
       // Counterparty: counterparty_id — XRP wallet, name, email, phone
@@ -1620,12 +1690,10 @@ export class EscrowService {
       };
 
       if (escrow.counterparty_id) {
-        const { data: cpWallet } = await adminClient
-          .from('wallets')
-          .select('xrpl_address')
-          .eq('user_id', escrow.counterparty_id)
-          .eq('suite_context', 'personal')
-          .maybeSingle();
+        const cpSuite = escrow.suite_context === 'business' ? 'business' : 'personal';
+        const cpWalletAddress =
+          (await this.getWalletAddressForUser(escrow.counterparty_id, cpSuite as 'business' | 'personal')) ||
+          (await this.getWalletAddressForUser(escrow.counterparty_id, 'personal'));
 
         const { data: cpUser } = await adminClient
           .from('users')
@@ -1636,7 +1704,7 @@ export class EscrowService {
         const cpContact = await this.resolveCounterpartyContact(escrow, cpUser);
 
         counterparty = {
-          xrpWalletAddress: cpWallet?.xrpl_address ?? null,
+          xrpWalletAddress: cpWalletAddress,
           name: cpContact.name,
           email: cpContact.email,
           phoneNumber: cpContact.phoneNumber,
