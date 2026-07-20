@@ -6,6 +6,8 @@ import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
 import {
   resolveBusinessSupplier,
+  resolveGlobalSupplierBusiness,
+  GLOBAL_SUPPLIER_ID_REGEX,
   SUPPLIER_DISPLAY_ID_REGEX,
   SUPPLY_CONTRACT_DISPLAY_ID_REGEX,
 } from './supplierDisplayId.util';
@@ -62,6 +64,44 @@ export class BusinessSuiteSupplierDisputesService {
         return {
           success: false,
           message: 'No supply contract found for this supplier. Create a contract using the supplier ID first.',
+          error: 'Escrow not found',
+        };
+      }
+    } else if (GLOBAL_SUPPLIER_ID_REGEX.test(ref)) {
+      const globalSupplier = await resolveGlobalSupplierBusiness(client, ref);
+      if (!globalSupplier) {
+        return { success: false, message: 'No verified supplier business found with this global supplier ID', error: 'Supplier not found' };
+      }
+      if (globalSupplier.ownerUserId === userId) {
+        return { success: false, message: 'You cannot file a dispute with your own business', error: 'Invalid supplier' };
+      }
+      const { data: escrowByBiz } = await client
+        .from('escrows')
+        .select('id, counterparty_id')
+        .eq('user_id', userId)
+        .eq('supplier_business_id', globalSupplier.businessId)
+        .eq('transaction_type', 'supply')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (escrowByBiz) {
+        escrow = escrowByBiz;
+      } else {
+        const { data: escrowByCounterparty } = await client
+          .from('escrows')
+          .select('id, counterparty_id')
+          .eq('user_id', userId)
+          .eq('counterparty_id', globalSupplier.ownerUserId)
+          .eq('transaction_type', 'supply')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        escrow = escrowByCounterparty ?? null;
+      }
+      if (!escrow) {
+        return {
+          success: false,
+          message: 'No supply contract found with this supplier. Create a supply contract first.',
           error: 'Escrow not found',
         };
       }

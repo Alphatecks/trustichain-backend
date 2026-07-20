@@ -279,7 +279,7 @@ export type SupplierContractEscrowType = 'Full Payment' | 'Milestone Payment';
 export type ReleaseCondition = 'Buyer confirms delivery' | 'Time based' | 'Milestones' | 'Automatic release after delivery';
 
 export interface CreateSupplierContractRequest {
-  /** Saved supplier reference — UUID or SUPP-YYYY-NNN from POST /api/business-suite/suppliers */
+  /** Saved supplier reference — global BSUP-YYYY-NNNNN, saved contact SUPP-YYYY-NNN/UUID, or omit and use supplierName */
   supplierId?: string;
   /** Step 1 - Contract Info (required when supplierId is omitted) */
   supplierName?: string;

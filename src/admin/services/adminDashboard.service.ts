@@ -5,6 +5,7 @@
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { storageService } from '../../services/storage/storage.service';
+import { ensureGlobalSupplierIdForBusiness } from '../../services/businessSuite/supplierDisplayId.util';
 import type {
   AdminOverviewResponse,
   AdminEscrowInsightResponse,
@@ -747,6 +748,15 @@ export class AdminDashboardService {
         });
         if (insertBizError) {
           console.warn('Admin: synced business_suite_kyc status but could not create businesses row:', insertBizError.message);
+        } else if (status === 'Verified') {
+          const { data: insertedBiz } = await client
+            .from('businesses')
+            .select('id')
+            .eq('owner_user_id', userId)
+            .maybeSingle();
+          if (insertedBiz?.id) {
+            await ensureGlobalSupplierIdForBusiness(client, insertedBiz.id);
+          }
         }
         return { success: true, message: 'Business KYC status updated', data: { status } };
       }
@@ -764,6 +774,10 @@ export class AdminDashboardService {
         .from('business_suite_kyc')
         .update(updatePayload)
         .eq('user_id', userId);
+
+      if (status === 'Verified' && existingBiz.id) {
+        await ensureGlobalSupplierIdForBusiness(client, existingBiz.id);
+      }
 
       return { success: true, message: 'Business KYC status updated', data: { status } };
     } catch (e) {
@@ -816,6 +830,10 @@ export class AdminDashboardService {
         .from('business_suite_kyc')
         .update(updatePayload)
         .eq('user_id', business.owner_user_id);
+
+      if (status === 'Verified') {
+        await ensureGlobalSupplierIdForBusiness(client, businessId);
+      }
 
       return { success: true, message: 'Business KYC status updated', data: { status } };
     } catch (e) {

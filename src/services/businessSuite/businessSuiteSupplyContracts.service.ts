@@ -6,8 +6,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../config/supabase';
 import {
+  classifySupplierReference,
   generateSupplyContractDisplayId,
+  GLOBAL_SUPPLIER_ID_REGEX,
   resolveBusinessSupplier,
+  resolveGlobalSupplierBusiness,
   SUPPLY_CONTRACT_DISPLAY_ID_REGEX,
 } from './supplierDisplayId.util';
 import { businessSuiteService } from './businessSuite.service';
@@ -103,19 +106,44 @@ export class BusinessSuiteSupplyContractsService {
     const client = supabaseAdmin!;
 
     let linkedSupplier: Awaited<ReturnType<typeof resolveBusinessSupplier>> = null;
+    let globalSupplier: Awaited<ReturnType<typeof resolveGlobalSupplierBusiness>> = null;
     const supplierRef = typeof body.supplierId === 'string' ? body.supplierId.trim() : '';
+
     if (supplierRef) {
-      linkedSupplier = await resolveBusinessSupplier(client, businessId, supplierRef);
-      if (!linkedSupplier) {
+      const refKind = classifySupplierReference(supplierRef);
+      if (refKind === 'global' || GLOBAL_SUPPLIER_ID_REGEX.test(supplierRef)) {
+        globalSupplier = await resolveGlobalSupplierBusiness(client, supplierRef);
+        if (!globalSupplier) {
+          return {
+            success: false,
+            message: 'Supplier not found. Use a valid global supplier ID (e.g. BSUP-2026-00001).',
+            error: 'Supplier not found',
+          };
+        }
+      } else if (refKind === 'saved') {
+        linkedSupplier = await resolveBusinessSupplier(client, businessId, supplierRef);
+        if (!linkedSupplier) {
+          globalSupplier = await resolveGlobalSupplierBusiness(client, supplierRef);
+        }
+        if (!linkedSupplier && !globalSupplier) {
+          return {
+            success: false,
+            message:
+              'Supplier not found. Use a global supplier ID (BSUP-YYYY-NNNNN), saved contact ID (SUPP-YYYY-NNN), or add the supplier first.',
+            error: 'Supplier not found',
+          };
+        }
+      } else {
         return {
           success: false,
-          message: 'Supplier not found. Use the supplierDisplayId from POST /api/business-suite/suppliers (e.g. SUPP-2026-001).',
-          error: 'Supplier not found',
+          message: 'Invalid supplierId. Use BSUP-YYYY-NNNNN, SUPP-YYYY-NNN, or a supplier UUID.',
+          error: 'Invalid supplier reference',
         };
       }
     }
 
     const supplierName =
+      globalSupplier?.companyName ||
       linkedSupplier?.name ||
       (typeof body.supplierName === 'string' ? body.supplierName.trim() : '');
     if (!supplierName) {
@@ -126,30 +154,55 @@ export class BusinessSuiteSupplyContractsService {
       };
     }
 
-    const { data: businesses } = await client
-      .from('businesses')
-      .select('id, owner_user_id, company_name')
-      .eq('status', 'Verified')
-      .not('company_name', 'is', null);
-    const normalized = supplierName.toLowerCase();
-    const biz = (businesses || []).find(
-      (b) => b.company_name && b.company_name.trim().toLowerCase() === normalized
-    );
-    if (!biz?.owner_user_id) {
+    let counterpartyUserId: string | null = globalSupplier?.ownerUserId ?? null;
+    let supplierBusinessId: string | null = globalSupplier?.businessId ?? linkedSupplier?.supplierBusinessId ?? null;
+
+    if (!counterpartyUserId) {
+      if (linkedSupplier?.supplierBusinessId) {
+        const resolved = await resolveGlobalSupplierBusiness(client, linkedSupplier.supplierBusinessId);
+        if (resolved) {
+          counterpartyUserId = resolved.ownerUserId;
+          supplierBusinessId = resolved.businessId;
+        }
+      }
+    }
+
+    if (!counterpartyUserId) {
+      const { data: businesses } = await client
+        .from('businesses')
+        .select('id, owner_user_id, company_name')
+        .eq('status', 'Verified')
+        .not('company_name', 'is', null);
+      const normalized = supplierName.toLowerCase();
+      const biz = (businesses || []).find(
+        (b) => b.company_name && b.company_name.trim().toLowerCase() === normalized
+      );
+      if (!biz?.owner_user_id) {
+        return {
+          success: false,
+          message: 'Supplier must be a registered business on Trustichain. No verified business found with that name.',
+          error: 'Supplier not registered',
+        };
+      }
+      counterpartyUserId = biz.owner_user_id;
+      supplierBusinessId = biz.id;
+    }
+
+    if (!counterpartyUserId) {
       return {
         success: false,
-        message: 'Supplier must be a registered business on Trustichain. No verified business found with that name.',
+        message: 'Supplier must be a registered business on Trustichain.',
         error: 'Supplier not registered',
       };
     }
 
-    const counterpartyUserId = biz.owner_user_id;
     if (counterpartyUserId === userId) {
       return { success: false, message: 'You cannot create a supply contract with your own business', error: 'Same business' };
     }
 
     const walletAddressRaw =
       (typeof body.supplierWalletAddress === 'string' ? body.supplierWalletAddress.trim() : '') ||
+      globalSupplier?.walletAddress?.trim() ||
       linkedSupplier?.walletAddress?.trim() ||
       '';
     const walletAddress = walletAddressRaw;
@@ -218,6 +271,7 @@ export class BusinessSuiteSupplyContractsService {
         delivery_method: body.deliveryMethod || null,
         contract_document_urls: documentUrls.length > 0 ? documentUrls : null,
         business_supplier_id: linkedSupplier?.id ?? null,
+        supplier_business_id: supplierBusinessId,
         contract_display_id: contractId,
       })
       .eq('id', escrowId);
@@ -236,7 +290,7 @@ export class BusinessSuiteSupplyContractsService {
       data: {
         escrowId,
         contractId,
-        supplierDisplayId: linkedSupplier?.supplierDisplayId ?? null,
+        supplierDisplayId: linkedSupplier?.supplierDisplayId ?? globalSupplier?.globalSupplierId ?? null,
         amountUsd: result.data.amount?.usd ?? paymentAmount,
         amountXrp: result.data.amount?.xrp ?? null,
         status: result.data.status ?? 'pending',

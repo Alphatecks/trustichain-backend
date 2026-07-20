@@ -875,6 +875,36 @@ export class BusinessSuiteController {
     });
   }
 
+  /** List saved suppliers with supplierDisplayId. GET /api/business-suite/suppliers */
+  async listSuppliers(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteSuppliersService.listSuppliers(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business') res.status(400).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Get this business's global supplier ID. GET /api/business-suite/my-supplier-id */
+  async getMySupplierId(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const result = await businessSuiteSuppliersService.getMySupplierId(userId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'No business' || result.error === 'Business not verified') res.status(400).json(result);
+    else if (result.error === 'Not found') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
+  /** Look up a supplier by global BSUP ID. GET /api/business-suite/suppliers/lookup/:globalSupplierId */
+  async lookupGlobalSupplier(req: Request, res: Response): Promise<void> {
+    const userId = req.userId!;
+    const globalSupplierId = req.params.globalSupplierId ?? '';
+    const result = await businessSuiteSuppliersService.lookupGlobalSupplier(userId, globalSupplierId);
+    if (result.success) res.status(200).json(result);
+    else if (result.error === 'Same business') res.status(400).json(result);
+    else if (result.error === 'Supplier not found' || result.error === 'Missing ID') res.status(404).json(result);
+    else res.status(403).json(result);
+  }
+
   /** Create new supplier. POST /api/business-suite/suppliers */
   async createSupplier(req: Request, res: Response): Promise<void> {
     const userId = req.userId!;

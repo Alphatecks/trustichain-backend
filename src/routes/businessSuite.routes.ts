@@ -405,7 +405,7 @@ router.post('/supply-contracts/escrowed-to-me/:escrowId/release', authenticate, 
 
 /**
  * @route   POST /api/business-suite/supplier-disputes
- * @desc    File dispute for suppliers. Body: supplierReference (SUPP-YYYY-NNN or business name), reason, amount, currency, description, evidence? (optional array of { fileUrl, fileName, fileType?, fileSize? }).
+ * @desc    File dispute for suppliers. Body: supplierReference (BSUP-YYYY-NNNNN, SUPP-YYYY-NNN, SC-YYYY-NNN, or business name), reason, amount, currency, description, evidence? (optional array of { fileUrl, fileName, fileType?, fileSize? }).
  * @access  Private (business suite only)
  */
 router.post('/supplier-disputes', authenticate, asyncHandler(async (req, res) => {
@@ -432,7 +432,7 @@ router.post('/payroll-disputes/evidence/upload', authenticate, upload.single('do
 
 /**
  * @route   POST /api/business-suite/supply-contracts
- * @desc    Create supplier contract (Contract Info + Payment Terms from modal). Body: supplierName, supplierWalletAddress, contractTitle, deliveryMethod, disputeWindow, paymentAmount, currency, escrowType, releaseCondition, contractDocumentUrls (optional), etc.
+ * @desc    Create supplier contract (Contract Info + Payment Terms from modal). Body: supplierId (BSUP-YYYY-NNNNN, SUPP-YYYY-NNN, or UUID), supplierName, supplierWalletAddress, contractTitle, deliveryMethod, disputeWindow, paymentAmount, currency, escrowType, releaseCondition, contractDocumentUrls (optional), etc.
  * @access  Private (business suite only)
  */
 router.post('/supply-contracts', authenticate, asyncHandler(async (req, res) => {
@@ -458,6 +458,24 @@ router.get('/supply-contracts/documents/signed-url', authenticate, asyncHandler(
 }));
 
 /**
+ * @route   GET /api/business-suite/my-supplier-id
+ * @desc    Get this business's platform-wide supplier ID (BSUP-YYYY-NNNNN). Verified businesses only.
+ * @access  Private (business suite only)
+ */
+router.get('/my-supplier-id', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.getMySupplierId(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/suppliers/lookup/:globalSupplierId
+ * @desc    Look up a verified supplier business by global ID (BSUP-YYYY-NNNNN) before creating a contract
+ * @access  Private (business suite only)
+ */
+router.get('/suppliers/lookup/:globalSupplierId', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.lookupGlobalSupplier(req, res);
+}));
+
+/**
  * @route   GET /api/business-suite/suppliers/details
  * @desc    Supplier details list for UI cards (supplierId, progressPercentage, statusDetail, amount, dueDate).
  * @access  Private (business suite only)
@@ -477,7 +495,7 @@ router.get('/suppliers/transactions', authenticate, asyncHandler(async (req, res
 
 /**
  * @route   GET /api/business-suite/suppliers/autocomplete
- * @desc    Autocomplete verified businesses (excludes own). Query params: q (or query), limit (1–20, default 10). Response data.items: { businessId, companyName }[].
+ * @desc    Autocomplete verified businesses (excludes own). Query params: q (or query), limit (1–20, default 10). Response data.items: { businessId, companyName, globalSupplierId? }[].
  * @access  Private (business suite only)
  */
 router.get('/suppliers/autocomplete', authenticate, asyncHandler(async (req, res) => {
@@ -545,6 +563,15 @@ router.patch('/webhook/url', authenticate, asyncHandler(async (req, res) => {
  */
 router.get('/company-name', authenticate, asyncHandler(async (req, res) => {
   await businessSuiteController.getCompanyNameByEmail(req, res);
+}));
+
+/**
+ * @route   GET /api/business-suite/suppliers
+ * @desc    List saved suppliers for the business (supplierDisplayId e.g. SUPP-2026-001 for contract creation)
+ * @access  Private (business suite only)
+ */
+router.get('/suppliers', authenticate, asyncHandler(async (req, res) => {
+  await businessSuiteController.listSuppliers(req, res);
 }));
 
 /**

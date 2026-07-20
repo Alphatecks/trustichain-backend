@@ -4,7 +4,11 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
-import { generateSupplierDisplayId } from './supplierDisplayId.util';
+import {
+  ensureGlobalSupplierIdForBusiness,
+  generateSupplierDisplayId,
+  resolveGlobalSupplierBusiness,
+} from './supplierDisplayId.util';
 import { businessSuiteService } from './businessSuite.service';
 import type {
   SupplierAutocompleteItem,
@@ -14,6 +18,10 @@ import type {
   SupplierTransactionListItem,
   SupplierTransactionHistoryParams,
   SupplierTransactionHistoryResponse,
+  ListSuppliersResponse,
+  SupplierListItem,
+  MySupplierIdResponse,
+  GlobalSupplierLookupResponse,
 } from '../../types/api/businessSuiteSuppliers.types';
 
 const KYC_STATUSES = ['Not started', 'Pending', 'In review', 'Verified', 'Rejected'];
@@ -59,6 +67,65 @@ export class BusinessSuiteSuppliersService {
   }
 
   /**
+   * List saved suppliers for the authenticated business (includes supplierDisplayId for contract creation).
+   * GET /api/business-suite/suppliers
+   */
+  async listSuppliers(userId: string): Promise<ListSuppliersResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
+
+    const client = supabaseAdmin!;
+    const { data: rows, error } = await client
+      .from('business_suppliers')
+      .select(
+        'id, supplier_display_id, name, wallet_address, country, kyc_status, contract_type, tags, created_at, supplier_business_id, supplier_business:supplier_business_id ( global_supplier_id )'
+      )
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return {
+        success: false,
+        message: error.message || 'Failed to fetch suppliers',
+        error: error.message,
+      };
+    }
+
+    const items: SupplierListItem[] = (rows ?? [])
+      .filter((row) => row.supplier_display_id)
+      .map((row) => {
+        const supplierBiz = row.supplier_business as { global_supplier_id?: string | null } | { global_supplier_id?: string | null }[] | null;
+        const globalSupplierId = Array.isArray(supplierBiz)
+          ? supplierBiz[0]?.global_supplier_id ?? null
+          : supplierBiz?.global_supplier_id ?? null;
+        return {
+          id: row.id,
+          supplierDisplayId: row.supplier_display_id as string,
+          globalSupplierId,
+          name: row.name,
+          walletAddress: row.wallet_address ?? null,
+          country: row.country ?? null,
+          kycStatus: row.kyc_status ?? null,
+          contractType: row.contract_type ?? null,
+          tags: row.tags ?? null,
+          createdAt: row.created_at,
+        };
+      });
+
+    return {
+      success: true,
+      message: items.length > 0 ? 'Suppliers retrieved successfully' : 'No suppliers found',
+      data: { items },
+    };
+  }
+
+  /**
    * Create a new supplier. POST /api/business-suite/suppliers
    * Supports Add supplier UI: name, walletAddress, country, kycStatus, contractType, tags.
    * Also supports legacy: dueDate, amount.
@@ -72,6 +139,7 @@ export class BusinessSuiteSuppliersService {
     data?: {
       id: string;
       supplierDisplayId: string;
+      globalSupplierId?: string | null;
       name: string;
       walletAddress: string | null;
       country: string | null;
@@ -168,6 +236,7 @@ export class BusinessSuiteSuppliersService {
         business_id: businessId,
         user_id: userId,
         supplier_display_id: supplierDisplayId,
+        supplier_business_id: supplierBusinessId,
         name,
         wallet_address: walletAddress,
         country,
@@ -184,12 +253,15 @@ export class BusinessSuiteSuppliersService {
       return { success: false, message: error.message || 'Failed to create supplier', error: error.message };
     }
 
+    const globalResolved = await resolveGlobalSupplierBusiness(client, supplierBusinessId);
+
     return {
       success: true,
       message: 'Supplier added successfully',
       data: {
         id: supplier.id,
         supplierDisplayId: supplier.supplier_display_id,
+        globalSupplierId: globalResolved?.globalSupplierId ?? null,
         name: supplier.name,
         walletAddress: supplier.wallet_address ?? null,
         country: supplier.country ?? null,
@@ -269,7 +341,7 @@ export class BusinessSuiteSuppliersService {
       businessSuiteService.getBusinessId(userId),
       client
         .from('businesses')
-        .select('id, company_name, status')
+        .select('id, company_name, status, global_supplier_id')
         .not('company_name', 'is', null)
         .ilike('company_name', `%${trimmedQuery}%`)
         .limit(100),
@@ -296,6 +368,7 @@ export class BusinessSuiteSuppliersService {
           normalizedName,
           score,
           isVerified,
+          globalSupplierId: isVerified ? ((row as { global_supplier_id?: string | null }).global_supplier_id ?? null) : null,
         };
       })
       .filter((item) => item.normalizedName.includes(normalizedQuery))
@@ -307,7 +380,7 @@ export class BusinessSuiteSuppliersService {
         const bName = b.companyName.toLowerCase();
         return aName.localeCompare(bName);
       })
-      .map(({ businessId, companyName }) => ({ businessId, companyName }))
+      .map(({ businessId, companyName, globalSupplierId }) => ({ businessId, companyName, globalSupplierId }))
       .slice(0, cappedLimit);
 
     return {
@@ -508,6 +581,88 @@ export class BusinessSuiteSuppliersService {
       (b) => b.company_name && b.company_name.trim().toLowerCase() === trimmed.toLowerCase()
     );
     return matched?.id ?? null;
+  }
+
+  /**
+   * Get this business's platform-wide supplier ID (BSUP-YYYY-NNNNN).
+   * GET /api/business-suite/my-supplier-id
+   */
+  async getMySupplierId(userId: string): Promise<MySupplierIdResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const businessId = await businessSuiteService.getBusinessId(userId);
+    if (!businessId) {
+      return { success: false, message: 'No registered business for this account', error: 'No business' };
+    }
+
+    const status = await businessSuiteService.getBusinessStatus(userId);
+    if (status !== 'Verified') {
+      return {
+        success: false,
+        message: 'Your business must be verified before a global supplier ID is issued',
+        error: 'Business not verified',
+      };
+    }
+
+    const client = supabaseAdmin!;
+    const globalSupplierId = await ensureGlobalSupplierIdForBusiness(client, businessId);
+    if (!globalSupplierId) {
+      return { success: false, message: 'Could not retrieve global supplier ID', error: 'Not found' };
+    }
+
+    return {
+      success: true,
+      message: 'Global supplier ID retrieved',
+      data: { globalSupplierId },
+    };
+  }
+
+  /**
+   * Look up a registered supplier business by BSUP-YYYY-NNNNN (for contract creation).
+   * GET /api/business-suite/suppliers/lookup/:globalSupplierId
+   */
+  async lookupGlobalSupplier(userId: string, globalSupplierId: string): Promise<GlobalSupplierLookupResponse> {
+    const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
+    if (!check.allowed) {
+      return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
+    }
+
+    const ref = typeof globalSupplierId === 'string' ? globalSupplierId.trim() : '';
+    if (!ref) {
+      return { success: false, message: 'Global supplier ID is required', error: 'Missing ID' };
+    }
+
+    const ownBusinessId = await businessSuiteService.getBusinessId(userId);
+    const client = supabaseAdmin!;
+    const resolved = await resolveGlobalSupplierBusiness(client, ref);
+    if (!resolved) {
+      return {
+        success: false,
+        message: 'No verified supplier business found with this ID',
+        error: 'Supplier not found',
+      };
+    }
+    if (resolved.businessId === ownBusinessId) {
+      return {
+        success: false,
+        message: 'This is your own business supplier ID',
+        error: 'Same business',
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Supplier found',
+      data: {
+        globalSupplierId: resolved.globalSupplierId,
+        companyName: resolved.companyName,
+        walletAddress: resolved.walletAddress,
+        status: resolved.status,
+      },
+    };
   }
 }
 

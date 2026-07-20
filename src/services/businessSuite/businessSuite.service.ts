@@ -6,6 +6,7 @@
 import * as crypto from 'crypto';
 import { supabaseAdmin } from '../../config/supabase';
 import { storageService } from '../storage/storage.service';
+import { ensureGlobalSupplierIdForBusiness } from './supplierDisplayId.util';
 
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_COST = 16384;
@@ -258,6 +259,7 @@ export class BusinessSuiteService {
       businessName: string | null;
       businessEmailAddress: string | null;
       loggedInIp: string | null;
+      globalSupplierId?: string | null;
     };
     error?: string;
   }> {
@@ -273,7 +275,7 @@ export class BusinessSuiteService {
 
     const { data: biz, error: bizError } = await client
       .from('businesses')
-      .select('company_name, company_logo_url, business_email')
+      .select('id, company_name, company_logo_url, business_email, status, global_supplier_id')
       .eq('owner_user_id', userId)
       .maybeSingle();
 
@@ -295,6 +297,14 @@ export class BusinessSuiteService {
 
     const businessProfilePicture = await storageService.getSignedUrlForCompanyLogo(biz.company_logo_url ?? null);
 
+    let globalSupplierId: string | null =
+      biz.global_supplier_id != null && String(biz.global_supplier_id).trim().length > 0
+        ? String(biz.global_supplier_id).trim()
+        : null;
+    if (!globalSupplierId && biz.status === 'Verified' && biz.id) {
+      globalSupplierId = await ensureGlobalSupplierIdForBusiness(client, biz.id);
+    }
+
     return {
       success: true,
       message: 'Business profile details retrieved',
@@ -303,6 +313,7 @@ export class BusinessSuiteService {
         businessName: biz.company_name != null && String(biz.company_name).trim().length > 0 ? String(biz.company_name).trim() : null,
         businessEmailAddress: businessEmail,
         loggedInIp: loggedInIp && loggedInIp.trim() ? loggedInIp.trim() : null,
+        globalSupplierId,
       },
     };
   }

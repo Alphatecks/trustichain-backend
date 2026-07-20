@@ -26,6 +26,30 @@ export interface SupplierDetailsResponse {
   error?: string;
 }
 
+/** Saved supplier row for GET /api/business-suite/suppliers */
+export interface SupplierListItem {
+  id: string;
+  supplierDisplayId: string;
+  /** Platform-wide ID of the linked supplier business (BSUP-YYYY-NNNNN), when known */
+  globalSupplierId?: string | null;
+  name: string;
+  walletAddress: string | null;
+  country: string | null;
+  kycStatus: string | null;
+  contractType: string | null;
+  tags: string[] | null;
+  createdAt: string;
+}
+
+export interface ListSuppliersResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    items: SupplierListItem[];
+  };
+  error?: string;
+}
+
 /** Single row for Supplier transaction history table: transactionId, supplierName, amount (XRP + USD), status, type */
 export interface SupplierTransactionListItem {
   id: string;
@@ -62,6 +86,29 @@ export interface SupplierTransactionHistoryResponse {
 export interface SupplierAutocompleteItem {
   businessId: string;
   companyName: string;
+  /** Present when the business is verified and has a global supplier ID */
+  globalSupplierId?: string | null;
+}
+
+export interface MySupplierIdResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    globalSupplierId: string;
+  };
+  error?: string;
+}
+
+export interface GlobalSupplierLookupResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    globalSupplierId: string;
+    companyName: string;
+    walletAddress: string | null;
+    status: string;
+  };
+  error?: string;
 }
 
 export interface SupplierAutocompleteResponse {
