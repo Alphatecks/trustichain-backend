@@ -5,7 +5,7 @@
 
 import { supabaseAdmin } from '../../config/supabase';
 import {
-  ensureGlobalSupplierIdForBusiness,
+  ensureGlobalSupplierIdForBusinessDetailed,
   generateSupplierDisplayId,
   resolveGlobalSupplierBusiness,
 } from './supplierDisplayId.util';
@@ -84,7 +84,7 @@ export class BusinessSuiteSuppliersService {
     const { data: rows, error } = await client
       .from('business_suppliers')
       .select(
-        'id, supplier_display_id, name, wallet_address, country, kyc_status, contract_type, tags, created_at, supplier_business_id, supplier_business:supplier_business_id ( global_supplier_id )'
+        'id, supplier_display_id, name, wallet_address, country, kyc_status, contract_type, tags, created_at, supplier_business_id'
       )
       .eq('business_id', businessId)
       .order('created_at', { ascending: false });
@@ -97,26 +97,44 @@ export class BusinessSuiteSuppliersService {
       };
     }
 
+    const supplierBusinessIds = [
+      ...new Set(
+        (rows ?? [])
+          .map((row) => row.supplier_business_id as string | null)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+    const globalIdByBusinessId: Record<string, string> = {};
+    if (supplierBusinessIds.length > 0) {
+      const { data: bizRows, error: bizErr } = await client
+        .from('businesses')
+        .select('id, global_supplier_id')
+        .in('id', supplierBusinessIds);
+      if (!bizErr) {
+        for (const biz of bizRows ?? []) {
+          if (biz.id && biz.global_supplier_id) {
+            globalIdByBusinessId[biz.id as string] = biz.global_supplier_id as string;
+          }
+        }
+      }
+    }
+
     const items: SupplierListItem[] = (rows ?? [])
       .filter((row) => row.supplier_display_id)
-      .map((row) => {
-        const supplierBiz = row.supplier_business as { global_supplier_id?: string | null } | { global_supplier_id?: string | null }[] | null;
-        const globalSupplierId = Array.isArray(supplierBiz)
-          ? supplierBiz[0]?.global_supplier_id ?? null
-          : supplierBiz?.global_supplier_id ?? null;
-        return {
-          id: row.id,
-          supplierDisplayId: row.supplier_display_id as string,
-          globalSupplierId,
-          name: row.name,
-          walletAddress: row.wallet_address ?? null,
-          country: row.country ?? null,
-          kycStatus: row.kyc_status ?? null,
-          contractType: row.contract_type ?? null,
-          tags: row.tags ?? null,
-          createdAt: row.created_at,
-        };
-      });
+      .map((row) => ({
+        id: row.id,
+        supplierDisplayId: row.supplier_display_id as string,
+        globalSupplierId: row.supplier_business_id
+          ? globalIdByBusinessId[row.supplier_business_id as string] ?? null
+          : null,
+        name: row.name,
+        walletAddress: row.wallet_address ?? null,
+        country: row.country ?? null,
+        kycStatus: row.kyc_status ?? null,
+        contractType: row.contract_type ?? null,
+        tags: row.tags ?? null,
+        createdAt: row.created_at,
+      }));
 
     return {
       success: true,
@@ -400,9 +418,7 @@ export class BusinessSuiteSuppliersService {
       return { success: false, message: 'Business suite is not enabled for this account', error: check.error };
     }
     const client = supabaseAdmin!;
-    const { data: rows, error } = await client
-      .from('escrows')
-      .select(`
+    const escrowSelectWithSupplierBusiness = `
         id,
         amount_usd,
         progress,
@@ -411,51 +427,139 @@ export class BusinessSuiteSuppliersService {
         created_at,
         contract_display_id,
         business_supplier_id,
-        supplier:business_supplier_id (
-          supplier_display_id
-        )
-      `)
+        supplier_business_id
+      `;
+    const escrowSelectBase = `
+        id,
+        amount_usd,
+        progress,
+        expected_completion_date,
+        expected_release_date,
+        created_at,
+        contract_display_id,
+        business_supplier_id
+      `;
+
+    let rows: Array<Record<string, unknown>> | null = null;
+    let error: { message: string } | null = null;
+
+    ({ data: rows, error } = await client
+      .from('escrows')
+      .select(escrowSelectWithSupplierBusiness)
       .eq('user_id', userId)
       .eq('suite_context', 'business')
       .eq('transaction_type', 'supply')
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true }));
+
+    if (error?.message?.toLowerCase().includes('supplier_business_id')) {
+      ({ data: rows, error } = await client
+        .from('escrows')
+        .select(escrowSelectBase)
+        .eq('user_id', userId)
+        .eq('suite_context', 'business')
+        .eq('transaction_type', 'supply')
+        .order('created_at', { ascending: true }));
+    }
+
+    if (error?.message?.toLowerCase().includes('business_supplier_id')) {
+      ({ data: rows, error } = await client
+        .from('escrows')
+        .select(`
+        id,
+        amount_usd,
+        progress,
+        expected_completion_date,
+        expected_release_date,
+        created_at,
+        contract_display_id
+      `)
+        .eq('user_id', userId)
+        .eq('suite_context', 'business')
+        .eq('transaction_type', 'supply')
+        .order('created_at', { ascending: true }));
+    }
+
     if (error) {
       return { success: false, message: error.message || 'Failed to fetch supplier contract details', error: error.message };
     }
     const list = rows || [];
+
+    const businessSupplierIds = [
+      ...new Set(
+        list
+          .map((row) => row.business_supplier_id as string | null | undefined)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+    const supplierBusinessIds = [
+      ...new Set(
+        list
+          .map((row) => row.supplier_business_id as string | null | undefined)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+
+    const suppDisplayById: Record<string, string> = {};
+    if (businessSupplierIds.length > 0) {
+      const { data: supplierRows } = await client
+        .from('business_suppliers')
+        .select('id, supplier_display_id')
+        .in('id', businessSupplierIds);
+      for (const s of supplierRows ?? []) {
+        if (s.id && s.supplier_display_id) {
+          suppDisplayById[s.id as string] = s.supplier_display_id as string;
+        }
+      }
+    }
+
+    const globalIdByBusinessId: Record<string, string> = {};
+    if (supplierBusinessIds.length > 0) {
+      const { data: bizRows, error: bizErr } = await client
+        .from('businesses')
+        .select('id, global_supplier_id')
+        .in('id', supplierBusinessIds);
+      if (!bizErr) {
+        for (const biz of bizRows ?? []) {
+          if (biz.id && biz.global_supplier_id) {
+            globalIdByBusinessId[biz.id as string] = biz.global_supplier_id as string;
+          }
+        }
+      }
+    }
+
     const byYear = new Map<number, number>();
-    const items: SupplierDetailItem[] = list.map((row: {
-      id: string;
-      created_at: string;
-      expected_completion_date: string | null;
-      expected_release_date: string | null;
-      amount_usd: string | number;
-      progress: number | null;
-      contract_display_id: string | null;
-      supplier: { supplier_display_id?: string | null } | { supplier_display_id?: string | null }[] | null;
-    }) => {
-      let contractId = row.contract_display_id?.trim() || null;
-      if (!contractId) {
-        const year = new Date(row.created_at).getUTCFullYear();
+    const items: SupplierDetailItem[] = list.map((row) => {
+      const createdAt = String(row.created_at ?? '');
+      const expectedCompletion = (row.expected_completion_date as string | null) ?? null;
+      const expectedRelease = (row.expected_release_date as string | null) ?? null;
+      const amountUsd = row.amount_usd;
+      const progress = row.progress as number | null;
+      const contractDisplayId = (row.contract_display_id as string | null) ?? null;
+      const businessSupplierId = (row.business_supplier_id as string | null | undefined) ?? null;
+      const supplierBusinessId = (row.supplier_business_id as string | null | undefined) ?? null;
+
+      let contractId = contractDisplayId?.trim() || null;
+      if (!contractId && createdAt) {
+        const year = new Date(createdAt).getUTCFullYear();
         const seq = (byYear.get(year) ?? 0) + 1;
         byYear.set(year, seq);
         contractId = `SC-${year}-${String(seq).padStart(3, '0')}`;
       }
-      const supplierJoin = row.supplier;
-      const supplierDisplayId = Array.isArray(supplierJoin)
-        ? supplierJoin[0]?.supplier_display_id ?? null
-        : supplierJoin?.supplier_display_id ?? null;
-      const progressPct = row.progress != null ? Math.min(100, Math.max(0, Number(row.progress))) : 0;
-      const dueDateIso = row.expected_completion_date || row.expected_release_date || null;
+      const supplierDisplayId =
+        (businessSupplierId ? suppDisplayById[businessSupplierId] : null) ??
+        (supplierBusinessId ? globalIdByBusinessId[supplierBusinessId] : null) ??
+        null;
+      const progressPct = progress != null ? Math.min(100, Math.max(0, Number(progress))) : 0;
+      const dueDateIso = expectedCompletion || expectedRelease || null;
       const statusDetail = dueDateIso
         ? `Due date: ${formatDueDateShort(dueDateIso)}`
         : `${progressPct}%`;
-      const amount = row.amount_usd != null ? parseFloat(String(row.amount_usd)) : 0;
+      const amount = amountUsd != null ? parseFloat(String(amountUsd)) : 0;
       return {
-        id: row.id,
-        contractId,
+        id: String(row.id),
+        contractId: contractId ?? String(row.id),
         supplierDisplayId,
-        supplierId: contractId,
+        supplierId: contractId ?? String(row.id),
         progressPercentage: progressPct,
         statusDetail,
         amount,
@@ -598,25 +702,16 @@ export class BusinessSuiteSuppliersService {
       return { success: false, message: 'No registered business for this account', error: 'No business' };
     }
 
-    const status = await businessSuiteService.getBusinessStatus(userId);
-    if (status !== 'Verified') {
-      return {
-        success: false,
-        message: 'Your business must be verified before a global supplier ID is issued',
-        error: 'Business not verified',
-      };
-    }
-
     const client = supabaseAdmin!;
-    const globalSupplierId = await ensureGlobalSupplierIdForBusiness(client, businessId);
-    if (!globalSupplierId) {
-      return { success: false, message: 'Could not retrieve global supplier ID', error: 'Not found' };
+    const result = await ensureGlobalSupplierIdForBusinessDetailed(client, businessId);
+    if (!result.ok) {
+      return { success: false, message: result.message, error: result.error };
     }
 
     return {
       success: true,
       message: 'Global supplier ID retrieved',
-      data: { globalSupplierId },
+      data: { globalSupplierId: result.globalSupplierId },
     };
   }
 

@@ -890,7 +890,7 @@ export class BusinessSuiteController {
     const result = await businessSuiteSuppliersService.getMySupplierId(userId);
     if (result.success) res.status(200).json(result);
     else if (result.error === 'No business' || result.error === 'Business not verified') res.status(400).json(result);
-    else if (result.error === 'Not found') res.status(404).json(result);
+    else if (result.error === 'Not found' || result.error === 'Migration required' || result.error === 'Update failed' || result.error === 'ID generation failed' || result.error === 'Database error') res.status(503).json(result);
     else res.status(403).json(result);
   }
 

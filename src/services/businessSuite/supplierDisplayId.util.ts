@@ -44,19 +44,17 @@ export async function generateSupplierDisplayId(
 /** Generate next BSUP-YYYY-NNNNN — one per registered business, platform-wide. */
 export async function generateGlobalSupplierId(client: SupabaseClient): Promise<string> {
   const year = new Date().getUTCFullYear();
-  const start = `${year}-01-01T00:00:00.000Z`;
-  const end = `${year + 1}-01-01T00:00:00.000Z`;
+  const prefix = `BSUP-${year}-`;
 
   for (let attempt = 0; attempt < 8; attempt++) {
     const { count } = await client
       .from('businesses')
       .select('*', { count: 'exact', head: true })
       .not('global_supplier_id', 'is', null)
-      .gte('created_at', start)
-      .lt('created_at', end);
+      .like('global_supplier_id', `${prefix}%`);
 
     const seq = (count ?? 0) + 1 + attempt;
-    const candidate = `BSUP-${year}-${String(seq).padStart(5, '0')}`;
+    const candidate = `${prefix}${String(seq).padStart(5, '0')}`;
 
     const { data: existing } = await client
       .from('businesses')
@@ -72,22 +70,104 @@ export async function generateGlobalSupplierId(client: SupabaseClient): Promise<
   throw new Error('Could not allocate a unique global supplier ID');
 }
 
+function isMissingGlobalSupplierIdColumn(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('global_supplier_id') && (lower.includes('does not exist') || lower.includes('could not find'));
+}
+
+async function isBusinessVerifiedForGlobalId(
+  client: SupabaseClient,
+  businessId: string,
+  ownerUserId: string | null,
+  businessesStatus: string | null
+): Promise<boolean> {
+  if (businessesStatus === 'Verified') return true;
+  if (!ownerUserId) return false;
+
+  const { data: kyc } = await client
+    .from('business_suite_kyc')
+    .select('status')
+    .eq('user_id', ownerUserId)
+    .maybeSingle();
+
+  if (kyc?.status !== 'Verified') return false;
+
+  if (businessesStatus !== 'Verified') {
+    await client
+      .from('businesses')
+      .update({ status: 'Verified', updated_at: new Date().toISOString() })
+      .eq('id', businessId);
+  }
+
+  return true;
+}
+
+export type EnsureGlobalSupplierIdResult =
+  | { ok: true; globalSupplierId: string }
+  | { ok: false; error: string; message: string };
+
 /** Assign global_supplier_id when business is Verified and missing. Idempotent. */
 export async function ensureGlobalSupplierIdForBusiness(
   client: SupabaseClient,
   businessId: string
 ): Promise<string | null> {
+  const result = await ensureGlobalSupplierIdForBusinessDetailed(client, businessId);
+  return result.ok ? result.globalSupplierId : null;
+}
+
+export async function ensureGlobalSupplierIdForBusinessDetailed(
+  client: SupabaseClient,
+  businessId: string
+): Promise<EnsureGlobalSupplierIdResult> {
   const { data: row, error } = await client
     .from('businesses')
-    .select('id, status, global_supplier_id')
+    .select('id, status, global_supplier_id, owner_user_id')
     .eq('id', businessId)
     .maybeSingle();
 
-  if (error || !row) return null;
-  if (row.status !== 'Verified') return null;
-  if (row.global_supplier_id) return row.global_supplier_id as string;
+  if (error) {
+    console.error('[ensureGlobalSupplierIdForBusiness] fetch error:', error.message);
+    if (isMissingGlobalSupplierIdColumn(error.message)) {
+      return {
+        ok: false,
+        error: 'Migration required',
+        message: 'Database migration 082_businesses_global_supplier_id.sql has not been applied yet.',
+      };
+    }
+    return { ok: false, error: 'Database error', message: error.message };
+  }
 
-  const globalSupplierId = await generateGlobalSupplierId(client);
+  if (!row) {
+    return { ok: false, error: 'Not found', message: 'Business record not found.' };
+  }
+
+  if (row.global_supplier_id) {
+    return { ok: true, globalSupplierId: row.global_supplier_id as string };
+  }
+
+  const verified = await isBusinessVerifiedForGlobalId(
+    client,
+    businessId,
+    (row.owner_user_id as string | null) ?? null,
+    (row.status as string | null) ?? null
+  );
+  if (!verified) {
+    return {
+      ok: false,
+      error: 'Business not verified',
+      message: 'Your business must be verified before a global supplier ID is issued.',
+    };
+  }
+
+  let globalSupplierId: string;
+  try {
+    globalSupplierId = await generateGlobalSupplierId(client);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to generate global supplier ID';
+    console.error('[ensureGlobalSupplierIdForBusiness] generate error:', message);
+    return { ok: false, error: 'ID generation failed', message };
+  }
+
   const { data: updated, error: updErr } = await client
     .from('businesses')
     .update({ global_supplier_id: globalSupplierId, updated_at: new Date().toISOString() })
@@ -97,15 +177,27 @@ export async function ensureGlobalSupplierIdForBusiness(
     .maybeSingle();
 
   if (updErr) {
+    console.error('[ensureGlobalSupplierIdForBusiness] update error:', updErr.message);
+    if (isMissingGlobalSupplierIdColumn(updErr.message)) {
+      return {
+        ok: false,
+        error: 'Migration required',
+        message: 'Database migration 082_businesses_global_supplier_id.sql has not been applied yet.',
+      };
+    }
     const { data: again } = await client
       .from('businesses')
       .select('global_supplier_id')
       .eq('id', businessId)
       .maybeSingle();
-    return again?.global_supplier_id ?? null;
+    if (again?.global_supplier_id) {
+      return { ok: true, globalSupplierId: again.global_supplier_id as string };
+    }
+    return { ok: false, error: 'Update failed', message: updErr.message };
   }
 
-  return (updated?.global_supplier_id as string | undefined) ?? globalSupplierId;
+  const assigned = (updated?.global_supplier_id as string | undefined) ?? globalSupplierId;
+  return { ok: true, globalSupplierId: assigned };
 }
 
 /** Generate next SC-YYYY-NNN for a creator's supply contracts in the current year. */
