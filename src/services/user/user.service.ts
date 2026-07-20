@@ -5,6 +5,7 @@
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import type {
+  AddBeneficiaryResponse,
   BeneficiaryItem,
   GetBeneficiariesResponse,
   RemoveBeneficiaryResponse,
@@ -345,6 +346,147 @@ export class UserService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fetch beneficiaries',
         error: error instanceof Error ? error.message : 'Failed to fetch beneficiaries',
+      };
+    }
+  }
+
+  /**
+   * Save a beneficiary by Trustitag handle for quick P2P sends.
+   */
+  async addBeneficiary(userId: string, rawTrustitag: unknown): Promise<AddBeneficiaryResponse> {
+    try {
+      const adminClient = supabaseAdmin;
+      if (!adminClient) {
+        return {
+          success: false,
+          message: 'Adding a beneficiary requires server configuration (service role)',
+          error: 'Service unavailable',
+        };
+      }
+
+      const normalized = trustitagService.normalizeTrustitag(String(rawTrustitag ?? ''));
+      if (!normalized) {
+        return {
+          success: false,
+          message: 'Invalid trustitag. Use 3-32 chars: lowercase letters, numbers, underscore.',
+          error: 'Validation failed',
+        };
+      }
+
+      const { data: beneficiaryUser, error: userErr } = await adminClient
+        .from('users')
+        .select('id, full_name, avatar_url, trustitag')
+        .eq('trustitag', normalized)
+        .maybeSingle();
+
+      if (userErr) {
+        return {
+          success: false,
+          message: userErr.message || 'Failed to look up trustitag',
+          error: userErr.message,
+        };
+      }
+
+      if (!beneficiaryUser?.id) {
+        return {
+          success: false,
+          message: 'No user found with this trustitag',
+          error: 'Not found',
+        };
+      }
+
+      if (beneficiaryUser.id === userId) {
+        return {
+          success: false,
+          message: 'You cannot add yourself as a beneficiary',
+          error: 'Validation failed',
+        };
+      }
+
+      const { data: existing } = await adminClient
+        .from('user_beneficiaries')
+        .select('id, trustitag, created_at')
+        .eq('user_id', userId)
+        .eq('beneficiary_user_id', beneficiaryUser.id)
+        .maybeSingle();
+
+      if (existing) {
+        return {
+          success: true,
+          message: 'Beneficiary already saved',
+          data: {
+            id: existing.id,
+            trustitag: existing.trustitag,
+            fullName: beneficiaryUser.full_name?.trim() || existing.trustitag,
+            avatarUrl: await resolveAvatarDisplayUrl(beneficiaryUser.avatar_url),
+            createdAt: existing.created_at,
+          },
+        };
+      }
+
+      const { data: inserted, error: insertErr } = await adminClient
+        .from('user_beneficiaries')
+        .insert({
+          user_id: userId,
+          beneficiary_user_id: beneficiaryUser.id,
+          trustitag: normalized,
+        })
+        .select('id, trustitag, created_at')
+        .single();
+
+      if (insertErr) {
+        if (insertErr.code === '23505') {
+          const { data: again } = await adminClient
+            .from('user_beneficiaries')
+            .select('id, trustitag, created_at')
+            .eq('user_id', userId)
+            .eq('beneficiary_user_id', beneficiaryUser.id)
+            .maybeSingle();
+          if (again) {
+            return {
+              success: true,
+              message: 'Beneficiary already saved',
+              data: {
+                id: again.id,
+                trustitag: again.trustitag,
+                fullName: beneficiaryUser.full_name?.trim() || again.trustitag,
+                avatarUrl: await resolveAvatarDisplayUrl(beneficiaryUser.avatar_url),
+                createdAt: again.created_at,
+              },
+            };
+          }
+        }
+        if (insertErr.message?.toLowerCase().includes('user_beneficiaries')) {
+          return {
+            success: false,
+            message: 'Beneficiaries are not available yet. Run migration 080_user_beneficiaries.sql.',
+            error: 'Migration required',
+          };
+        }
+        return {
+          success: false,
+          message: insertErr.message || 'Failed to add beneficiary',
+          error: insertErr.message,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Beneficiary added successfully',
+        data: {
+          id: inserted.id,
+          trustitag: inserted.trustitag,
+          fullName: beneficiaryUser.full_name?.trim() || inserted.trustitag,
+          avatarUrl: await resolveAvatarDisplayUrl(beneficiaryUser.avatar_url),
+          createdAt: inserted.created_at,
+        },
+      };
+    } catch (error) {
+      console.error('Error adding beneficiary:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to add beneficiary',
+        error: error instanceof Error ? error.message : 'Failed to add beneficiary',
       };
     }
   }

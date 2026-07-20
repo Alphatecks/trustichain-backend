@@ -93,6 +93,15 @@ router.get('/beneficiaries', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/user/beneficiaries
+ * @desc    Add a saved beneficiary by Trustitag handle. Body: { trustitag }
+ * @access  Private
+ */
+router.post('/beneficiaries', authenticate, asyncHandler(async (req, res) => {
+  await userController.addBeneficiary(req, res);
+}));
+
+/**
  * @route   DELETE /api/user/beneficiaries/:beneficiaryId
  * @desc    Permanently remove a saved beneficiary (Trustitag contact)
  * @access  Private

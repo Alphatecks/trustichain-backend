@@ -26,3 +26,15 @@ export interface RemoveBeneficiaryResponse {
   };
   error?: string;
 }
+
+export interface AddBeneficiaryRequest {
+  /** Trustitag handle (with or without @) */
+  trustitag: string;
+}
+
+export interface AddBeneficiaryResponse {
+  success: boolean;
+  message: string;
+  data?: BeneficiaryItem;
+  error?: string;
+}
