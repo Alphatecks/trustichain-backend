@@ -279,9 +279,11 @@ export type SupplierContractEscrowType = 'Full Payment' | 'Milestone Payment';
 export type ReleaseCondition = 'Buyer confirms delivery' | 'Time based' | 'Milestones' | 'Automatic release after delivery';
 
 export interface CreateSupplierContractRequest {
-  /** Step 1 - Contract Info */
-  supplierName: string;
-  supplierWalletAddress: string;
+  /** Saved supplier reference — UUID or SUPP-YYYY-NNN from POST /api/business-suite/suppliers */
+  supplierId?: string;
+  /** Step 1 - Contract Info (required when supplierId is omitted) */
+  supplierName?: string;
+  supplierWalletAddress?: string;
   supplierEmail?: string;
   contractTitle: string;
   deliveryDeadline?: string;
@@ -303,6 +305,7 @@ export interface CreateSupplierContractResponse {
   data?: {
     escrowId: string;
     contractId: string;
+    supplierDisplayId?: string | null;
     amountUsd: number;
     amountXrp: number | null;
     status: string;

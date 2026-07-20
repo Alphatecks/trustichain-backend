@@ -5,6 +5,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../config/supabase';
+import {
+  generateSupplyContractDisplayId,
+  resolveBusinessSupplier,
+  SUPPLY_CONTRACT_DISPLAY_ID_REGEX,
+} from './supplierDisplayId.util';
 import { businessSuiteService } from './businessSuite.service';
 import { escrowService } from '../escrow/escrow.service';
 import type {
@@ -22,9 +27,8 @@ const RELEASE_CONDITION_TO_TYPE: Record<ReleaseCondition, ReleaseType> = {
 };
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CONTRACT_ID_REGEX = /^(?:SUPP|SC)-(\d{4})-(\d+)$/i;
 
-/** Resolve escrow identifier (UUID or SUPP-YYYY-NNN / SC-YYYY-NNN) to escrow UUID for creator (user_id = userId). */
+/** Resolve escrow identifier (UUID or SC-YYYY-NNN) to escrow UUID for creator (user_id = userId). */
 async function resolveSupplyContractEscrowId(
   client: SupabaseClient,
   identifier: string,
@@ -43,9 +47,22 @@ async function resolveSupplyContractEscrowId(
       .maybeSingle();
     return data?.id ?? null;
   }
-  const match = trimmed.match(CONTRACT_ID_REGEX);
-  if (!match) return null;
-  const [, yearStr, seqStr] = match;
+
+  if (SUPPLY_CONTRACT_DISPLAY_ID_REGEX.test(trimmed)) {
+    const { data: byDisplay } = await client
+      .from('escrows')
+      .select('id')
+      .eq('contract_display_id', trimmed.toUpperCase())
+      .eq('user_id', userId)
+      .eq('suite_context', 'business')
+      .eq('transaction_type', 'supply')
+      .maybeSingle();
+    if (byDisplay?.id) return byDisplay.id;
+  }
+
+  const legacyMatch = trimmed.match(/^SC-(\d{4})-(\d+)$/i);
+  if (!legacyMatch) return null;
+  const [, yearStr, seqStr] = legacyMatch;
   const year = parseInt(yearStr!, 10);
   const seq = parseInt(seqStr!, 10);
   if (!year || !seq || seq < 1) return null;
@@ -83,12 +100,32 @@ export class BusinessSuiteSupplyContractsService {
       return { success: false, message: 'No registered business for this account', error: 'No business' };
     }
 
-    const supplierName = typeof body.supplierName === 'string' ? body.supplierName.trim() : '';
-    if (!supplierName) {
-      return { success: false, message: 'Supplier name is required (must be a registered business on Trustichain)', error: 'Missing supplier name' };
+    const client = supabaseAdmin!;
+
+    let linkedSupplier: Awaited<ReturnType<typeof resolveBusinessSupplier>> = null;
+    const supplierRef = typeof body.supplierId === 'string' ? body.supplierId.trim() : '';
+    if (supplierRef) {
+      linkedSupplier = await resolveBusinessSupplier(client, businessId, supplierRef);
+      if (!linkedSupplier) {
+        return {
+          success: false,
+          message: 'Supplier not found. Use the supplierDisplayId from POST /api/business-suite/suppliers (e.g. SUPP-2026-001).',
+          error: 'Supplier not found',
+        };
+      }
     }
 
-    const client = supabaseAdmin!;
+    const supplierName =
+      linkedSupplier?.name ||
+      (typeof body.supplierName === 'string' ? body.supplierName.trim() : '');
+    if (!supplierName) {
+      return {
+        success: false,
+        message: 'supplierId or supplierName is required',
+        error: 'Missing supplier name',
+      };
+    }
+
     const { data: businesses } = await client
       .from('businesses')
       .select('id, owner_user_id, company_name')
@@ -111,9 +148,19 @@ export class BusinessSuiteSupplyContractsService {
       return { success: false, message: 'You cannot create a supply contract with your own business', error: 'Same business' };
     }
 
-    const walletAddress = typeof body.supplierWalletAddress === 'string' ? body.supplierWalletAddress.trim() : '';
+    const walletAddressRaw =
+      (typeof body.supplierWalletAddress === 'string' ? body.supplierWalletAddress.trim() : '') ||
+      linkedSupplier?.walletAddress?.trim() ||
+      '';
+    const walletAddress = walletAddressRaw;
     if (!walletAddress || !walletAddress.startsWith('r') || walletAddress.length < 25) {
-      return { success: false, message: 'Supplier wallet address must be a valid XRPL address', error: 'Invalid wallet address' };
+      return {
+        success: false,
+        message: linkedSupplier
+          ? 'This supplier has no wallet address on file. Provide supplierWalletAddress when creating the contract.'
+          : 'Supplier wallet address must be a valid XRPL address',
+        error: 'Invalid wallet address',
+      };
     }
 
     const paymentAmount = Number(body.paymentAmount);
@@ -161,12 +208,17 @@ export class BusinessSuiteSupplyContractsService {
       : typeof rawDocs === 'string' && rawDocs.trim()
         ? [rawDocs.trim()]
         : [];
+
+    const contractId = await generateSupplyContractDisplayId(client, userId);
+
     const { error: updateError } = await client
       .from('escrows')
       .update({
         contract_title: body.contractTitle?.trim() || null,
         delivery_method: body.deliveryMethod || null,
         contract_document_urls: documentUrls.length > 0 ? documentUrls : null,
+        business_supplier_id: linkedSupplier?.id ?? null,
+        contract_display_id: contractId,
       })
       .eq('id', escrowId);
     if (updateError) {
@@ -178,29 +230,13 @@ export class BusinessSuiteSupplyContractsService {
       };
     }
 
-    const { data: escrow } = await client
-      .from('escrows')
-      .select('created_at, escrow_sequence')
-      .eq('id', escrowId)
-      .single();
-
-    const year = escrow?.created_at ? new Date(escrow.created_at).getUTCFullYear() : new Date().getUTCFullYear();
-    const { count } = await client
-      .from('escrows')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('transaction_type', 'supply')
-      .gte('created_at', `${year}-01-01`)
-      .lte('created_at', `${year}-12-31T23:59:59.999Z`);
-    const seq = count ?? 0;
-    const contractId = `SUPP-${year}-${String(seq).padStart(3, '0')}`;
-
     return {
       success: true,
       message: 'Supplier contract created',
       data: {
         escrowId,
         contractId,
+        supplierDisplayId: linkedSupplier?.supplierDisplayId ?? null,
         amountUsd: result.data.amount?.usd ?? paymentAmount,
         amountXrp: result.data.amount?.xrp ?? null,
         status: result.data.status ?? 'pending',

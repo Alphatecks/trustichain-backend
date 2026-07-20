@@ -2,9 +2,14 @@
  * Business Suite Suppliers API Types
  */
 
-/** Single card in Supplier details UI: id, display id, progress donut, status/due date, amount */
+/** Single card in Supplier details UI: escrow id, contract id, linked supplier id, progress donut, status/due date, amount */
 export interface SupplierDetailItem {
   id: string;
+  /** Supply contract display ID (SC-YYYY-NNN) */
+  contractId: string;
+  /** Saved supplier display ID (SUPP-YYYY-NNN) when contract is linked to a supplier row */
+  supplierDisplayId?: string | null;
+  /** @deprecated Use contractId — legacy alias kept for backward compatibility */
   supplierId: string;
   progressPercentage: number;
   statusDetail: string;

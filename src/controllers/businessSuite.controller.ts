@@ -780,7 +780,7 @@ export class BusinessSuiteController {
     const userId = req.userId!;
     const result = await businessSuiteSupplyContractsService.createSupplierContract(userId, req.body || {});
     if (result.success) res.status(201).json(result);
-    else if (result.error === 'Supplier not registered') res.status(404).json(result);
+    else if (result.error === 'Supplier not registered' || result.error === 'Supplier not found') res.status(404).json(result);
     else if (result.error === 'Missing supplier name' || result.error === 'Invalid wallet address' || result.error === 'Invalid payment amount') res.status(400).json(result);
     else res.status(403).json(result);
   }

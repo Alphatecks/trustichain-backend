@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase';
+import { generateSupplierDisplayId } from './supplierDisplayId.util';
 import { businessSuiteService } from './businessSuite.service';
 import type {
   SupplierAutocompleteItem,
@@ -70,6 +71,7 @@ export class BusinessSuiteSuppliersService {
     message: string;
     data?: {
       id: string;
+      supplierDisplayId: string;
       name: string;
       walletAddress: string | null;
       country: string | null;
@@ -149,11 +151,23 @@ export class BusinessSuiteSuppliersService {
         : null;
 
     const client = supabaseAdmin!;
+    let supplierDisplayId: string;
+    try {
+      supplierDisplayId = await generateSupplierDisplayId(client, businessId);
+    } catch (e) {
+      return {
+        success: false,
+        message: e instanceof Error ? e.message : 'Failed to generate supplier ID',
+        error: 'ID generation failed',
+      };
+    }
+
     const { data: supplier, error } = await client
       .from('business_suppliers')
       .insert({
         business_id: businessId,
         user_id: userId,
+        supplier_display_id: supplierDisplayId,
         name,
         wallet_address: walletAddress,
         country,
@@ -163,7 +177,7 @@ export class BusinessSuiteSuppliersService {
         due_date: dueDate,
         amount_usd: amount,
       })
-      .select('id, name, wallet_address, country, kyc_status, contract_type, tags, due_date, amount_usd')
+      .select('id, supplier_display_id, name, wallet_address, country, kyc_status, contract_type, tags, due_date, amount_usd')
       .single();
 
     if (error) {
@@ -175,6 +189,7 @@ export class BusinessSuiteSuppliersService {
       message: 'Supplier added successfully',
       data: {
         id: supplier.id,
+        supplierDisplayId: supplier.supplier_display_id,
         name: supplier.name,
         walletAddress: supplier.wallet_address ?? null,
         country: supplier.country ?? null,
@@ -314,7 +329,19 @@ export class BusinessSuiteSuppliersService {
     const client = supabaseAdmin!;
     const { data: rows, error } = await client
       .from('escrows')
-      .select('id, amount_usd, progress, expected_completion_date, expected_release_date, created_at')
+      .select(`
+        id,
+        amount_usd,
+        progress,
+        expected_completion_date,
+        expected_release_date,
+        created_at,
+        contract_display_id,
+        business_supplier_id,
+        supplier:business_supplier_id (
+          supplier_display_id
+        )
+      `)
       .eq('user_id', userId)
       .eq('suite_context', 'business')
       .eq('transaction_type', 'supply')
@@ -331,11 +358,20 @@ export class BusinessSuiteSuppliersService {
       expected_release_date: string | null;
       amount_usd: string | number;
       progress: number | null;
+      contract_display_id: string | null;
+      supplier: { supplier_display_id?: string | null } | { supplier_display_id?: string | null }[] | null;
     }) => {
-      const year = new Date(row.created_at).getUTCFullYear();
-      const seq = (byYear.get(year) ?? 0) + 1;
-      byYear.set(year, seq);
-      const supplierId = `SUPP-${year}-${String(seq).padStart(3, '0')}`;
+      let contractId = row.contract_display_id?.trim() || null;
+      if (!contractId) {
+        const year = new Date(row.created_at).getUTCFullYear();
+        const seq = (byYear.get(year) ?? 0) + 1;
+        byYear.set(year, seq);
+        contractId = `SC-${year}-${String(seq).padStart(3, '0')}`;
+      }
+      const supplierJoin = row.supplier;
+      const supplierDisplayId = Array.isArray(supplierJoin)
+        ? supplierJoin[0]?.supplier_display_id ?? null
+        : supplierJoin?.supplier_display_id ?? null;
       const progressPct = row.progress != null ? Math.min(100, Math.max(0, Number(row.progress))) : 0;
       const dueDateIso = row.expected_completion_date || row.expected_release_date || null;
       const statusDetail = dueDateIso
@@ -344,7 +380,9 @@ export class BusinessSuiteSuppliersService {
       const amount = row.amount_usd != null ? parseFloat(String(row.amount_usd)) : 0;
       return {
         id: row.id,
-        supplierId,
+        contractId,
+        supplierDisplayId,
+        supplierId: contractId,
         progressPercentage: progressPct,
         statusDetail,
         amount,
@@ -405,10 +443,15 @@ export class BusinessSuiteSuppliersService {
     const list = rows || [];
     const supplierIds = [...new Set(list.map((r: { supplier_id: string }) => r.supplier_id))];
     const { data: suppliers } = supplierIds.length > 0
-      ? await client.from('business_suppliers').select('id, name').in('id', supplierIds)
+      ? await client.from('business_suppliers').select('id, name, supplier_display_id').in('id', supplierIds)
       : { data: [] };
-    const supplierMap = (suppliers || []).reduce<Record<string, string>>((acc, s: { id: string; name: string }) => {
-      acc[s.id] = s.name || '—';
+    const supplierMap = (suppliers || []).reduce<
+      Record<string, { name: string; supplierDisplayId: string | null }>
+    >((acc, s: { id: string; name: string; supplier_display_id?: string | null }) => {
+      acc[s.id] = {
+        name: s.name || '—',
+        supplierDisplayId: s.supplier_display_id ?? null,
+      };
       return acc;
     }, {});
 
@@ -429,7 +472,7 @@ export class BusinessSuiteSuppliersService {
     }) => ({
       id: row.id,
       transactionId: formatTransactionId(row.id),
-      supplierName: supplierMap[row.supplier_id] ?? '—',
+      supplierName: supplierMap[row.supplier_id]?.name ?? '—',
       amountXrp: row.amount_xrp != null ? parseFloat(String(row.amount_xrp)) : null,
       amountUsd: parseFloat(String(row.amount_usd)),
       status: row.status || 'Successful',

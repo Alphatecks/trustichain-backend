@@ -16,6 +16,7 @@ import { encryptionService } from '../encryption/encryption.service';
 import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
 import { getEscrowCreationFeeSettings, resolveEscrowCreationFeePercentageByType } from './escrowCreationFee.service';
+import { generateSupplierDisplayId } from '../businessSuite/supplierDisplayId.util';
 
 async function resolveAvatarUrl(stored: string | null | undefined): Promise<string | null> {
   if (stored == null || !String(stored).trim()) return null;
@@ -3422,11 +3423,19 @@ export class EscrowService {
         (r: { id: string; name: string }) => r.name && r.name.trim().toLowerCase() === normalized
       );
       if (match) return match.id;
+      let supplierDisplayId: string;
+      try {
+        supplierDisplayId = await generateSupplierDisplayId(client, businessId);
+      } catch (e) {
+        console.warn('[Escrow] recordSupplyCompletionInSupplierHistory: could not generate supplier display id', e);
+        return null;
+      }
       const { data: inserted, error } = await client
         .from('business_suppliers')
         .insert({
           business_id: businessId,
           user_id: ownerUserId,
+          supplier_display_id: supplierDisplayId,
           name: name.trim() || 'Unknown',
         })
         .select('id')

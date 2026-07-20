@@ -4,13 +4,18 @@
 
 import { supabaseAdmin } from '../../config/supabase';
 import { businessSuiteService } from './businessSuite.service';
+import {
+  resolveBusinessSupplier,
+  SUPPLIER_DISPLAY_ID_REGEX,
+  SUPPLY_CONTRACT_DISPLAY_ID_REGEX,
+} from './supplierDisplayId.util';
 import { disputeService } from '../dispute/dispute.service';
 import type { FileSupplierDisputeRequest, FileSupplierDisputeResponse } from '../../types/api/businessSuiteDashboard.types';
 import type { CreateDisputeRequest, DisputeCategory, DisputeReasonType } from '../../types/api/dispute.types';
 
 export class BusinessSuiteSupplierDisputesService {
   /**
-   * File a dispute against a supplier. Resolves supplier reference (SUPP-YYYY-NNN or business name) to a supply escrow.
+   * File a dispute against a supplier. Resolves supplier reference (SUPP-YYYY-NNN supplier id, SC-YYYY-NNN contract id, or business name).
    */
   async fileSupplierDispute(userId: string, body: FileSupplierDisputeRequest): Promise<FileSupplierDisputeResponse> {
     const check = await businessSuiteService.ensureBusinessSuiteAccess(userId);
@@ -34,25 +39,64 @@ export class BusinessSuiteSupplierDisputesService {
     }
 
     const client = supabaseAdmin!;
+    const businessId = await businessSuiteService.getBusinessId(userId);
     let escrow: { id: string; counterparty_id: string | null } | null = null;
 
-    const suppMatch = ref.match(/^SUPP-(\d{4})-(\d{3})$/i);
-    if (suppMatch) {
-      const year = parseInt(suppMatch[1], 10);
-      const seq = parseInt(suppMatch[2], 10);
-      const { data: rows } = await client
+    if (SUPPLIER_DISPLAY_ID_REGEX.test(ref) && businessId) {
+      const supplier = await resolveBusinessSupplier(client, businessId, ref);
+      if (supplier) {
+        const { data: escrowRow } = await client
+          .from('escrows')
+          .select('id, counterparty_id')
+          .eq('user_id', userId)
+          .eq('business_supplier_id', supplier.id)
+          .eq('transaction_type', 'supply')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (escrowRow) {
+          escrow = escrowRow;
+        }
+      }
+      if (!escrow) {
+        return {
+          success: false,
+          message: 'No supply contract found for this supplier. Create a contract using the supplier ID first.',
+          error: 'Escrow not found',
+        };
+      }
+    } else if (SUPPLY_CONTRACT_DISPLAY_ID_REGEX.test(ref)) {
+      const { data: byDisplay } = await client
         .from('escrows')
         .select('id, counterparty_id')
+        .eq('contract_display_id', ref.toUpperCase())
         .eq('user_id', userId)
         .eq('transaction_type', 'supply')
-        .gte('created_at', `${year}-01-01`)
-        .lte('created_at', `${year}-12-31T23:59:59.999Z`)
-        .order('created_at', { ascending: true });
-      const list = rows || [];
-      if (seq < 1 || seq > list.length) {
-        return { success: false, message: 'No supply contract found with this supplier reference', error: 'Escrow not found' };
+        .maybeSingle();
+      if (byDisplay) {
+        escrow = byDisplay;
+      } else {
+        const scMatch = ref.match(/^SC-(\d{4})-(\d{3})$/i);
+        if (scMatch) {
+          const year = parseInt(scMatch[1], 10);
+          const seq = parseInt(scMatch[2], 10);
+          const { data: rows } = await client
+            .from('escrows')
+            .select('id, counterparty_id')
+            .eq('user_id', userId)
+            .eq('transaction_type', 'supply')
+            .gte('created_at', `${year}-01-01`)
+            .lte('created_at', `${year}-12-31T23:59:59.999Z`)
+            .order('created_at', { ascending: true });
+          const list = rows || [];
+          if (seq >= 1 && seq <= list.length) {
+            escrow = list[seq - 1];
+          }
+        }
       }
-      escrow = list[seq - 1];
+      if (!escrow) {
+        return { success: false, message: 'No supply contract found with this contract reference', error: 'Escrow not found' };
+      }
     } else {
       const { data: businesses } = await client
         .from('businesses')
