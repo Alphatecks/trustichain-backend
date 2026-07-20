@@ -4,8 +4,15 @@
  */
 
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import type {
+  BeneficiaryItem,
+  GetBeneficiariesResponse,
+  RemoveBeneficiaryResponse,
+} from '../../types/api/beneficiary.types';
 import { storageService } from '../storage/storage.service';
 import { trustitagService } from '../trustitag.service';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Stored avatar: our bucket ref, or external https URL (e.g. Google profile photo). */
 async function resolveAvatarDisplayUrl(stored: string | null | undefined): Promise<string | null> {
@@ -286,20 +293,51 @@ export class UserService {
   /**
    * Get beneficiaries for a user
    */
-  async getBeneficiaries(_userId: string): Promise<{
-    success: boolean;
-    message: string;
-    data?: any[];
-    error?: string;
-  }> {
+  async getBeneficiaries(userId: string): Promise<GetBeneficiariesResponse> {
     try {
-      // TODO: Implement beneficiaries logic when database schema is ready
-      // For now, return empty array
-      // userId parameter reserved for future implementation
+      const adminClient = supabaseAdmin || supabase;
+
+      const { data: rows, error } = await adminClient
+        .from('user_beneficiaries')
+        .select(
+          `
+          id,
+          trustitag,
+          created_at,
+          beneficiary:beneficiary_user_id (
+            full_name,
+            avatar_url
+          )
+        `
+        )
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return {
+          success: false,
+          message: error.message || 'Failed to fetch beneficiaries',
+          error: error.message,
+        };
+      }
+
+      const beneficiaries: BeneficiaryItem[] = await Promise.all(
+        (rows ?? []).map(async (row) => {
+          const beneficiary = row.beneficiary as { full_name?: string; avatar_url?: string | null } | null;
+          return {
+            id: row.id,
+            trustitag: row.trustitag,
+            fullName: beneficiary?.full_name?.trim() || row.trustitag,
+            avatarUrl: await resolveAvatarDisplayUrl(beneficiary?.avatar_url),
+            createdAt: row.created_at,
+          };
+        })
+      );
+
       return {
         success: true,
         message: 'Beneficiaries retrieved successfully',
-        data: [],
+        data: beneficiaries,
       };
     } catch (error) {
       console.error('Error fetching beneficiaries:', error);
@@ -307,6 +345,97 @@ export class UserService {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fetch beneficiaries',
         error: error instanceof Error ? error.message : 'Failed to fetch beneficiaries',
+      };
+    }
+  }
+
+  /**
+   * Permanently remove a saved beneficiary (Trustitag contact).
+   * Accepts beneficiary row UUID or normalized trustitag handle.
+   */
+  async removeBeneficiary(userId: string, beneficiaryId: string): Promise<RemoveBeneficiaryResponse> {
+    try {
+      const adminClient = supabaseAdmin;
+      if (!adminClient) {
+        return {
+          success: false,
+          message: 'Removing a beneficiary requires server configuration (service role)',
+          error: 'Service unavailable',
+        };
+      }
+
+      const identifier = String(beneficiaryId || '').trim();
+      if (!identifier) {
+        return {
+          success: false,
+          message: 'beneficiaryId is required',
+          error: 'Validation failed',
+        };
+      }
+
+      let query = adminClient
+        .from('user_beneficiaries')
+        .select('id, trustitag')
+        .eq('user_id', userId);
+
+      if (UUID_RE.test(identifier)) {
+        query = query.eq('id', identifier);
+      } else {
+        const normalized = trustitagService.normalizeTrustitag(identifier);
+        if (!normalized) {
+          return {
+            success: false,
+            message: 'Invalid beneficiary identifier',
+            error: 'Validation failed',
+          };
+        }
+        query = query.eq('trustitag', normalized);
+      }
+
+      const { data: row, error: fetchErr } = await query.maybeSingle();
+      if (fetchErr) {
+        return {
+          success: false,
+          message: fetchErr.message || 'Failed to remove beneficiary',
+          error: fetchErr.message,
+        };
+      }
+      if (!row) {
+        return {
+          success: false,
+          message: 'Beneficiary not found',
+          error: 'Not found',
+        };
+      }
+
+      const { error: deleteErr } = await adminClient
+        .from('user_beneficiaries')
+        .delete()
+        .eq('id', row.id)
+        .eq('user_id', userId);
+
+      if (deleteErr) {
+        return {
+          success: false,
+          message: deleteErr.message || 'Failed to remove beneficiary',
+          error: deleteErr.message,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Beneficiary removed successfully',
+        data: {
+          id: row.id,
+          trustitag: row.trustitag,
+        },
+      };
+    } catch (error) {
+      console.error('Error removing beneficiary:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to remove beneficiary',
+        error: error instanceof Error ? error.message : 'Failed to remove beneficiary',
       };
     }
   }

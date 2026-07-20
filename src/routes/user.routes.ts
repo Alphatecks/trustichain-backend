@@ -92,6 +92,16 @@ router.get('/beneficiaries', authenticate, asyncHandler(async (req, res) => {
   await userController.getBeneficiaries(req, res);
 }));
 
+/**
+ * @route   DELETE /api/user/beneficiaries/:beneficiaryId
+ * @desc    Permanently remove a saved beneficiary (Trustitag contact)
+ * @access  Private
+ * @param   beneficiaryId - Beneficiary row UUID or trustitag handle
+ */
+router.delete('/beneficiaries/:beneficiaryId', authenticate, asyncHandler(async (req, res) => {
+  await userController.removeBeneficiary(req, res);
+}));
+
 export default router;
 
 

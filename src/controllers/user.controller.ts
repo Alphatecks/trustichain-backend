@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { userService } from '../services/user/user.service';
+import type { RemoveBeneficiaryResponse } from '../types/api/beneficiary.types';
 
 interface UserProfileResponse {
   success: boolean;
@@ -139,6 +140,50 @@ export class UserController {
       } else {
         res.status(400).json(result);
       }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Remove a saved beneficiary (Trustitag contact)
+   * DELETE /api/user/beneficiaries/:beneficiaryId
+   */
+  async removeBeneficiary(req: Request, res: Response<RemoveBeneficiaryResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const beneficiaryId = req.params.beneficiaryId?.trim();
+      if (!beneficiaryId) {
+        res.status(400).json({
+          success: false,
+          message: 'beneficiaryId is required',
+          error: 'Validation failed',
+        });
+        return;
+      }
+
+      const result = await userService.removeBeneficiary(userId, beneficiaryId);
+
+      if (result.success) {
+        res.status(200).json(result);
+        return;
+      }
+
+      const err = result.error || '';
+      if (err === 'Not found') {
+        res.status(404).json(result);
+        return;
+      }
+      if (err === 'Service unavailable') {
+        res.status(503).json(result);
+        return;
+      }
+      res.status(400).json(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.status(500).json({
