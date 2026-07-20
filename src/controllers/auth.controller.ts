@@ -532,7 +532,16 @@ export class AuthController {
   async ensureProfile(req: Request, res: Response<EnsureProfileResponse>): Promise<void> {
     try {
       const userId = req.userId!;
-      const result = await authService.ensurePublicUserProfile(userId);
+      const authHeader = req.headers.authorization;
+      const accessToken =
+        authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : undefined;
+      const refreshToken =
+        typeof req.body?.refreshToken === 'string' ? req.body.refreshToken.trim() : undefined;
+
+      const session =
+        accessToken && refreshToken ? { accessToken, refreshToken } : undefined;
+
+      const result = await authService.ensurePublicUserProfile(userId, session);
       if (result.success) {
         res.status(200).json(result);
       } else if (result.error === 'Not found') {

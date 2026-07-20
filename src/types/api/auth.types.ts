@@ -125,8 +125,16 @@ export interface EnsureProfileResponse {
       trustitag?: string;
     };
     created: boolean;
+    /** Present when MFA is enabled and session tokens were supplied */
+    requiresMfa?: boolean;
+    mfaToken?: string;
   };
   error?: string;
+}
+
+/** Optional body for POST /api/auth/ensure-profile when completing OAuth with MFA */
+export interface EnsureProfileRequest {
+  refreshToken?: string;
 }
 
 /** GET /api/auth/supabase-public-config — public anon client bootstrap */

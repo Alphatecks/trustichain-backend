@@ -75,7 +75,7 @@ const loginSchema = z.object({
 
 const loginMfaSchema = z.object({
   code: z.preprocess(
-    (val) => (typeof val === 'string' ? val.replace(/\s/g, '') : val),
+    (val) => String(val ?? '').replace(/\s/g, ''),
     z.string().regex(/^\d{6}$/, 'Authenticator code must be 6 digits')
   ),
   mfaToken: z.string().min(1, 'mfaToken is required'),

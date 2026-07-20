@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../config/supabase';
 
 const AES = 'aes-256-gcm';
 const MFA_LOGIN_TTL_SEC = 10 * 60; // 10 minutes
-const DEFAULT_TOTP_WINDOW_STEPS = 1;
+const DEFAULT_TOTP_WINDOW_STEPS = 2;
 const MAX_TOTP_WINDOW_STEPS = 3;
 
 export interface MfaLoginPayload {
@@ -110,6 +110,10 @@ function verifyTotp(secret: string, token: string): boolean {
   });
   return result.valid;
 }
+
+export type MfaVerifyLoginResult =
+  | { valid: true }
+  | { valid: false; error: 'Invalid code' | 'MFA not enabled' | 'MFA configuration error' | 'Not found' };
 
 export class MfaService {
   private issuerName(): string {
@@ -309,41 +313,68 @@ export class MfaService {
   }
 
   /**
+   * Read whether MFA is enabled for a user (service role — not subject to RLS gaps).
+   */
+  async isMfaEnabled(userId: string): Promise<{ enabled: boolean; error?: string }> {
+    if (!supabaseAdmin) {
+      return { enabled: false, error: 'Service unavailable' };
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('mfa_enabled')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      return { enabled: false, error: error.message };
+    }
+
+    return { enabled: data?.mfa_enabled === true };
+  }
+
+  /**
    * Verify TOTP for a user who has MFA enabled (login second step).
    */
-  async verifyLoginCode(userId: string, code: string): Promise<boolean> {
+  async verifyLoginCode(userId: string, code: string): Promise<MfaVerifyLoginResult> {
     if (!supabaseAdmin) {
-      return false;
+      return { valid: false, error: 'MFA configuration error' };
     }
     try {
       getEncryptionKey();
     } catch {
-      return false;
+      return { valid: false, error: 'MFA configuration error' };
     }
 
     const normalized = String(code).replace(/\s/g, '');
     if (!/^\d{6}$/.test(normalized)) {
-      return false;
+      return { valid: false, error: 'Invalid code' };
     }
 
-    const { data: row } = await supabaseAdmin
+    const { data: row, error: fetchError } = await supabaseAdmin
       .from('users')
       .select('mfa_enabled, mfa_secret_encrypted')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
+
+    if (fetchError) {
+      return { valid: false, error: 'Not found' };
+    }
 
     if (!row?.mfa_enabled || !row.mfa_secret_encrypted) {
-      return false;
+      return { valid: false, error: 'MFA not enabled' };
     }
 
     let secretPlain: string;
     try {
       secretPlain = decryptSecret(row.mfa_secret_encrypted as string);
     } catch {
-      return false;
+      return { valid: false, error: 'MFA configuration error' };
     }
 
-    return verifyTotp(secretPlain, normalized);
+    return verifyTotp(secretPlain, normalized)
+      ? { valid: true }
+      : { valid: false, error: 'Invalid code' };
   }
 
 }

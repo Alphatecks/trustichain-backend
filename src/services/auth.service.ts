@@ -1,4 +1,4 @@
-import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { createClient, type Session, type User } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { walletService } from './wallet/wallet.service';
 import {
@@ -459,48 +459,34 @@ export class AuthService {
       }).catch(() => {});
       // #endregion
 
-      // Must use loginClient (JWT attached): shared supabase has no session here, so RLS hides the row.
-      const { data: mfaRow } = await loginClient
-        .from('users')
-        .select('mfa_enabled')
-        .eq('id', user.id)
-        .maybeSingle();
+      // Ensure public.users exists so MFA flags and profile fields are reliable.
+      await this.upsertPublicUserProfileFromAuthUser(user);
+
+      const mfaStatus = await mfaService.isMfaEnabled(user.id);
+      if (mfaStatus.error) {
+        return {
+          success: false,
+          message: 'Unable to verify two-factor authentication status. Please try again.',
+          error: 'MFA check failed',
+        };
+      }
 
       const trustitag = await this.assignTrustitagForUser(user.id);
 
-      if (mfaRow?.mfa_enabled === true && authData.session?.access_token) {
-        let mfaToken: string;
-        try {
-          mfaToken = createMfaLoginToken({
-            userId: user.id,
-            email: userEmail,
-            access_token: authData.session.access_token,
-            refresh_token: authData.session.refresh_token ?? '',
-          });
-        } catch {
-          return {
-            success: false,
-            message:
-              'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
-            error: 'Server misconfiguration',
-          };
+      if (mfaStatus.enabled && authData.session?.access_token) {
+        const challenge = this.buildMfaLoginChallenge({
+          userId: user.id,
+          email: userEmail,
+          fullName,
+          country,
+          accessToken: authData.session.access_token,
+          refreshToken: authData.session.refresh_token ?? '',
+          trustitag,
+        });
+        if (!challenge.success) {
+          return challenge;
         }
-        // Session lives only on the ephemeral client; no signOut on the shared singleton.
-        return {
-          success: true,
-          message: 'Additional verification required',
-          data: {
-            requiresMfa: true,
-            mfaToken,
-            user: {
-              id: user.id,
-              email: userEmail,
-              fullName,
-              country: country ?? '',
-              ...(trustitag && { trustitag }),
-            },
-          },
-        };
+        return challenge;
       }
 
       return {
@@ -559,8 +545,16 @@ export class AuthService {
         };
       }
 
-      const totpOk = await mfaService.verifyLoginCode(payload.userId, code);
-      if (!totpOk) {
+      const totpResult = await mfaService.verifyLoginCode(payload.userId, code);
+      if (!totpResult.valid) {
+        if (totpResult.error === 'MFA configuration error') {
+          return {
+            success: false,
+            message:
+              'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
+            error: 'Server misconfiguration',
+          };
+        }
         return {
           success: false,
           message: 'Invalid authenticator code',
@@ -834,10 +828,58 @@ export class AuthService {
     }
   }
 
+  /** Build MFA challenge payload after password/OAuth sign-in succeeded. */
+  private buildMfaLoginChallenge(input: {
+    userId: string;
+    email: string;
+    fullName: string;
+    country: string | null;
+    accessToken: string;
+    refreshToken: string;
+    trustitag?: string;
+  }): LoginResponse {
+    let mfaToken: string;
+    try {
+      mfaToken = createMfaLoginToken({
+        userId: input.userId,
+        email: input.email,
+        access_token: input.accessToken,
+        refresh_token: input.refreshToken,
+      });
+    } catch {
+      return {
+        success: false,
+        message:
+          'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
+        error: 'Server misconfiguration',
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Additional verification required',
+      data: {
+        requiresMfa: true,
+        mfaToken,
+        user: {
+          id: input.userId,
+          email: input.email,
+          fullName: input.fullName,
+          country: input.country ?? '',
+          ...(input.trustitag && { trustitag: input.trustitag }),
+        },
+      },
+    };
+  }
+
   /**
    * Sync public.users from Supabase Auth for the JWT subject (SPA OAuth / any provider).
+   * When refreshToken is supplied and MFA is enabled, returns mfaToken for POST /api/auth/login/mfa.
    */
-  async ensurePublicUserProfile(userId: string): Promise<EnsureProfileResponse> {
+  async ensurePublicUserProfile(
+    userId: string,
+    session?: { accessToken: string; refreshToken: string }
+  ): Promise<EnsureProfileResponse> {
     if (!supabaseAdmin) {
       return {
         success: false,
@@ -862,6 +904,71 @@ export class AuthService {
 
     await this.ensurePersonalWalletExists(userId);
     const trustitag = await this.assignTrustitagForUser(userId);
+
+    const mfaStatus = await mfaService.isMfaEnabled(userId);
+    if (mfaStatus.error) {
+      return {
+        success: false,
+        message: 'Unable to verify two-factor authentication status. Please try again.',
+        error: 'MFA check failed',
+      };
+    }
+
+    if (mfaStatus.enabled) {
+      const accessToken = session?.accessToken?.trim();
+      const refreshToken = session?.refreshToken?.trim();
+      if (!accessToken || !refreshToken) {
+        return {
+          success: true,
+          message: 'Profile synced. Two-factor authentication verification is required before continuing.',
+          data: {
+            user: {
+              id: userProfile.id,
+              email: userProfile.email,
+              fullName: userProfile.fullName,
+              country: userProfile.country,
+              ...(trustitag && { trustitag }),
+            },
+            created,
+            requiresMfa: true,
+          },
+        };
+      }
+
+      const challenge = this.buildMfaLoginChallenge({
+        userId: userProfile.id,
+        email: userProfile.email,
+        fullName: userProfile.fullName,
+        country: userProfile.country,
+        accessToken,
+        refreshToken,
+        trustitag,
+      });
+      if (!challenge.success || !challenge.data?.mfaToken) {
+        return {
+          success: false,
+          message: challenge.message,
+          error: challenge.error,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Additional verification required',
+        data: {
+          user: {
+            id: userProfile.id,
+            email: userProfile.email,
+            fullName: userProfile.fullName,
+            country: userProfile.country,
+            ...(trustitag && { trustitag }),
+          },
+          created,
+          requiresMfa: true,
+          mfaToken: challenge.data.mfaToken,
+        },
+      };
+    }
 
     return {
       success: true,
@@ -905,51 +1012,51 @@ export class AuthService {
    */
   private async finalizeGoogleOAuthSession(
     session: Session,
-    user: User,
-    /** Client that already has this user's JWT (RLS: auth.uid() = id) */
-    clientWithSession: SupabaseClient
+    user: User
   ): Promise<GoogleOAuthCallbackResponse> {
     const userProfile = await this.upsertPublicUserProfileFromAuthUser(user);
     await this.ensurePersonalWalletExists(user.id);
     const trustitag = await this.assignTrustitagForUser(user.id);
 
-    const { data: mfaRow } = await clientWithSession
-      .from('users')
-      .select('mfa_enabled')
-      .eq('id', user.id)
-      .maybeSingle();
+    const mfaStatus = await mfaService.isMfaEnabled(user.id);
+    if (mfaStatus.error) {
+      return {
+        success: false,
+        message: 'Unable to verify two-factor authentication status. Please try again.',
+        error: 'MFA check failed',
+      };
+    }
 
-    if (mfaRow?.mfa_enabled === true && session.access_token) {
-      let mfaToken: string;
-      try {
-        mfaToken = createMfaLoginToken({
-          userId: user.id,
-          email: userProfile.email,
-          access_token: session.access_token,
-          refresh_token: session.refresh_token ?? '',
-        });
-      } catch {
+    if (mfaStatus.enabled && session.access_token) {
+      const challenge = this.buildMfaLoginChallenge({
+        userId: user.id,
+        email: userProfile.email,
+        fullName: userProfile.fullName,
+        country: userProfile.country,
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token ?? '',
+        trustitag,
+      });
+      if (!challenge.success) {
         return {
           success: false,
-          message:
-            'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
-          error: 'Server misconfiguration',
+          message: challenge.message,
+          error: challenge.error,
         };
       }
-
       return {
         success: true,
-        message: 'Additional verification required',
+        message: challenge.message,
         data: {
           user: {
-            id: userProfile.id,
-            email: userProfile.email,
-            fullName: userProfile.fullName,
-            country: userProfile.country,
-            ...(trustitag && { trustitag }),
+            id: challenge.data!.user.id,
+            email: challenge.data!.user.email,
+            fullName: challenge.data!.user.fullName,
+            country: challenge.data!.user.country || null,
+            ...(challenge.data!.user.trustitag && { trustitag: challenge.data!.user.trustitag }),
           },
           requiresMfa: true,
-          mfaToken,
+          mfaToken: challenge.data!.mfaToken,
         },
       };
     }
@@ -1002,13 +1109,16 @@ export class AuthService {
       }
 
       const user = sessionData.user;
-      const { data: mfaRow } = await ephemeral
-        .from('users')
-        .select('mfa_enabled')
-        .eq('id', user.id)
-        .maybeSingle();
+      const mfaStatus = await mfaService.isMfaEnabled(user.id);
+      if (mfaStatus.error) {
+        return {
+          success: false,
+          message: 'Unable to verify two-factor authentication status. Please try again.',
+          error: 'MFA check failed',
+        };
+      }
 
-      if (mfaRow?.mfa_enabled !== true) {
+      if (!mfaStatus.enabled) {
         return {
           success: false,
           message: 'Two-factor authentication is not enabled for this account',
@@ -1025,40 +1135,21 @@ export class AuthService {
         'User';
       const country = (typeof userMetadata?.country === 'string' ? userMetadata.country : null) ?? null;
 
-      let mfaToken: string;
-      try {
-        mfaToken = createMfaLoginToken({
-          userId: user.id,
-          email: userEmail,
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-      } catch {
-        return {
-          success: false,
-          message:
-            'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
-          error: 'Server misconfiguration',
-        };
-      }
-
       const trustitag = await this.assignTrustitagForUser(user.id);
 
-      return {
-        success: true,
-        message: 'Additional verification required',
-        data: {
-          requiresMfa: true,
-          mfaToken,
-          user: {
-            id: user.id,
-            email: userEmail,
-            fullName,
-            country: country ?? '',
-            ...(trustitag && { trustitag }),
-          },
-        },
-      };
+      const challenge = this.buildMfaLoginChallenge({
+        userId: user.id,
+        email: userEmail,
+        fullName,
+        country,
+        accessToken,
+        refreshToken,
+        trustitag,
+      });
+      if (!challenge.success) {
+        return challenge;
+      }
+      return challenge;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
@@ -1140,7 +1231,7 @@ export class AuthService {
         };
       }
 
-      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user, loginClient);
+      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
@@ -1171,7 +1262,7 @@ export class AuthService {
         };
       }
 
-      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user, loginClient);
+      return await this.finalizeGoogleOAuthSession(sessionData.session, sessionData.user);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
