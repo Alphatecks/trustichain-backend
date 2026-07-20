@@ -67,20 +67,57 @@ export const validateRegister = (
   }
 };
 
-// Login validation schema
-const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(1, 'Password is required'),
-});
+/** Extract TOTP from common frontend field names. */
+function pickTotpCode(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const b = body as Record<string, unknown>;
+  const raw = b.code ?? b.otp ?? b.totp ?? b.totpCode ?? b.mfaCode;
+  if (raw == null || raw === '') return undefined;
+  const s = String(raw).replace(/\s/g, '');
+  if (!/^\d+$/.test(s) || s.length > 6) return undefined;
+  return s.padStart(6, '0');
+}
 
-const loginMfaSchema = z.object({
-  code: z.preprocess(
-    (val) => String(val ?? '').replace(/\s/g, ''),
-    z.string().regex(/^\d{6}$/, 'Authenticator code must be 6 digits')
-  ),
-  mfaToken: z.string().min(1, 'mfaToken is required'),
-  email: z.string().email('Invalid email').optional(),
-});
+// Login validation schema
+const loginSchema = z.preprocess(
+  (body) => {
+    if (body && typeof body === 'object') {
+      const code = pickTotpCode(body);
+      return { ...(body as object), ...(code ? { code } : {}) };
+    }
+    return body;
+  },
+  z.object({
+    email: z.string().email('Invalid email address'),
+    password: z.string().min(1, 'Password is required'),
+    code: z
+      .string()
+      .regex(/^\d{6}$/, 'Authenticator code must be 6 digits')
+      .optional(),
+  })
+);
+
+const loginMfaSchema = z.preprocess(
+  (body) => {
+    if (body && typeof body === 'object') {
+      const b = body as Record<string, unknown>;
+      const codeRaw = b.code ?? b.otp ?? b.totp ?? b.totpCode ?? b.mfaCode;
+      const mfaTokenRaw = b.mfaToken ?? b.mfa_token;
+      const code =
+        codeRaw != null && codeRaw !== ''
+          ? String(codeRaw).replace(/\s/g, '').padStart(6, '0')
+          : undefined;
+      const mfaToken = typeof mfaTokenRaw === 'string' ? mfaTokenRaw.trim() : mfaTokenRaw;
+      return { ...b, code, mfaToken };
+    }
+    return body;
+  },
+  z.object({
+    code: z.string().regex(/^\d{6}$/, 'Authenticator code must be 6 digits'),
+    mfaToken: z.string().min(1, 'mfaToken is required'),
+    email: z.string().email('Invalid email').optional(),
+  })
+);
 
 const oauthMfaPrepSchema = z.object({
   accessToken: z.string().min(1, 'accessToken is required'),
@@ -252,7 +289,7 @@ export const validateLoginMfa = (
   next: NextFunction
 ): void => {
   try {
-    loginMfaSchema.parse(req.body);
+    req.body = loginMfaSchema.parse(req.body);
     next();
   } catch (error: unknown) {
     if (error instanceof ZodError) {
@@ -278,7 +315,7 @@ export const validateLogin = (
   next: NextFunction
 ): void => {
   try {
-    loginSchema.parse(req.body);
+    req.body = loginSchema.parse(req.body) as LoginRequest;
     next();
   } catch (error: unknown) {
     if (error instanceof ZodError) {

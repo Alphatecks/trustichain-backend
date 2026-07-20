@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../config/supabase';
 
 const AES = 'aes-256-gcm';
 const MFA_LOGIN_TTL_SEC = 10 * 60; // 10 minutes
-const DEFAULT_TOTP_WINDOW_STEPS = 2;
+const DEFAULT_TOTP_WINDOW_STEPS = 3;
 const MAX_TOTP_WINDOW_STEPS = 3;
 
 export interface MfaLoginPayload {
@@ -63,7 +63,6 @@ export function parseMfaLoginToken(token: string): MfaLoginPayload | null {
       !parsed.userId ||
       !parsed.email ||
       !parsed.access_token ||
-      !parsed.refresh_token ||
       typeof parsed.exp !== 'number'
     ) {
       return null;
@@ -75,6 +74,14 @@ export function parseMfaLoginToken(token: string): MfaLoginPayload | null {
   } catch {
     return null;
   }
+}
+
+/** Normalize user-entered TOTP (strip spaces, pad leading zeros). */
+export function normalizeTotpCode(raw: unknown): string | null {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).replace(/\s/g, '');
+  if (!/^\d+$/.test(s) || s.length > 6) return null;
+  return s.padStart(6, '0');
 }
 
 function requireAdmin() {
@@ -194,8 +201,8 @@ export class MfaService {
       return { success: false, message: msg, error: 'MFA configuration error' };
     }
 
-    const normalized = String(code).replace(/\s/g, '');
-    if (!/^\d{6}$/.test(normalized)) {
+    const normalized = normalizeTotpCode(code);
+    if (!normalized) {
       return { success: false, message: 'Invalid code format (expect 6 digits)', error: 'Validation failed' };
     }
 
@@ -262,8 +269,8 @@ export class MfaService {
       return { success: false, message: msg, error: 'MFA configuration error' };
     }
 
-    const normalized = String(code).replace(/\s/g, '');
-    if (!/^\d{6}$/.test(normalized)) {
+    const normalized = normalizeTotpCode(code);
+    if (!normalized) {
       return { success: false, message: 'Invalid code format (expect 6 digits)', error: 'Validation failed' };
     }
 
@@ -346,8 +353,8 @@ export class MfaService {
       return { valid: false, error: 'MFA configuration error' };
     }
 
-    const normalized = String(code).replace(/\s/g, '');
-    if (!/^\d{6}$/.test(normalized)) {
+    const normalized = normalizeTotpCode(code);
+    if (!normalized) {
       return { valid: false, error: 'Invalid code' };
     }
 

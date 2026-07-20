@@ -18,7 +18,7 @@ import {
 import { emailService } from './email.service';
 import { trustitagService } from './trustitag.service';
 import * as crypto from 'crypto';
-import { createMfaLoginToken, parseMfaLoginToken, mfaService } from './mfa.service';
+import { createMfaLoginToken, parseMfaLoginToken, mfaService, type MfaVerifyLoginResult } from './mfa.service';
 import type { LoginMfaRequest } from '../types/api/auth.types';
 
 /** Per-request Supabase client for password login / MFA so the shared singleton is not used for sessions. */
@@ -474,6 +474,22 @@ export class AuthService {
       const trustitag = await this.assignTrustitagForUser(user.id);
 
       if (mfaStatus.enabled && authData.session?.access_token) {
+        if (loginData.code) {
+          const totpResult = await mfaService.verifyLoginCode(user.id, loginData.code);
+          if (!totpResult.valid) {
+            return this.totpLoginError(totpResult);
+          }
+          return this.finishLoginWithSessionTokens({
+            userId: user.id,
+            userEmail,
+            fullName,
+            country,
+            accessToken: authData.session.access_token,
+            refreshToken: authData.session.refresh_token ?? undefined,
+            trustitag,
+          });
+        }
+
         const challenge = this.buildMfaLoginChallenge({
           userId: user.id,
           email: userEmail,
@@ -519,7 +535,9 @@ export class AuthService {
    */
   async loginWithMfa(body: LoginMfaRequest): Promise<LoginResponse> {
     try {
-      const { code, mfaToken, email } = body;
+      const code = body.code;
+      const mfaToken = body.mfaToken?.trim();
+      const { email } = body;
       if (!code || !mfaToken) {
         return {
           success: false,
@@ -532,7 +550,7 @@ export class AuthService {
       if (!payload) {
         return {
           success: false,
-          message: 'Invalid or expired MFA token. Please sign in again.',
+          message: 'Invalid or expired MFA token. Please sign in again with your email and password.',
           error: 'Invalid mfaToken',
         };
       }
@@ -547,88 +565,20 @@ export class AuthService {
 
       const totpResult = await mfaService.verifyLoginCode(payload.userId, code);
       if (!totpResult.valid) {
-        if (totpResult.error === 'MFA configuration error') {
-          return {
-            success: false,
-            message:
-              'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
-            error: 'Server misconfiguration',
-          };
-        }
-        return {
-          success: false,
-          message: 'Invalid authenticator code',
-          error: 'Invalid code',
-        };
-      }
-
-      const adminClient = supabaseAdmin || supabase;
-      const { data: profile, error: profileError } = await adminClient
-        .from('users')
-        .select('email, full_name, country')
-        .eq('id', payload.userId)
-        .maybeSingle();
-
-      if (profileError || !profile) {
-        return {
-          success: false,
-          message: 'User profile not found',
-          error: 'Not found',
-        };
-      }
-
-      let ephemeral;
-      try {
-        ephemeral = createEphemeralAuthClient();
-      } catch {
-        return {
-          success: false,
-          message: 'Server configuration error',
-          error: 'Missing Supabase configuration',
-        };
-      }
-
-      const { data: sessionData, error: sessionError } = await ephemeral.auth.setSession({
-        access_token: payload.access_token,
-        refresh_token: payload.refresh_token,
-      });
-
-      if (sessionError || !sessionData.session) {
-        return {
-          success: false,
-          message: 'Session could not be restored. Please sign in again.',
-          error: 'Invalid session',
-        };
-      }
-
-      const accessToken = sessionData.session.access_token;
-      const refreshToken = sessionData.session.refresh_token;
-      const { data: userData, error: userError } = await ephemeral.auth.getUser(accessToken);
-      if (userError || !userData.user) {
-        return {
-          success: false,
-          message: 'Session could not be restored. Please sign in again.',
-          error: 'Invalid session',
-        };
+        return this.totpLoginError(totpResult);
       }
 
       const trustitag = await this.assignTrustitagForUser(payload.userId);
 
-      return {
-        success: true,
-        message: 'Login successful',
-        data: {
-          user: {
-            id: payload.userId,
-            email: profile.email,
-            fullName: profile.full_name,
-            country: profile.country ?? '',
-            ...(trustitag && { trustitag }),
-          },
-          accessToken,
-          refreshToken,
-        },
-      };
+      return this.finishLoginWithSessionTokens({
+        userId: payload.userId,
+        userEmail: payload.email,
+        fullName: payload.email.split('@')[0] || 'User',
+        country: null,
+        accessToken: payload.access_token,
+        refreshToken: payload.refresh_token || undefined,
+        trustitag,
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       return {
@@ -816,6 +766,94 @@ export class AuthService {
     } catch (e) {
       console.warn('[AuthService] ensurePersonalWalletExists: unexpected error', e);
     }
+  }
+
+  /** Map TOTP verification failure to a login response. */
+  private totpLoginError(result: MfaVerifyLoginResult): LoginResponse {
+    if (result.valid) {
+      return { success: true, message: 'Login successful' };
+    }
+    if (result.error === 'MFA configuration error') {
+      return {
+        success: false,
+        message:
+          'Two-factor authentication is enabled but MFA encryption is not configured on the server. Set MFA_ENCRYPTION_KEY (64 hex chars).',
+        error: 'Server misconfiguration',
+      };
+    }
+    if (result.error === 'MFA not enabled') {
+      return {
+        success: false,
+        message: 'Two-factor authentication is not fully set up. Disable and re-enable MFA in settings.',
+        error: 'MFA not enabled',
+      };
+    }
+    if (result.error === 'Not found') {
+      return {
+        success: false,
+        message: 'User account not found. Please sign in again.',
+        error: 'Not found',
+      };
+    }
+    return {
+      success: false,
+      message: 'Invalid authenticator code. Check the 6-digit code from Google Authenticator and try again.',
+      error: 'Invalid code',
+    };
+  }
+
+  /** Return login tokens after TOTP has been verified. */
+  private async finishLoginWithSessionTokens(input: {
+    userId: string;
+    userEmail: string;
+    fullName: string;
+    country: string | null;
+    accessToken: string;
+    refreshToken?: string;
+    trustitag?: string;
+  }): Promise<LoginResponse> {
+    const adminClient = supabaseAdmin || supabase;
+    const { data: profile } = await adminClient
+      .from('users')
+      .select('email, full_name, country')
+      .eq('id', input.userId)
+      .maybeSingle();
+
+    let ephemeral;
+    try {
+      ephemeral = createEphemeralAuthClient();
+    } catch {
+      return {
+        success: false,
+        message: 'Server configuration error',
+        error: 'Missing Supabase configuration',
+      };
+    }
+
+    const { data: userData, error: userError } = await ephemeral.auth.getUser(input.accessToken);
+    if (userError || !userData.user) {
+      return {
+        success: false,
+        message: 'Session expired. Please sign in again with your email and password.',
+        error: 'Invalid session',
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: input.userId,
+          email: profile?.email || input.userEmail,
+          fullName: profile?.full_name || input.fullName,
+          country: profile?.country ?? input.country ?? '',
+          ...(input.trustitag && { trustitag: input.trustitag }),
+        },
+        accessToken: input.accessToken,
+        refreshToken: input.refreshToken,
+      },
+    };
   }
 
   /** Assign Trustitag on login/signup; failures are non-fatal for auth. */

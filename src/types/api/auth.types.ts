@@ -27,6 +27,8 @@ export interface RegisterResponse {
 export interface LoginRequest {
   email: string;
   password: string;
+  /** Optional TOTP code — when MFA is enabled, can complete login in one step */
+  code?: string;
 }
 
 export interface LoginResponse {
