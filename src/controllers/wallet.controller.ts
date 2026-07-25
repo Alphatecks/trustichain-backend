@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import { walletService } from '../services/wallet/wallet.service';
-import { multichainWalletService } from '../services/wallet/multichain-wallet.service';
+import {
+  getMultichainNetworkMode,
+  multichainWalletService,
+} from '../services/wallet/multichain-wallet.service';
+import { multichainDepositMonitorService } from '../services/wallet/multichain-deposit-monitor.service';
+import { getWalletFundingConfig } from '../config/multichain-tokens';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
 
 
@@ -451,6 +456,70 @@ export class WalletController {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.status(500).json({ success: false, message: errorMessage, error: 'Internal server error' });
+    }
+  }
+
+  async getFundingConfig(_req: Request, res: Response): Promise<void> {
+    try {
+      const config = getWalletFundingConfig(getMultichainNetworkMode());
+      res.json({
+        success: true,
+        message: 'Wallet funding config retrieved',
+        data: config,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  async notifyDeposit(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const result = await multichainDepositMonitorService.notifyDeposit(userId, req.body || {});
+      if (result.success) {
+        res.json(result);
+      } else if (result.data?.status === 'failed') {
+        res.status(400).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  async getDepositStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const txHash = String(req.query.txHash ?? '');
+      const network = req.query.network ? String(req.query.network) : undefined;
+      const result = await multichainDepositMonitorService.getDepositStatus(
+        userId,
+        txHash,
+        network
+      );
+      if (!result.success) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
     }
   }
 

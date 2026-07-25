@@ -25,6 +25,35 @@ router.get('/deposit-address', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/wallet/funding-config
+ * @desc    Chain IDs, token contracts, decimals, and RPCs for WalletConnect / Reown funding UI
+ * @access  Private
+ */
+router.get('/funding-config', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getFundingConfig(req, res);
+}));
+
+/**
+ * @route   POST /api/wallet/deposits/notify
+ * @desc    Notify backend of an on-chain USDT/USDC deposit tx (faster credit than cron)
+ * @access  Private
+ * @body    { asset: 'USDT'|'USDC', network: 'ERC20'|'TRC20'|'BEP20'|'SOLANA', txHash: string }
+ */
+router.post('/deposits/notify', authenticate, asyncHandler(async (req, res) => {
+  await walletController.notifyDeposit(req, res);
+}));
+
+/**
+ * @route   GET /api/wallet/deposits/status
+ * @desc    Poll status of a notified / credited multichain deposit
+ * @access  Private
+ * @query   txHash (required), network (optional)
+ */
+router.get('/deposits/status', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getDepositStatus(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/swap/quote
  * @desc    Get quote for swapping between XRP, USDT, and USDC
  * @access  Private

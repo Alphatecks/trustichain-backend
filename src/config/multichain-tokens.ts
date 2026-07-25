@@ -119,3 +119,146 @@ export function getEvmRpcForNetwork(
 ): string {
   return network === 'BEP20' ? rpc.evmBsc : rpc.evmEthereum;
 }
+
+/** Chain metadata for WalletConnect / Reown funding UI. */
+export interface DepositNetworkMeta {
+  chainType: 'evm' | 'tron' | 'solana';
+  /** EVM numeric chain id (WalletConnect / wagmi). Absent for Tron/Solana. */
+  chainId?: number;
+  /** CAIP-2 chain id, e.g. eip155:1, solana:devnet, tron:mainnet */
+  caip2: string;
+  chainName: string;
+  rpcUrl: string;
+}
+
+export interface FundingTokenConfig {
+  asset: StablecoinAsset;
+  network: DepositNetwork;
+  chainType: 'evm' | 'tron' | 'solana';
+  chainId?: number;
+  caip2: string;
+  chainName: string;
+  decimals: number;
+  /** ERC-20 / BEP-20 contract, TRC-20 contract, or Solana mint */
+  tokenAddress: string;
+  rpcUrl: string;
+}
+
+export interface WalletFundingConfig {
+  mode: MultichainNetworkMode;
+  tokens: FundingTokenConfig[];
+  supportedPairs: {
+    USDT: DepositNetwork[];
+    USDC: DepositNetwork[];
+  };
+}
+
+function getDepositNetworkMeta(
+  network: DepositNetwork,
+  mode: MultichainNetworkMode,
+  rpc: MultichainRpcConfig
+): DepositNetworkMeta {
+  if (mode === 'mainnet') {
+    switch (network) {
+      case 'ERC20':
+        return {
+          chainType: 'evm',
+          chainId: 1,
+          caip2: 'eip155:1',
+          chainName: 'Ethereum',
+          rpcUrl: rpc.evmEthereum,
+        };
+      case 'BEP20':
+        return {
+          chainType: 'evm',
+          chainId: 56,
+          caip2: 'eip155:56',
+          chainName: 'BNB Smart Chain',
+          rpcUrl: rpc.evmBsc,
+        };
+      case 'TRC20':
+        return {
+          chainType: 'tron',
+          caip2: 'tron:mainnet',
+          chainName: 'Tron',
+          rpcUrl: rpc.tron,
+        };
+      case 'SOLANA':
+        return {
+          chainType: 'solana',
+          caip2: 'solana:mainnet',
+          chainName: 'Solana',
+          rpcUrl: rpc.solana,
+        };
+    }
+  }
+
+  switch (network) {
+    case 'ERC20':
+      return {
+        chainType: 'evm',
+        chainId: 11155111,
+        caip2: 'eip155:11155111',
+        chainName: 'Ethereum Sepolia',
+        rpcUrl: rpc.evmEthereum,
+      };
+    case 'BEP20':
+      return {
+        chainType: 'evm',
+        chainId: 97,
+        caip2: 'eip155:97',
+        chainName: 'BSC Testnet',
+        rpcUrl: rpc.evmBsc,
+      };
+    case 'TRC20':
+      return {
+        chainType: 'tron',
+        caip2: 'tron:shasta',
+        chainName: 'Tron Shasta',
+        rpcUrl: rpc.tron,
+      };
+    case 'SOLANA':
+      return {
+        chainType: 'solana',
+        caip2: 'solana:devnet',
+        chainName: 'Solana Devnet',
+        rpcUrl: rpc.solana,
+      };
+  }
+}
+
+function tokenAddressOf(token: TokenMonitorConfig): string | undefined {
+  return token.evmContract ?? token.tronContract ?? token.solanaMint;
+}
+
+/** Full funding config for frontend Reown / WalletConnect wiring. */
+export function getWalletFundingConfig(mode: MultichainNetworkMode): WalletFundingConfig {
+  const rpc = getMultichainRpcConfig(mode);
+  const tokens: FundingTokenConfig[] = [];
+
+  for (const token of getTokenMonitorConfigs(mode)) {
+    const address = tokenAddressOf(token);
+    if (!address) continue;
+    const meta = getDepositNetworkMeta(token.network, mode, rpc);
+    tokens.push({
+      asset: token.asset,
+      network: token.network,
+      chainType: meta.chainType,
+      chainId: meta.chainId,
+      caip2: meta.caip2,
+      chainName: meta.chainName,
+      decimals: token.decimals,
+      tokenAddress: address,
+      rpcUrl: meta.rpcUrl,
+    });
+  }
+
+  return {
+    mode,
+    tokens,
+    supportedPairs: {
+      USDT: ['ERC20', 'TRC20', 'BEP20'],
+      USDC: ['BEP20', 'SOLANA'],
+    },
+  };
+}

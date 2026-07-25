@@ -245,6 +245,72 @@ export interface StablecoinDepositAddressMap {
   USDC: Partial<Record<'BEP20' | 'SOLANA', string>>;
 }
 
+export interface FundingTokenConfigResponse {
+  asset: 'USDT' | 'USDC';
+  network: 'ERC20' | 'TRC20' | 'BEP20' | 'SOLANA';
+  chainType: 'evm' | 'tron' | 'solana';
+  chainId?: number;
+  caip2: string;
+  chainName: string;
+  decimals: number;
+  tokenAddress: string;
+  rpcUrl: string;
+}
+
+export interface WalletFundingConfigResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    mode: 'testnet' | 'mainnet';
+    tokens: FundingTokenConfigResponse[];
+    supportedPairs: {
+      USDT: Array<'ERC20' | 'TRC20' | 'BEP20'>;
+      USDC: Array<'BEP20' | 'SOLANA'>;
+    };
+  };
+  error?: string;
+}
+
+export interface NotifyDepositRequest {
+  asset: 'USDT' | 'USDC';
+  network: 'ERC20' | 'TRC20' | 'BEP20' | 'SOLANA';
+  txHash: string;
+}
+
+export type MultichainDepositStatus = 'pending' | 'credited' | 'failed' | 'not_found';
+
+export interface NotifyDepositResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    status: Exclude<MultichainDepositStatus, 'not_found'>;
+    asset: 'USDT' | 'USDC';
+    network: 'ERC20' | 'TRC20' | 'BEP20' | 'SOLANA';
+    txHash: string;
+    amount?: number;
+    transactionId?: string;
+    creditId?: string;
+    errorMessage?: string;
+  };
+  error?: string;
+}
+
+export interface DepositStatusResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    status: MultichainDepositStatus;
+    asset?: 'USDT' | 'USDC';
+    network?: 'ERC20' | 'TRC20' | 'BEP20' | 'SOLANA';
+    txHash: string;
+    amount?: number;
+    transactionId?: string;
+    creditId?: string;
+    errorMessage?: string;
+  };
+  error?: string;
+}
+
 export interface FundXUMMRequest {
   amount: number;
   currency?: WalletFundingCurrency; // Defaults to XRP
