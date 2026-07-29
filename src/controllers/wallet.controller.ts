@@ -1,13 +1,35 @@
 import { Request, Response } from 'express';
+import { z } from 'zod';
 import { walletService } from '../services/wallet/wallet.service';
 import {
   getMultichainNetworkMode,
   multichainWalletService,
 } from '../services/wallet/multichain-wallet.service';
 import { multichainDepositMonitorService } from '../services/wallet/multichain-deposit-monitor.service';
+import { walletStripeFundingService } from '../services/wallet/wallet-stripe-funding.service';
 import { getWalletFundingConfig } from '../config/multichain-tokens';
 import { validateSignedTransactionFormat } from '../utils/transactionValidation';
+import type {
+  CreateWalletStripeFundingIntentRequest,
+  WalletStripeFundingIntentResponseData,
+  WalletStripeFundingStatusData,
+} from '../types/api/wallet.types';
 
+const createWalletStripeFundingIntentSchema = z
+  .object({
+    amountUsd: z.number().positive().optional(),
+    amount_usd: z.number().positive().optional(),
+    currency: z.string().min(3).max(8).optional(),
+    suiteContext: z.enum(['personal', 'business']).optional(),
+    suite_context: z.enum(['personal', 'business']).optional(),
+    asset: z.enum(['USDT', 'USDC', 'usdt', 'usdc']).optional(),
+    idempotencyKey: z.string().min(1).max(255).optional(),
+    idempotency_key: z.string().min(1).max(255).optional(),
+  })
+  .refine((body) => body.amountUsd != null || body.amount_usd != null, {
+    message: 'amountUsd is required',
+    path: ['amountUsd'],
+  });
 
 export class WalletController {
   async getBalance(req: Request, res: Response): Promise<void> {
@@ -541,6 +563,76 @@ export class WalletController {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  async createWalletStripeFundingIntent(
+    req: Request,
+    res: Response<{ success: boolean; message: string; data?: WalletStripeFundingIntentResponseData; error?: string }>
+  ): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const parsed = createWalletStripeFundingIntentSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          success: false,
+          message: parsed.error.issues[0]?.message || 'Invalid request body',
+          error: 'Validation failed',
+        });
+        return;
+      }
+
+      const body = parsed.data;
+      const request: CreateWalletStripeFundingIntentRequest = {
+        amountUsd: body.amountUsd ?? body.amount_usd!,
+        currency: body.currency,
+        suiteContext: body.suiteContext ?? body.suite_context,
+        asset: body.asset?.toUpperCase() as 'USDT' | 'USDC' | undefined,
+        idempotencyKey: body.idempotencyKey ?? body.idempotency_key,
+      };
+
+      const result = await walletStripeFundingService.createFundingIntent(userId, request);
+      res.status(result.success ? 200 : 400).json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  async getWalletStripeFundingStatus(
+    req: Request,
+    res: Response<{ success: boolean; message: string; data?: WalletStripeFundingStatusData; error?: string }>
+  ): Promise<void> {
+    try {
+      const userId = (req as Request & { userId?: string }).userId!;
+      const fundingAttemptId = typeof req.query.fundingAttemptId === 'string' ? req.query.fundingAttemptId : undefined;
+      const intentId = typeof req.query.intentId === 'string' ? req.query.intentId : undefined;
+
+      if (!fundingAttemptId && !intentId) {
+        res.status(400).json({
+          success: false,
+          message: 'fundingAttemptId or intentId is required',
+          error: 'Missing required parameters',
+        });
+        return;
+      }
+
+      const result = await walletStripeFundingService.getFundingStatus(userId, {
+        fundingAttemptId,
+        intentId,
+      });
+      res.status(result.success ? 200 : 404).json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
         success: false,
         message: errorMessage,
         error: 'Internal server error',

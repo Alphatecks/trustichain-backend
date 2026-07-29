@@ -369,4 +369,47 @@ export interface XUMMPayloadStatusResponse {
   error?: string;
 }
 
+export interface WalletApiResponse<T = undefined> {
+  success: boolean;
+  message: string;
+  data?: T;
+  error?: string;
+}
+
+export type WalletFundingBalanceAsset = 'USDT' | 'USDC';
+
+export interface CreateWalletStripeFundingIntentRequest {
+  amountUsd: number;
+  currency?: string;
+  suiteContext?: 'personal' | 'business';
+  asset?: WalletFundingBalanceAsset;
+  idempotencyKey?: string;
+}
+
+export interface WalletStripeFundingIntentResponseData {
+  fundingAttemptId: string;
+  intentId: string;
+  clientSecret: string;
+  status: string;
+  amountUsd: number;
+  currency: string;
+  asset: WalletFundingBalanceAsset;
+  suiteContext: 'personal' | 'business';
+  requiresAction: boolean;
+}
+
+export interface WalletStripeFundingStatusData {
+  fundingAttemptId: string;
+  intentId: string;
+  status: string;
+  amountUsd: number;
+  currency: string;
+  asset: WalletFundingBalanceAsset;
+  suiteContext: 'personal' | 'business';
+  credited: boolean;
+  transactionId?: string;
+  creditedAt?: string;
+  failureCode?: string;
+  failureMessage?: string;
+}
 

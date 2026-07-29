@@ -94,6 +94,26 @@ router.post('/fund/submit', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   POST /api/wallet/fund/stripe-intent
+ * @desc    Create Stripe PaymentIntent to fund wallet via Google Pay / Apple Pay
+ * @access  Private
+ * @body    { amountUsd: number, currency?: string, suiteContext?: 'personal'|'business', asset?: 'USDT'|'USDC' }
+ */
+router.post('/fund/stripe-intent', authenticate, asyncHandler(async (req, res) => {
+  await walletController.createWalletStripeFundingIntent(req, res);
+}));
+
+/**
+ * @route   GET /api/wallet/fund/stripe/status
+ * @desc    Poll wallet funding PaymentIntent status and credit result
+ * @access  Private
+ * @query   fundingAttemptId or intentId
+ */
+router.get('/fund/stripe/status', authenticate, asyncHandler(async (req, res) => {
+  await walletController.getWalletStripeFundingStatus(req, res);
+}));
+
+/**
  * @route   POST /api/wallet/fund
  * @desc    Fund wallet (deposit)
  * @access  Private

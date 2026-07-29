@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import Stripe from 'stripe';
 import { supabase, supabaseAdmin } from '../../config/supabase';
+import { walletStripeFundingService } from '../wallet/wallet-stripe-funding.service';
 import type {
   CreatePaymentIntentRequest,
   CreateSetupIntentRequest,
@@ -603,7 +604,7 @@ export class PaymentsService {
       switch (event.type) {
         case 'payment_intent.succeeded': {
           const paymentIntent = event.data.object as any;
-          await this.updateAttemptForEvent(
+          const walletHandled = await walletStripeFundingService.handleWebhookEvent(
             paymentIntent.id,
             'payment_intent',
             'succeeded',
@@ -611,11 +612,21 @@ export class PaymentsService {
             null,
             null
           );
+          if (!walletHandled) {
+            await this.updateAttemptForEvent(
+              paymentIntent.id,
+              'payment_intent',
+              'succeeded',
+              event,
+              null,
+              null
+            );
+          }
           break;
         }
         case 'payment_intent.processing': {
           const paymentIntent = event.data.object as any;
-          await this.updateAttemptForEvent(
+          const walletHandled = await walletStripeFundingService.handleWebhookEvent(
             paymentIntent.id,
             'payment_intent',
             'processing',
@@ -623,13 +634,23 @@ export class PaymentsService {
             null,
             null
           );
+          if (!walletHandled) {
+            await this.updateAttemptForEvent(
+              paymentIntent.id,
+              'payment_intent',
+              'processing',
+              event,
+              null,
+              null
+            );
+          }
           break;
         }
         case 'payment_intent.payment_failed': {
           const paymentIntent = event.data.object as any;
           const failureCode = paymentIntent.last_payment_error?.code || null;
           const failureMessage = paymentIntent.last_payment_error?.message || null;
-          await this.updateAttemptForEvent(
+          const walletHandled = await walletStripeFundingService.handleWebhookEvent(
             paymentIntent.id,
             'payment_intent',
             'failed',
@@ -637,11 +658,21 @@ export class PaymentsService {
             failureCode,
             failureMessage
           );
+          if (!walletHandled) {
+            await this.updateAttemptForEvent(
+              paymentIntent.id,
+              'payment_intent',
+              'failed',
+              event,
+              failureCode,
+              failureMessage
+            );
+          }
           break;
         }
         case 'payment_intent.canceled': {
           const paymentIntent = event.data.object as any;
-          await this.updateAttemptForEvent(
+          const walletHandled = await walletStripeFundingService.handleWebhookEvent(
             paymentIntent.id,
             'payment_intent',
             'canceled',
@@ -649,6 +680,16 @@ export class PaymentsService {
             null,
             paymentIntent.cancellation_reason || null
           );
+          if (!walletHandled) {
+            await this.updateAttemptForEvent(
+              paymentIntent.id,
+              'payment_intent',
+              'canceled',
+              event,
+              null,
+              paymentIntent.cancellation_reason || null
+            );
+          }
           break;
         }
         case 'setup_intent.succeeded': {
