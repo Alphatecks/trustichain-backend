@@ -20,7 +20,9 @@ export interface Milestone {
 export interface CreateEscrowRequest {
   // Wallet addresses
   payerXrpWalletAddress?: string; // Optional - will be automatically fetched from authenticated user's registered wallet
-  counterpartyXrpWalletAddress: string;
+  counterpartyXrpWalletAddress?: string;
+  /** Resolve counterparty by Trustitag instead of XRPL address (e.g. tc_abc123 or @tc_abc123) */
+  counterpartyTrustitag?: string;
   
   // Counterparty ID (optional - will be looked up by wallet address if not provided)
   counterpartyId?: string;

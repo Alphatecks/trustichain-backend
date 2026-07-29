@@ -52,9 +52,13 @@ export class TrustitagService {
   }
 
   /**
-   * Resolve recipient personal wallet XRPL address by normalized trustitag.
+   * Resolve recipient XRPL address by normalized trustitag.
+   * Defaults to personal wallet; use suiteContext 'any' to fall back to business.
    */
-  async resolveRecipientWallet(trustitagNormalized: string): Promise<{
+  async resolveRecipientWallet(
+    trustitagNormalized: string,
+    options?: { suiteContext?: 'personal' | 'business' | 'any' }
+  ): Promise<{
     recipientUserId: string;
     destinationAddress: string;
   } | null> {
@@ -62,15 +66,24 @@ export class TrustitagService {
     const { data: u, error: uErr } = await c.from('users').select('id').eq('trustitag', trustitagNormalized).maybeSingle();
     if (uErr || !u) return null;
 
-    const { data: w } = await c
-      .from('wallets')
-      .select('xrpl_address')
-      .eq('user_id', u.id)
-      .eq('suite_context', 'personal')
-      .maybeSingle();
+    const suitePreference = options?.suiteContext ?? 'personal';
+    const suitesToTry =
+      suitePreference === 'any' ? (['personal', 'business'] as const) : ([suitePreference] as const);
 
-    if (!w?.xrpl_address) return null;
-    return { recipientUserId: u.id, destinationAddress: w.xrpl_address };
+    for (const suiteContext of suitesToTry) {
+      const { data: w } = await c
+        .from('wallets')
+        .select('xrpl_address')
+        .eq('user_id', u.id)
+        .eq('suite_context', suiteContext)
+        .maybeSingle();
+
+      if (w?.xrpl_address) {
+        return { recipientUserId: u.id, destinationAddress: w.xrpl_address };
+      }
+    }
+
+    return null;
   }
 }
 

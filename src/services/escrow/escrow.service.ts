@@ -13,6 +13,7 @@ import { exchangeService } from '../exchange/exchange.service';
 import { xummService } from '../xumm/xumm.service';
 import { notificationService } from '../notification/notification.service';
 import { encryptionService } from '../encryption/encryption.service';
+import { trustitagService } from '../trustitag.service';
 import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
 import { getEscrowCreationFeeSettings, resolveEscrowCreationFeePercentageByType } from './escrowCreationFee.service';
@@ -35,6 +36,63 @@ export class EscrowService {
    */
   private formatEscrowId(year: number, sequence: number): string {
     return `#ESC-${year}-${sequence.toString().padStart(3, '0')}`;
+  }
+
+  private isXrplAddress(value: string): boolean {
+    return /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value.trim());
+  }
+
+  private readCounterpartyTrustitagInput(request: CreateEscrowRequest): string | undefined {
+    const body = request as CreateEscrowRequest & {
+      trustitag?: string;
+      counterpartyTrustiTag?: string;
+    };
+    const explicit =
+      request.counterpartyTrustitag?.trim() ||
+      body.counterpartyTrustiTag?.trim() ||
+      body.trustitag?.trim();
+    if (explicit) {
+      return explicit;
+    }
+
+    const walletInput = request.counterpartyXrpWalletAddress?.trim();
+    if (walletInput && !this.isXrplAddress(walletInput)) {
+      return walletInput;
+    }
+
+    return undefined;
+  }
+
+  private async resolveCounterpartyByTrustitag(
+    trustitagInput: string
+  ): Promise<
+    | { success: true; counterpartyUserId: string; counterpartyWalletAddress: string }
+    | { success: false; message: string; error: string }
+  > {
+    const normalized = trustitagService.normalizeTrustitag(trustitagInput);
+    if (!normalized) {
+      return {
+        success: false,
+        message: 'Invalid Trustitag. Use 3–32 characters: letters, numbers, and underscores (e.g. tc_abc123).',
+        error: 'Invalid trustitag',
+      };
+    }
+
+    const resolved = await trustitagService.resolveRecipientWallet(normalized, { suiteContext: 'any' });
+    if (!resolved) {
+      return {
+        success: false,
+        message:
+          'No TrustiChain user found with this Trustitag, or they have not created a wallet yet. Ask them to sign up and create a wallet first.',
+        error: 'Counterparty wallet not found',
+      };
+    }
+
+    return {
+      success: true,
+      counterpartyUserId: resolved.recipientUserId,
+      counterpartyWalletAddress: resolved.destinationAddress,
+    };
   }
 
   /**
@@ -587,11 +645,23 @@ export class EscrowService {
       // Use the authenticated user's registered wallet address automatically
       // If payerXrpWalletAddress is provided, it will be ignored (for backward compatibility)
 
-      // Look up counterparty by wallet address or use provided counterpartyId
+      // Look up counterparty by Trustitag, wallet address, or counterpartyId
       let counterpartyUserId: string | null = null;
       let counterpartyWalletAddress: string;
 
-      if (request.counterpartyId) {
+      const trustitagInput = this.readCounterpartyTrustitagInput(request);
+      if (trustitagInput) {
+        const trustitagResult = await this.resolveCounterpartyByTrustitag(trustitagInput);
+        if (!trustitagResult.success) {
+          return {
+            success: false,
+            message: trustitagResult.message,
+            error: trustitagResult.error,
+          };
+        }
+        counterpartyUserId = trustitagResult.counterpartyUserId;
+        counterpartyWalletAddress = trustitagResult.counterpartyWalletAddress;
+      } else if (request.counterpartyId) {
         // If counterpartyId is provided, validate that the provided address is one of the counterparty's wallets (personal or business)
         const { data: counterpartyWallets, error: walletError } = await adminClient
           .from('wallets')
@@ -606,7 +676,21 @@ export class EscrowService {
           };
         }
 
-        const providedAddress = request.counterpartyXrpWalletAddress.trim();
+        const providedAddress = request.counterpartyXrpWalletAddress?.trim();
+        if (!providedAddress) {
+          const preferredWallet =
+            counterpartyWallets.find((w: { xrpl_address: string }) => w.xrpl_address)?.xrpl_address ||
+            counterpartyWallets[0]?.xrpl_address;
+          if (!preferredWallet) {
+            return {
+              success: false,
+              message: 'Counterparty wallet not found',
+              error: 'Counterparty wallet not found',
+            };
+          }
+          counterpartyUserId = request.counterpartyId;
+          counterpartyWalletAddress = preferredWallet;
+        } else {
         const matchingWallet = counterpartyWallets.find((w: { xrpl_address: string }) => w.xrpl_address === providedAddress);
         if (!matchingWallet) {
           return {
@@ -618,12 +702,14 @@ export class EscrowService {
 
         counterpartyUserId = request.counterpartyId;
         counterpartyWalletAddress = matchingWallet.xrpl_address;
-      } else {
+        }
+      } else if (request.counterpartyXrpWalletAddress?.trim()) {
+        const counterpartyAddress = request.counterpartyXrpWalletAddress.trim();
         // Look up counterparty by wallet address
         const { data: counterpartyWallet, error: walletLookupError } = await adminClient
           .from('wallets')
           .select('user_id, xrpl_address')
-          .eq('xrpl_address', request.counterpartyXrpWalletAddress)
+          .eq('xrpl_address', counterpartyAddress)
           .maybeSingle();
 
         if (walletLookupError || !counterpartyWallet) {
@@ -636,6 +722,12 @@ export class EscrowService {
 
         counterpartyUserId = counterpartyWallet.user_id;
         counterpartyWalletAddress = counterpartyWallet.xrpl_address;
+      } else {
+        return {
+          success: false,
+          message: 'Counterparty Trustitag or XRPL wallet address is required',
+          error: 'Missing counterparty',
+        };
       }
 
       // Prevent creating escrow with yourself
