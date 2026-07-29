@@ -34,7 +34,7 @@ describe('PaymentsService', () => {
 
   it('returns existing payment attempt for same idempotency key', async () => {
     const escrowRow = {
-      id: 'escrow-1',
+      id: '550e8400-e29b-41d4-a716-446655440001',
       user_id: 'user-1',
       counterparty_id: 'user-2',
       amount_usd: '100.00',
@@ -63,7 +63,7 @@ describe('PaymentsService', () => {
 
     const service = new PaymentsService();
     const result = await service.createPaymentIntent('user-1', {
-      escrowId: 'escrow-1',
+      escrowId: '550e8400-e29b-41d4-a716-446655440001',
       amountUsd: 100,
       idempotencyKey: 'same-key',
     });

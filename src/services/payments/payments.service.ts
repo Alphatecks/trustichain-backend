@@ -69,19 +69,47 @@ export class PaymentsService {
     return `${fallbackPrefix}:${crypto.randomUUID()}`;
   }
 
-  private async getEscrowForPayer(escrowId: string, userId: string): Promise<EscrowRow | null> {
-    const adminClient = this.getAdminClient();
-    const { data, error } = await adminClient
-      .from('escrows')
-      .select('id, user_id, counterparty_id, amount_usd, status, payment_status')
-      .eq('id', escrowId)
-      .single();
+  private static readonly UUID_REGEX =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    if (error || !data) {
+  private async getEscrowForPayer(escrowIdInput: string, userId: string): Promise<EscrowRow | null> {
+    const adminClient = this.getAdminClient();
+    const trimmed = escrowIdInput.trim().replace(/^#/, '');
+
+    if (PaymentsService.UUID_REGEX.test(trimmed)) {
+      const { data, error } = await adminClient
+        .from('escrows')
+        .select('id, user_id, counterparty_id, amount_usd, status, payment_status')
+        .eq('id', trimmed)
+        .maybeSingle();
+
+      if (error || !data || data.user_id !== userId) {
+        return null;
+      }
+
+      return data as EscrowRow;
+    }
+
+    const match = /^ESC-(\d{4})-(\d+)$/i.exec(trimmed);
+    if (!match) {
       return null;
     }
 
-    if (data.user_id !== userId) {
+    const year = parseInt(match[1]!, 10);
+    const sequence = parseInt(match[2]!, 10);
+    const start = `${year}-01-01T00:00:00.000Z`;
+    const end = `${year + 1}-01-01T00:00:00.000Z`;
+
+    const { data, error } = await adminClient
+      .from('escrows')
+      .select('id, user_id, counterparty_id, amount_usd, status, payment_status')
+      .eq('escrow_sequence', sequence)
+      .gte('created_at', start)
+      .lt('created_at', end)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
       return null;
     }
 
@@ -109,6 +137,8 @@ export class PaymentsService {
           error: 'Escrow access denied',
         };
       }
+
+      const escrowUuid = escrow.id;
 
       if (escrow.status === 'cancelled' || escrow.status === 'completed') {
         return {
@@ -138,7 +168,7 @@ export class PaymentsService {
 
       const currency = this.normalizeCurrency(request.currency);
       const idempotencyKey = this.sanitizeIdempotencyKey(
-        `pi:${request.escrowId}:${userId}`,
+        `pi:${escrowUuid}:${userId}`,
         request.idempotencyKey
       );
 
@@ -146,7 +176,7 @@ export class PaymentsService {
       const { data: existingAttempt } = await adminClient
         .from('escrow_payment_attempts')
         .select('id, stripe_intent_id, stripe_client_secret, status, amount_usd, currency')
-        .eq('escrow_id', request.escrowId)
+        .eq('escrow_id', escrowUuid)
         .eq('payer_user_id', userId)
         .eq('intent_type', 'payment_intent')
         .eq('idempotency_key', idempotencyKey)
@@ -157,7 +187,7 @@ export class PaymentsService {
           success: true,
           message: 'Existing PaymentIntent returned for idempotency key',
           data: {
-            escrowId: request.escrowId,
+            escrowId: escrowUuid,
             paymentAttemptId: existingAttempt.id,
             intentId: existingAttempt.stripe_intent_id,
             clientSecret: existingAttempt.stripe_client_secret,
@@ -177,7 +207,7 @@ export class PaymentsService {
           card: { request_three_d_secure: 'automatic' },
         },
         metadata: {
-          escrow_id: request.escrowId,
+          escrow_id: escrowUuid,
           payer_user_id: userId,
           counterparty_id: escrow.counterparty_id || '',
           integration_mode: 'test',
@@ -206,7 +236,7 @@ export class PaymentsService {
       const { data: insertedAttempt, error: insertError } = await adminClient
         .from('escrow_payment_attempts')
         .insert({
-          escrow_id: request.escrowId,
+          escrow_id: escrowUuid,
           payer_user_id: userId,
           counterparty_id: escrow.counterparty_id,
           provider: 'stripe',
@@ -236,13 +266,13 @@ export class PaymentsService {
           payment_status: paymentIntent.status,
           payment_linked_at: new Date().toISOString(),
         })
-        .eq('id', request.escrowId);
+        .eq('id', escrowUuid);
 
       return {
         success: true,
         message: 'Stripe PaymentIntent created successfully',
         data: {
-          escrowId: request.escrowId,
+          escrowId: escrowUuid,
           paymentAttemptId: insertedAttempt.id,
           intentId: paymentIntent.id,
           clientSecret: paymentIntent.client_secret,
@@ -283,8 +313,10 @@ export class PaymentsService {
         };
       }
 
+      const escrowUuid = escrow.id;
+
       const idempotencyKey = this.sanitizeIdempotencyKey(
-        `si:${request.escrowId}:${userId}`,
+        `si:${escrowUuid}:${userId}`,
         request.idempotencyKey
       );
       const adminClient = this.getAdminClient();
@@ -292,7 +324,7 @@ export class PaymentsService {
       const { data: existingAttempt } = await adminClient
         .from('escrow_payment_attempts')
         .select('id, stripe_intent_id, stripe_client_secret, status')
-        .eq('escrow_id', request.escrowId)
+        .eq('escrow_id', escrowUuid)
         .eq('payer_user_id', userId)
         .eq('intent_type', 'setup_intent')
         .eq('idempotency_key', idempotencyKey)
@@ -303,7 +335,7 @@ export class PaymentsService {
           success: true,
           message: 'Existing SetupIntent returned for idempotency key',
           data: {
-            escrowId: request.escrowId,
+            escrowId: escrowUuid,
             paymentAttemptId: existingAttempt.id,
             intentId: existingAttempt.stripe_intent_id,
             clientSecret: existingAttempt.stripe_client_secret,
@@ -318,7 +350,7 @@ export class PaymentsService {
           payment_method_types: ['card'],
           usage: 'off_session',
           metadata: {
-            escrow_id: request.escrowId,
+            escrow_id: escrowUuid,
             payer_user_id: userId,
             customer_email: request.customerEmail || '',
             integration_mode: 'test',
@@ -338,7 +370,7 @@ export class PaymentsService {
       const { data: insertedAttempt, error: insertError } = await adminClient
         .from('escrow_payment_attempts')
         .insert({
-          escrow_id: request.escrowId,
+          escrow_id: escrowUuid,
           payer_user_id: userId,
           counterparty_id: escrow.counterparty_id,
           provider: 'stripe',
@@ -366,7 +398,7 @@ export class PaymentsService {
         success: true,
         message: 'Stripe SetupIntent created successfully',
         data: {
-          escrowId: request.escrowId,
+          escrowId: escrowUuid,
           paymentAttemptId: insertedAttempt.id,
           intentId: setupIntent.id,
           clientSecret: setupIntent.client_secret,
@@ -400,7 +432,7 @@ export class PaymentsService {
       const { data: latestAttempt } = await adminClient
         .from('escrow_payment_attempts')
         .select('id, intent_type, stripe_intent_id, status, failure_code, failure_message, retry_count, latest_webhook_event_type, updated_at')
-        .eq('escrow_id', escrowId)
+        .eq('escrow_id', escrow.id)
         .eq('payer_user_id', userId)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -410,7 +442,7 @@ export class PaymentsService {
         success: true,
         message: 'Escrow payment status fetched successfully',
         data: {
-          escrowId,
+          escrowId: escrow.id,
           paymentStatus: escrow.payment_status || 'unpaid',
           latestAttempt: latestAttempt
             ? {
