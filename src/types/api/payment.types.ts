@@ -19,6 +19,8 @@ export interface PaymentIntentResponseData {
   clientSecret: string;
   status: string;
   amountUsd: number | null;
+  payableAmountUsd?: number;
+  creationFeeUsd?: number;
   currency: string;
   requiresAction: boolean;
 }

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { walletStripeFundingService } from '../wallet/wallet-stripe-funding.service';
+import { escrowService } from '../escrow/escrow.service';
 import type {
   CreatePaymentIntentRequest,
   CreateSetupIntentRequest,
@@ -17,6 +18,9 @@ type EscrowRow = {
   user_id: string;
   counterparty_id: string | null;
   amount_usd: string | number;
+  creation_fee_usd?: string | number | null;
+  payable_amount_usd?: string | number | null;
+  payment_method?: string | null;
   status: string;
   payment_status: string;
 };
@@ -70,6 +74,36 @@ export class PaymentsService {
     return `${fallbackPrefix}:${crypto.randomUUID()}`;
   }
 
+  private resolvePayableAmountUsd(escrow: EscrowRow): number {
+    const payable = this.parseAmount(escrow.payable_amount_usd);
+    if (payable > 0) {
+      return payable;
+    }
+    const base = this.parseAmount(escrow.amount_usd);
+    const fee = this.parseAmount(escrow.creation_fee_usd);
+    const combined = base + fee;
+    return combined > 0 ? parseFloat(combined.toFixed(2)) : base;
+  }
+
+  private async maybeFinalizeStripeEscrow(escrowId: string, status: string): Promise<void> {
+    if (status !== 'succeeded') {
+      return;
+    }
+    const adminClient = this.getAdminClient();
+    const { data: escrow } = await adminClient
+      .from('escrows')
+      .select('payment_method, xrpl_escrow_id')
+      .eq('id', escrowId)
+      .maybeSingle();
+
+    if (escrow?.payment_method === 'stripe' && !escrow.xrpl_escrow_id) {
+      const result = await escrowService.finalizeStripeFundedEscrow(escrowId);
+      if (!result.success) {
+        console.error('[Payments] Stripe escrow finalize failed:', result.message);
+      }
+    }
+  }
+
   private static readonly UUID_REGEX =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -80,7 +114,7 @@ export class PaymentsService {
     if (PaymentsService.UUID_REGEX.test(trimmed)) {
       const { data, error } = await adminClient
         .from('escrows')
-        .select('id, user_id, counterparty_id, amount_usd, status, payment_status')
+        .select('id, user_id, counterparty_id, amount_usd, creation_fee_usd, payable_amount_usd, payment_method, status, payment_status')
         .eq('id', trimmed)
         .maybeSingle();
 
@@ -103,7 +137,7 @@ export class PaymentsService {
 
     const { data, error } = await adminClient
       .from('escrows')
-      .select('id, user_id, counterparty_id, amount_usd, status, payment_status')
+      .select('id, user_id, counterparty_id, amount_usd, creation_fee_usd, payable_amount_usd, payment_method, status, payment_status')
       .eq('escrow_sequence', sequence)
       .gte('created_at', start)
       .lt('created_at', end)
@@ -150,8 +184,18 @@ export class PaymentsService {
       }
 
       const escrowAmountUsd = this.parseAmount(escrow.amount_usd);
-      const requestedAmountUsd = request.amountUsd ?? escrowAmountUsd;
-      if (requestedAmountUsd <= 0) {
+      const creationFeeUsd = this.parseAmount(escrow.creation_fee_usd);
+      const payableAmountUsd = this.resolvePayableAmountUsd(escrow);
+
+      if (request.amountUsd != null && Math.abs(request.amountUsd - payableAmountUsd) > 0.009) {
+        console.warn('[Payments] Client amountUsd ignored; using server payable amount', {
+          clientAmountUsd: request.amountUsd,
+          payableAmountUsd,
+          escrowAmountUsd,
+        });
+      }
+
+      if (payableAmountUsd <= 0) {
         return {
           success: false,
           message: 'Payment amount must be greater than zero',
@@ -159,13 +203,7 @@ export class PaymentsService {
         };
       }
 
-      if (Math.abs(requestedAmountUsd - escrowAmountUsd) > 0.009) {
-        return {
-          success: false,
-          message: `Requested amount (${requestedAmountUsd}) must match escrow amount (${escrowAmountUsd})`,
-          error: 'Amount mismatch',
-        };
-      }
+      const chargeAmountUsd = payableAmountUsd;
 
       const currency = this.normalizeCurrency(request.currency);
       const idempotencyKey = this.sanitizeIdempotencyKey(
@@ -194,6 +232,8 @@ export class PaymentsService {
             clientSecret: existingAttempt.stripe_client_secret,
             status: existingAttempt.status,
             amountUsd: this.parseAmount(existingAttempt.amount_usd),
+            payableAmountUsd: this.parseAmount(existingAttempt.amount_usd),
+            creationFeeUsd,
             currency: existingAttempt.currency,
             requiresAction: existingAttempt.status === 'requires_action',
           },
@@ -202,7 +242,7 @@ export class PaymentsService {
 
       const stripe = this.getStripeClient();
       const paymentIntentCreatePayload: any = {
-        amount: this.toStripeAmount(requestedAmountUsd),
+        amount: this.toStripeAmount(chargeAmountUsd),
         currency,
         payment_method_options: {
           card: { request_three_d_secure: 'automatic' },
@@ -211,6 +251,9 @@ export class PaymentsService {
           escrow_id: escrowUuid,
           payer_user_id: userId,
           counterparty_id: escrow.counterparty_id || '',
+          payment_method: escrow.payment_method || 'stripe',
+          payable_amount_usd: String(payableAmountUsd),
+          creation_fee_usd: String(creationFeeUsd),
           integration_mode: 'test',
         },
       };
@@ -245,7 +288,7 @@ export class PaymentsService {
           stripe_intent_id: paymentIntent.id,
           stripe_client_secret: paymentIntent.client_secret,
           idempotency_key: idempotencyKey,
-          amount_usd: requestedAmountUsd,
+          amount_usd: chargeAmountUsd,
           currency,
           status: paymentIntent.status,
           metadata: paymentIntent.metadata,
@@ -278,7 +321,9 @@ export class PaymentsService {
           intentId: paymentIntent.id,
           clientSecret: paymentIntent.client_secret,
           status: paymentIntent.status,
-          amountUsd: requestedAmountUsd,
+          amountUsd: escrowAmountUsd,
+          payableAmountUsd: chargeAmountUsd,
+          creationFeeUsd,
           currency,
           requiresAction: paymentIntent.status === 'requires_action',
         },
@@ -439,12 +484,22 @@ export class PaymentsService {
         .limit(1)
         .maybeSingle();
 
+      if (latestAttempt?.status === 'succeeded' && escrow.payment_method === 'stripe') {
+        await this.maybeFinalizeStripeEscrow(escrow.id, 'succeeded');
+      }
+
+      const { data: refreshedEscrow } = await adminClient
+        .from('escrows')
+        .select('payment_status, status, xrpl_escrow_id')
+        .eq('id', escrow.id)
+        .maybeSingle();
+
       return {
         success: true,
         message: 'Escrow payment status fetched successfully',
         data: {
           escrowId: escrow.id,
-          paymentStatus: escrow.payment_status || 'unpaid',
+          paymentStatus: refreshedEscrow?.payment_status || escrow.payment_status || 'unpaid',
           latestAttempt: latestAttempt
             ? {
                 id: latestAttempt.id,
@@ -511,7 +566,7 @@ export class PaymentsService {
     event: any,
     failureCode: string | null,
     failureMessage: string | null
-  ): Promise<string | null> {
+  ): Promise<{ attemptId: string; escrowId: string } | null> {
     const adminClient = this.getAdminClient();
     const { riskLevel, fraudRuleHit } = this.extractRisk(event);
 
@@ -554,7 +609,7 @@ export class PaymentsService {
       })
       .eq('event_id', event.id);
 
-    return updated.id as string;
+    return { attemptId: updated.id as string, escrowId: updated.escrow_id as string };
   }
 
   async processWebhook(
@@ -613,7 +668,7 @@ export class PaymentsService {
             null
           );
           if (!walletHandled) {
-            await this.updateAttemptForEvent(
+            const updated = await this.updateAttemptForEvent(
               paymentIntent.id,
               'payment_intent',
               'succeeded',
@@ -621,6 +676,9 @@ export class PaymentsService {
               null,
               null
             );
+            if (updated) {
+              await this.maybeFinalizeStripeEscrow(updated.escrowId, 'succeeded');
+            }
           }
           break;
         }

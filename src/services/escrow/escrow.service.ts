@@ -95,9 +95,304 @@ export class EscrowService {
     };
   }
 
+  private normalizePaymentMethod(request: CreateEscrowRequest): 'xrp_wallet' | 'stripe' {
+    const body = request as CreateEscrowRequest & {
+      payWith?: string;
+      payment_method?: string;
+    };
+    const raw = (request.paymentMethod || body.payWith || body.payment_method || 'xrp_wallet')
+      .toString()
+      .trim()
+      .toLowerCase();
+    if (raw === 'stripe' || raw === 'google_pay' || raw === 'apple_pay' || raw === 'googlepay' || raw === 'applepay') {
+      return 'stripe';
+    }
+    return 'xrp_wallet';
+  }
+
+  private computeEscrowReleaseTimes(expectedReleaseDate?: string | null): {
+    finishAfter?: number;
+    cancelAfter?: number;
+  } {
+    const RIPPLE_EPOCH_OFFSET = 946684800;
+    if (!expectedReleaseDate) {
+      const unixTimestamp = Math.floor(Date.now() / 1000) + 10;
+      return { finishAfter: unixTimestamp - RIPPLE_EPOCH_OFFSET, cancelAfter: undefined };
+    }
+
+    let releaseDate: Date;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(expectedReleaseDate)) {
+      const [year, month, day] = expectedReleaseDate.split('-').map(Number);
+      releaseDate = new Date(year!, month! - 1, day!, 0, 0, 0, 0);
+    } else {
+      releaseDate = new Date(expectedReleaseDate);
+    }
+
+    if (releaseDate < new Date()) {
+      return { finishAfter: undefined, cancelAfter: undefined };
+    }
+
+    const unixTimestamp = Math.floor(releaseDate.getTime() / 1000);
+    return { finishAfter: unixTimestamp - RIPPLE_EPOCH_OFFSET, cancelAfter: undefined };
+  }
+
+  private async insertEscrowMilestones(
+    adminClient: SupabaseClient,
+    escrowId: string,
+    request: CreateEscrowRequest,
+    usdRate: number
+  ): Promise<void> {
+    if (request.releaseType !== 'Milestones' || !request.milestones?.length) {
+      return;
+    }
+
+    const milestonesToInsert = request.milestones.map((milestone, index) => {
+      let milestoneAmountXrp = milestone.milestoneAmount;
+      let milestoneAmountUsd = milestone.milestoneAmount;
+      if (request.currency === 'USD') {
+        milestoneAmountXrp = milestone.milestoneAmount / usdRate;
+      } else {
+        milestoneAmountUsd = milestone.milestoneAmount * usdRate;
+      }
+      return {
+        escrow_id: escrowId,
+        milestone_order: milestone.milestoneOrder || index + 1,
+        milestone_details: milestone.milestoneDetails,
+        milestone_amount: milestoneAmountXrp,
+        milestone_amount_usd: milestoneAmountUsd,
+        status: 'pending',
+      };
+    });
+
+    const { error: milestonesError } = await adminClient.from('escrow_milestones').insert(milestonesToInsert);
+    if (milestonesError) {
+      console.error('[Escrow] Error creating milestones:', milestonesError);
+    }
+  }
+
+  private async sendEscrowCreationEmails(
+    adminClient: SupabaseClient,
+    params: {
+      userId: string;
+      counterpartyUserId: string | null;
+      escrow: { id: string; created_at: string; escrow_sequence?: number | null; expected_release_date?: string | null; expected_completion_date?: string | null; description?: string | null };
+      amountXrp: number;
+      amountUsd: number;
+      request: CreateEscrowRequest;
+    }
+  ): Promise<void> {
+    const { userId, counterpartyUserId, escrow, amountXrp, amountUsd, request } = params;
+    const year = new Date(escrow.created_at).getFullYear();
+    const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
+
+    const { data: payerUser } = await adminClient
+      .from('users')
+      .select('email, full_name')
+      .eq('id', userId)
+      .single();
+
+    let counterpartyUser: { email: string; full_name: string } | null = null;
+    if (counterpartyUserId) {
+      const { data: counterparty } = await adminClient
+        .from('users')
+        .select('email, full_name')
+        .eq('id', counterpartyUserId)
+        .single();
+      counterpartyUser = counterparty;
+    }
+
+    const releaseDate = escrow.expected_release_date || escrow.expected_completion_date || undefined;
+
+    if (payerUser?.email) {
+      await emailService
+        .sendEscrowCreationConfirmationToPayer(
+          request.payerEmail || payerUser.email,
+          request.payerName || payerUser.full_name,
+          formattedEscrowId,
+          amountXrp,
+          amountUsd,
+          request.counterpartyName || counterpartyUser?.full_name,
+          releaseDate,
+          escrow.description || undefined
+        )
+        .catch((emailError) => {
+          console.error('[Escrow] Failed to send email to payer:', emailError);
+        });
+    }
+
+    if (counterpartyUser?.email) {
+      await emailService
+        .sendEscrowCreationNotificationToCounterparty(
+          request.counterpartyEmail || counterpartyUser.email,
+          request.counterpartyName || counterpartyUser.full_name,
+          formattedEscrowId,
+          amountXrp,
+          amountUsd,
+          request.payerName || payerUser?.full_name,
+          releaseDate,
+          escrow.description || undefined
+        )
+        .catch((emailError) => {
+          console.error('[Escrow] Failed to send email to counterparty:', emailError);
+        });
+    }
+  }
+
   /**
-   * In-app row + FCM when an escrow is successfully created on XRPL (initiator and counterparty).
+   * After Stripe payment succeeds, create XRPL escrow via platform wallet and notify parties.
    */
+  async finalizeStripeFundedEscrow(
+    escrowId: string
+  ): Promise<{ success: boolean; message: string; data?: { xrplTxHash: string }; error?: string }> {
+    try {
+      const adminClient = supabaseAdmin || supabase;
+      const { data: escrow, error: fetchError } = await adminClient
+        .from('escrows')
+        .select('*')
+        .eq('id', escrowId)
+        .single();
+
+      if (fetchError || !escrow) {
+        return { success: false, message: 'Escrow not found', error: 'Not found' };
+      }
+
+      if (escrow.payment_method !== 'stripe') {
+        return { success: false, message: 'Escrow is not a Stripe-funded escrow', error: 'Invalid payment method' };
+      }
+
+      if (escrow.xrpl_escrow_id) {
+        return {
+          success: true,
+          message: 'Escrow already finalized on XRPL',
+          data: { xrplTxHash: escrow.xrpl_escrow_id },
+        };
+      }
+
+      const platformAddress = process.env.XRPL_PLATFORM_ADDRESS;
+      const platformSecret = process.env.XRPL_PLATFORM_SECRET;
+      if (!platformAddress || !platformSecret) {
+        return {
+          success: false,
+          message: 'Platform wallet not configured. XRPL_PLATFORM_ADDRESS and XRPL_PLATFORM_SECRET must be set.',
+          error: 'Platform wallet not configured',
+        };
+      }
+
+      if (!escrow.counterparty_id) {
+        return { success: false, message: 'Escrow has no counterparty', error: 'Missing counterparty' };
+      }
+
+      const { data: counterpartyWallets } = await adminClient
+        .from('wallets')
+        .select('xrpl_address, suite_context')
+        .eq('user_id', escrow.counterparty_id);
+
+      const counterpartyWallet =
+        counterpartyWallets?.find((w: { suite_context: string }) => w.suite_context === 'personal') ||
+        counterpartyWallets?.[0];
+
+      if (!counterpartyWallet?.xrpl_address) {
+        return {
+          success: false,
+          message: 'Counterparty wallet not found',
+          error: 'Counterparty wallet not found',
+        };
+      }
+
+      const amountXrp = parseFloat(String(escrow.amount_xrp));
+      const amountUsd = parseFloat(String(escrow.amount_usd));
+      const { finishAfter, cancelAfter } = this.computeEscrowReleaseTimes(escrow.expected_release_date);
+
+      const xrplTxHash = await xrplEscrowService.createEscrow({
+        fromAddress: platformAddress,
+        toAddress: counterpartyWallet.xrpl_address,
+        amountXrp,
+        finishAfter,
+        cancelAfter,
+        walletSecret: platformSecret.trim(),
+      });
+
+      const creationFeeUsd = parseFloat(String(escrow.creation_fee_usd ?? 0));
+      const exchangeRates = await exchangeService.getLiveExchangeRates();
+      const usdRate = exchangeRates.data?.rates.find((r) => r.currency === 'USD')?.rate;
+      const creationFeeXrp =
+        creationFeeUsd > 0 && usdRate && usdRate > 0
+          ? parseFloat((creationFeeUsd / usdRate).toFixed(6))
+          : 0;
+
+      const { error: updateError } = await adminClient
+        .from('escrows')
+        .update({
+          status: 'active',
+          payment_status: 'succeeded',
+          xrpl_escrow_id: xrplTxHash,
+          stripe_funded_at: new Date().toISOString(),
+          description: escrow.description || `Escrow created on XRPL (Stripe): ${xrplTxHash}`,
+        })
+        .eq('id', escrowId)
+        .is('xrpl_escrow_id', null);
+
+      if (updateError) {
+        console.error('[Escrow Stripe Finalize] escrow update failed:', updateError);
+        return { success: false, message: 'Failed to update escrow after XRPL creation', error: updateError.message };
+      }
+
+      if (creationFeeXrp > 0) {
+        try {
+          await adminClient.rpc('credit_escrow_fee', { amount_xrp: creationFeeXrp });
+        } catch (feeErr) {
+          console.warn('[Escrow Stripe Finalize] Failed to credit escrow fee:', feeErr);
+        }
+      }
+
+      await adminClient.from('transactions').insert({
+        user_id: escrow.user_id,
+        type: 'escrow_create',
+        amount_xrp: amountXrp,
+        amount_usd: amountUsd,
+        xrpl_tx_hash: xrplTxHash,
+        status: 'completed',
+        escrow_id: escrow.id,
+        description: `Escrow create (Stripe funded): ${escrow.description || 'No description'} | XRPL TX: ${xrplTxHash}`,
+      });
+
+      await this.notifyEscrowCreated({
+        initiatorUserId: escrow.user_id,
+        counterpartyUserId: escrow.counterparty_id,
+        escrowId: escrow.id,
+        amountXrp,
+        xrplTxHash,
+      });
+
+      await this.sendEscrowCreationEmails(adminClient, {
+        userId: escrow.user_id,
+        counterpartyUserId: escrow.counterparty_id,
+        escrow,
+        amountXrp,
+        amountUsd,
+        request: {
+          payerEmail: escrow.payer_email,
+          payerName: escrow.payer_name,
+          counterpartyEmail: escrow.counterparty_email,
+          counterpartyName: escrow.counterparty_name,
+        } as CreateEscrowRequest,
+      });
+
+      return {
+        success: true,
+        message: 'Stripe-funded escrow finalized on XRPL',
+        data: { xrplTxHash },
+      };
+    } catch (error) {
+      console.error('[Escrow Stripe Finalize] error:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to finalize Stripe-funded escrow',
+        error: error instanceof Error ? error.message : 'Finalize failed',
+      };
+    }
+  }
+
   private async notifyEscrowCreated(params: {
     initiatorUserId: string;
     counterpartyUserId: string | null;
@@ -616,6 +911,7 @@ export class EscrowService {
     
     try {
       const adminClient = supabaseAdmin || supabase;
+      const paymentMethod = this.normalizePaymentMethod(request);
 
       // Payer wallet: use business wallet when creating from business suite, else personal
       const payerSuiteContext = request.suiteContext === 'business' ? 'business' : 'personal';
@@ -624,22 +920,24 @@ export class EscrowService {
         .select('xrpl_address, encrypted_wallet_secret')
         .eq('user_id', userId)
         .eq('suite_context', payerSuiteContext)
-        .single();
+        .maybeSingle();
 
-      if (!payerWallet) {
-        return {
-          success: false,
-          message: 'Wallet not found. Please create a wallet first.',
-          error: 'Wallet not found. Please create a wallet first.',
-        };
-      }
+      if (paymentMethod === 'xrp_wallet') {
+        if (!payerWallet) {
+          return {
+            success: false,
+            message: 'Wallet not found. Please create a wallet first.',
+            error: 'Wallet not found. Please create a wallet first.',
+          };
+        }
 
-      if (!payerWallet.xrpl_address) {
-        return {
-          success: false,
-          message: 'Wallet address not found. Please connect a wallet first.',
-          error: 'Wallet address not found',
-        };
+        if (!payerWallet.xrpl_address) {
+          return {
+            success: false,
+            message: 'Wallet address not found. Please connect a wallet first.',
+            error: 'Wallet address not found',
+          };
+        }
       }
 
       // Use the authenticated user's registered wallet address automatically
@@ -919,6 +1217,93 @@ export class EscrowService {
       const creationFeeUsd = amountUsd * (Math.max(0, creationFeePercentage) / 100);
       const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / usdRate).toFixed(6)) : 0;
       const payableXrp = this.normalizeXrpAmount(amountXrp + creationFeeXrp);
+      const payableAmountUsd = parseFloat((amountUsd + creationFeeUsd).toFixed(2));
+
+      // Stripe path: persist pending escrow and return payable breakdown (XRPL created after payment)
+      if (paymentMethod === 'stripe') {
+        const currentYear = new Date().getFullYear();
+        const { data: lastEscrow } = await adminClient
+          .from('escrows')
+          .select('escrow_sequence')
+          .gte('created_at', new Date(currentYear, 0, 1).toISOString())
+          .order('escrow_sequence', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const nextSequence = lastEscrow?.escrow_sequence ? lastEscrow.escrow_sequence + 1 : 1;
+
+        const { data: escrow, error: escrowError } = await adminClient
+          .from('escrows')
+          .insert({
+            user_id: userId,
+            counterparty_id: counterpartyUserId,
+            amount_xrp: amountXrp,
+            amount_usd: amountUsd,
+            creation_fee_usd: creationFeeUsd,
+            payable_amount_usd: payableAmountUsd,
+            payment_method: 'stripe',
+            payment_status: 'unpaid',
+            status: 'pending',
+            xrpl_escrow_id: null,
+            description: request.description || 'Escrow pending Stripe payment',
+            transaction_type: escrowTransactionType,
+            industry: request.industry || null,
+            progress: 0,
+            escrow_sequence: nextSequence,
+            payer_email: request.payerEmail || null,
+            payer_name: request.payerName || null,
+            payer_phone: request.payerPhoneNumber || null,
+            counterparty_email: request.counterpartyEmail || null,
+            counterparty_name: request.counterpartyName || null,
+            counterparty_phone: request.counterpartyPhoneNumber || null,
+            release_type: request.releaseType || null,
+            expected_completion_date: request.expectedCompletionDate
+              ? new Date(request.expectedCompletionDate).toISOString()
+              : null,
+            expected_release_date: request.expectedReleaseDate
+              ? new Date(request.expectedReleaseDate).toISOString()
+              : null,
+            dispute_resolution_period: request.disputeResolutionPeriod || null,
+            release_conditions: request.releaseConditions || null,
+            suite_context: allowedSuiteContext,
+          })
+          .select()
+          .single();
+
+        if (escrowError || !escrow) {
+          return {
+            success: false,
+            message: 'Failed to create escrow',
+            error: escrowError?.message || 'Failed to create escrow',
+          };
+        }
+
+        await this.insertEscrowMilestones(adminClient, escrow.id, request, usdRate);
+
+        return {
+          success: true,
+          message: 'Escrow created. Complete payment with Google Pay or Apple Pay to fund it.',
+          data: {
+            escrowId: escrow.id,
+            amount: {
+              usd: parseFloat(amountUsd.toFixed(2)),
+              xrp: parseFloat(amountXrp.toFixed(6)),
+            },
+            creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
+            payableAmountUsd,
+            paymentMethod: 'stripe',
+            paymentStatus: 'unpaid',
+            status: escrow.status,
+          },
+        };
+      }
+
+      if (!payerWallet?.xrpl_address) {
+        return {
+          success: false,
+          message: 'Wallet not found. Please create a wallet first.',
+          error: 'Wallet not found',
+        };
+      }
 
       // Use user's wallet address (payerWallet already fetched above)
       const userWalletAddress = payerWallet.xrpl_address;
@@ -1160,6 +1545,10 @@ export class EscrowService {
           counterparty_id: counterpartyUserId,
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
+          creation_fee_usd: creationFeeUsd,
+          payable_amount_usd: payableAmountUsd,
+          payment_method: 'xrp_wallet',
+          payment_status: xrplTxHash ? 'succeeded' : 'unpaid',
           status: escrowStatus, // 'active' if auto-signed, 'pending' if XUMM
           xrpl_escrow_id: xrplTxHash || null, // Store XRPL transaction hash if available
           description: escrowDescription,
@@ -1283,7 +1672,7 @@ export class EscrowService {
           .like('description', `%XUMM_UUID:${xummUuid}%`);
       }
 
-      // Create notifications for initiator and counterparty (if escrow is active on XRPL)
+      // Notifications and emails only when escrow is active on XRPL (xrp_wallet path)
       if (xrplTxHash) {
         await this.notifyEscrowCreated({
           initiatorUserId: userId,
@@ -1293,77 +1682,16 @@ export class EscrowService {
           xrplTxHash,
         });
 
-        // Send emails to payer and counterparty
-        try {
-          // Get payer user details
-          const { data: payerUser } = await adminClient
-            .from('users')
-            .select('email, full_name')
-            .eq('id', userId)
-            .single();
-
-          // Get counterparty user details
-          let counterpartyUser: { email: string; full_name: string } | null = null;
-          if (counterpartyUserId) {
-            const { data: counterparty } = await adminClient
-              .from('users')
-              .select('email, full_name')
-              .eq('id', counterpartyUserId)
-              .single();
-            counterpartyUser = counterparty;
-          }
-
-          // Send email to payer (confirmation)
-          if (payerUser?.email) {
-            const payerEmailToUse = request.payerEmail || payerUser.email;
-            const payerNameToUse = request.payerName || payerUser.full_name;
-            
-            // Format escrow ID
-            const year = new Date(escrow.created_at).getFullYear();
-            const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
-            
-            await emailService.sendEscrowCreationConfirmationToPayer(
-              payerEmailToUse,
-              payerNameToUse,
-              formattedEscrowId,
-              amountXrp,
-              amountUsd,
-              request.counterpartyName || counterpartyUser?.full_name,
-              escrow.expected_release_date || escrow.expected_completion_date || undefined,
-              escrow.description || undefined
-            ).catch((emailError) => {
-              console.error('[Escrow Create] Failed to send email to payer:', emailError);
-              // Don't fail escrow creation if email fails
-            });
-          }
-
-          // Send email to counterparty (notification)
-          if (counterpartyUser?.email) {
-            const counterpartyEmailToUse = request.counterpartyEmail || counterpartyUser.email;
-            const counterpartyNameToUse = request.counterpartyName || counterpartyUser.full_name;
-            
-            // Format escrow ID (same as for payer)
-            const year = new Date(escrow.created_at).getFullYear();
-            const formattedEscrowId = this.formatEscrowId(year, escrow.escrow_sequence || 1);
-            
-            await emailService.sendEscrowCreationNotificationToCounterparty(
-              counterpartyEmailToUse,
-              counterpartyNameToUse,
-              formattedEscrowId,
-              amountXrp,
-              amountUsd,
-              request.payerName || payerUser?.full_name,
-              escrow.expected_release_date || escrow.expected_completion_date || undefined,
-              escrow.description || undefined
-            ).catch((emailError) => {
-              console.error('[Escrow Create] Failed to send email to counterparty:', emailError);
-              // Don't fail escrow creation if email fails
-            });
-          }
-        } catch (emailError) {
+        await this.sendEscrowCreationEmails(adminClient, {
+          userId,
+          counterpartyUserId,
+          escrow,
+          amountXrp,
+          amountUsd,
+          request,
+        }).catch((emailError) => {
           console.error('[Escrow Create] Error sending escrow creation emails:', emailError);
-          // Don't fail escrow creation if email sending fails
-        }
+        });
       }
 
       // Return response with appropriate message and data

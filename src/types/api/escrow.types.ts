@@ -55,7 +55,12 @@ export interface CreateEscrowRequest {
 
   // Suite context: set to 'business' when creating from Business Suite so business dashboard shows only these escrows
   suiteContext?: 'personal' | 'business';
+
+  /** xrp_wallet: fund from custodial XRP (default). stripe: Google Pay / Apple Pay gates XRPL creation. */
+  paymentMethod?: 'xrp_wallet' | 'stripe';
 }
+
+export type EscrowPaymentMethod = 'xrp_wallet' | 'stripe';
 
 export interface CreateEscrowResponse {
   success: boolean;
@@ -72,8 +77,16 @@ export interface CreateEscrowResponse {
     // XUMM-related fields for user-signed escrow creation
     xummUrl?: string;
     xummUuid?: string;
-    transaction?: any;
+    transaction?: {
+      creationFeeUsd?: number;
+      creationFeeXrp?: number;
+      totalPayableXrp?: number;
+    };
     transactionBlob?: string;
+    paymentMethod?: EscrowPaymentMethod;
+    creationFeeUsd?: number;
+    payableAmountUsd?: number;
+    paymentStatus?: string;
   };
   error?: string;
 }
