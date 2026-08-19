@@ -10,10 +10,12 @@ export interface DashboardSummaryResponse {
           rlusd: number;
           usdt: number;
           usdc: number;
+          xrp: number;
           usd: number;
         };
         addresses?: {
           rlusd: string;
+          xrp: string;
         };
         activeEscrows: {
           count: number;

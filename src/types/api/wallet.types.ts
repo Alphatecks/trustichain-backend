@@ -9,10 +9,12 @@ export interface WalletBalanceResponse {
       rlusd: number;
       usdt: number;
       usdc: number;
+      xrp: number;
       usd: number;
     };
     addresses: {
       rlusd: string;
+      xrp: string;
     };
     stablecoinAddresses?: StablecoinDepositAddressMap;
     multichainNetwork?: Record<string, unknown>;

@@ -19,6 +19,7 @@ describe('WalletService.getBalance - preserve DB balances when XRPL empty', () =
   const mockWallet = {
     id: 'wallet-1',
     xrpl_address: 'rTESTADDRESS',
+    balance_xrp: 10,
     balance_rlusd: 10,
     balance_usdt: 5,
     balance_usdc: 5,
@@ -63,7 +64,7 @@ describe('WalletService.getBalance - preserve DB balances when XRPL empty', () =
 
     // Mock exchange rates to avoid external HTTP calls and speed up test
     const exchangeModule = require('../../dist/services/exchange/exchange.service');
-    jest.spyOn(exchangeModule.exchangeService, 'getLiveExchangeRates').mockResolvedValue({ success: true, data: { rates: [{ currency: 'USD', rate: 1.85 }] } });
+    jest.spyOn(exchangeModule.exchangeService, 'getXrpUsdRate').mockResolvedValue(1.85);
   });
 
   afterEach(() => {
@@ -78,6 +79,7 @@ describe('WalletService.getBalance - preserve DB balances when XRPL empty', () =
     expect(res.success).toBe(true);
     expect(res.data).toBeDefined();
     expect(res.data.balance.rlusd).toBe(mockWallet.balance_rlusd);
+    expect(res.data.balance.xrp).toBe(mockWallet.balance_xrp);
     expect(res.data.balance.usdt).toBe(mockWallet.balance_usdt);
     expect(res.data.balance.usdc).toBe(mockWallet.balance_usdc);
     expect(res.data.addresses.rlusd).toBeDefined();

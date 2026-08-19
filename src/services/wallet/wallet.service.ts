@@ -72,20 +72,24 @@ export class WalletService {
     };
   }
 
-  /** RLUSD-first portfolio total (excludes legacy XRP from user-facing value). */
-  private computeUsdEquivalent(usdt: number, usdc: number, rlusd: number): number {
+  /** Portfolio total: RLUSD + stablecoins + XRP (via XRP/USD when available). */
+  private async computeUsdEquivalent(xrp: number, usdt: number, usdc: number, rlusd: number): Promise<number> {
+    const x = Number(xrp) || 0;
     const u = Number(usdt) || 0;
     const c = Number(usdc) || 0;
     const r = Number(rlusd) || 0;
-    return Math.round((r + u + c) * 100) / 100;
+    const xrpUsd = await exchangeService.getXrpUsdRate();
+    const xrpValue = xrpUsd != null && xrpUsd > 0 ? x * xrpUsd : 0;
+    return Math.round((r + u + c + xrpValue) * 100) / 100;
   }
 
-  private buildUserFacingBalance(usdt: number, usdc: number, rlusd: number) {
+  private async buildUserFacingBalance(xrp: number, usdt: number, usdc: number, rlusd: number) {
     return {
       rlusd: Number(rlusd) || 0,
       usdt: Number(usdt) || 0,
       usdc: Number(usdc) || 0,
-      usd: this.computeUsdEquivalent(usdt, usdc, rlusd),
+      xrp: Number(xrp) || 0,
+      usd: await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd),
     };
   }
 
@@ -99,7 +103,7 @@ export class WalletService {
 
   /**
    * Get wallet balance for a user. Use suiteContext 'business' for business suite (separate wallet).
-   * Returns RLUSD-first balances; legacy XRP is not included in user-facing portfolio value.
+   * Returns RLUSD-first balances; existing XRP is still returned for legacy wallets.
    */
   async getBalance(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
@@ -109,10 +113,12 @@ export class WalletService {
         rlusd: number;
         usdt: number;
         usdc: number;
+        xrp: number;
         usd: number;
       };
       addresses: {
         rlusd: string;
+        xrp: string;
       };
     };
     xrpl_address?: string | null;
@@ -210,6 +216,7 @@ export class WalletService {
             .single();
           
           if (updatedWallet) {
+            const xrp = updatedWallet.balance_xrp ?? 0;
             const usdt = updatedWallet.balance_usdt ?? 0;
             const usdc = updatedWallet.balance_usdc ?? 0;
             const rlusd = updatedWallet.balance_rlusd ?? 0;
@@ -219,8 +226,11 @@ export class WalletService {
               success: true,
               message: 'Balance retrieved successfully',
               data: {
-                balance: this.buildUserFacingBalance(usdt, usdc, rlusd),
-                addresses: { rlusd: rlusdAddress },
+                balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd),
+                addresses: {
+                  rlusd: rlusdAddress,
+                  xrp: wallet.xrpl_address ?? '',
+                },
               },
               xrpl_address: wallet.xrpl_address,
               rlusd_xrpl_address: resolvedRlusdAddress,
@@ -239,6 +249,7 @@ export class WalletService {
       }
 
       // Fallback: return database balance if sync fails or no xrpl_address
+      const xrp = wallet.balance_xrp ?? 0;
       const usdt = wallet.balance_usdt ?? 0;
       const usdc = wallet.balance_usdc ?? 0;
       const rlusd = wallet.balance_rlusd ?? 0;
@@ -248,8 +259,11 @@ export class WalletService {
         success: true,
         message: 'Balance retrieved successfully',
         data: {
-          balance: this.buildUserFacingBalance(usdt, usdc, rlusd),
-          addresses: { rlusd: rlusdAddress },
+          balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd),
+          addresses: {
+            rlusd: rlusdAddress,
+            xrp: wallet.xrpl_address ?? '',
+          },
         },
         xrpl_address: wallet.xrpl_address ?? null,
         rlusd_xrpl_address: resolvedRlusdAddress,
