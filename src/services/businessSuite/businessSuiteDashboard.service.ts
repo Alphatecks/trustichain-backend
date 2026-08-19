@@ -227,6 +227,7 @@ export class BusinessSuiteDashboardService {
       message: 'Business suite dashboard summary retrieved',
       data: {
         balance: balanceResult.data.balance,
+        addresses: balanceResult.data.addresses,
         activeEscrows: { count: activeCount, lockedAmount: parseFloat(lockedAmount.toFixed(2)) },
         trustiscore: { score: trustiscoreResult.data.score, level: trustiscoreResult.data.level },
         totalEscrowed: parseFloat(totalEscrowed.toFixed(2)),

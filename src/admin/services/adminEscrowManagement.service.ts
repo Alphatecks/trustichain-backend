@@ -417,16 +417,8 @@ export class AdminEscrowManagementService {
           error: 'Bad request',
         };
       }
-      const exchangeRates = await exchangeService.getLiveExchangeRates();
-      if (!exchangeRates.success || !exchangeRates.data) {
-        return {
-          success: false,
-          message: 'Failed to fetch exchange rate for USD conversion',
-          error: 'Exchange rate fetch failed',
-        };
-      }
-      const usdRate = exchangeRates.data.rates.find((r: { currency: string }) => r.currency === 'USD')?.rate;
-      if (!usdRate || usdRate <= 0) {
+      const usdRate = await exchangeService.getXrpUsdRate();
+      if (usdRate == null || usdRate <= 0) {
         return {
           success: false,
           message: 'XRP/USD exchange rate not available',

@@ -7,10 +7,13 @@ export interface DashboardSummaryResponse {
   message: string;
       data?: {
         balance: {
-          xrp: number;
+          rlusd: number;
           usdt: number;
           usdc: number;
-          usd: number; // Total USD equivalent (XRP converted + USDT + USDC)
+          usd: number;
+        };
+        addresses?: {
+          rlusd: string;
         };
         activeEscrows: {
           count: number;
@@ -30,12 +33,14 @@ export interface WalletBalanceResponse {
   message: string;
   data?: {
     balance: {
-      xrp: number;
+      rlusd: number;
       usdt: number;
       usdc: number;
-      usd: number; // Total USD equivalent (XRP converted + USDT + USDC)
+      usd: number;
     };
-    xrplAddress: string;
+    addresses: {
+      rlusd: string;
+    };
   };
   error?: string;
 }
@@ -87,10 +92,11 @@ export interface ExchangeRateResponse {
     rates: Array<{
       currency: string;
       rate: number;
-      change: number;
-      changePercent: number;
     }>;
     lastUpdated: string;
+    /** Each rate is units of `currency` per 1 USD (≈ 1 RLUSD). */
+    quoteDirection: 'unitsPerUsd';
+    quoteBase: 'USD';
   };
   error?: string;
 }

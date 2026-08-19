@@ -58,6 +58,7 @@ import {
   MediatorStatus,
 } from '../../types/api/dispute.types';
 import { exchangeService } from '../exchange/exchange.service';
+import { toUserFacingAmount } from '../../utils/userFacingAmount';
 import { emailService } from '../email.service';
 
 export class DisputeService {
@@ -101,24 +102,24 @@ export class DisputeService {
     amount_usd: string | number;
   }): {
     disputeAmount: number;
-    currency: 'USD' | 'XRP';
-    amount: { xrp: number; usd: number };
+    currency: 'RLUSD';
+    amount: ReturnType<typeof toUserFacingAmount>;
   } {
-    const amount = {
-      xrp: parseFloat(String(row.amount_xrp)) || 0,
-      usd: parseFloat(String(row.amount_usd)) || 0,
-    };
+    const amount = toUserFacingAmount(
+      parseFloat(String(row.amount_usd)) || 0,
+      parseFloat(String(row.amount_xrp)) || 0
+    );
     const storedCurrency = row.dispute_currency === 'XRP' ? 'XRP' : row.dispute_currency === 'USD' ? 'USD' : null;
     if (row.dispute_amount != null && storedCurrency) {
       return {
         disputeAmount: parseFloat(String(row.dispute_amount)) || 0,
-        currency: storedCurrency,
+        currency: 'RLUSD',
         amount,
       };
     }
     return {
-      disputeAmount: amount.usd,
-      currency: 'USD',
+      disputeAmount: amount.rlusd,
+      currency: 'RLUSD',
       amount,
     };
   }
@@ -824,17 +825,9 @@ export class DisputeService {
       let amountXrp = request.amount;
       let amountUsd = request.amount;
 
-      if (request.currency === 'USD') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
+      if (request.currency === 'USD' || request.currency === 'RLUSD') {
+        const usdRate = await exchangeService.getXrpUsdRate();
+        if (usdRate == null || usdRate <= 0) {
           return {
             success: false,
             message: 'XRP/USD exchange rate not available',
@@ -843,17 +836,8 @@ export class DisputeService {
         }
         amountXrp = request.amount / usdRate;
       } else {
-        // Currency is XRP, convert to USD
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
+        const usdRate = await exchangeService.getXrpUsdRate();
+        if (usdRate == null || usdRate <= 0) {
           return {
             success: false,
             message: 'XRP/USD exchange rate not available',

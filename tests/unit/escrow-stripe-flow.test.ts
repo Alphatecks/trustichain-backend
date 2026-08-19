@@ -27,12 +27,7 @@ jest.mock('../../src/services/trustitag.service', () => ({
 
 jest.mock('../../src/services/exchange/exchange.service', () => ({
   exchangeService: {
-    getLiveExchangeRates: jest.fn().mockResolvedValue({
-      success: true,
-      data: {
-        rates: [{ currency: 'USD', rate: 2 }],
-      },
-    }),
+    getXrpUsdRate: jest.fn().mockResolvedValue(2),
   },
 }));
 

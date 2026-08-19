@@ -29,6 +29,7 @@ import {
   type StablecoinDepositAddressMap,
 } from './multichain-wallet.service';
 import { multichainDepositMonitorService } from './multichain-deposit-monitor.service';
+import { toUserFacingAmount } from '../../utils/userFacingAmount';
 
 export type WalletSuiteContext = 'personal' | 'business';
 
@@ -52,19 +53,66 @@ export class WalletService {
     }
     return wallet.xrpl_address;
   }
+  private async getCustodialBalances(
+    userId: string,
+    suiteContext: WalletSuiteContext = 'personal'
+  ): Promise<{ xrp: number; usdt: number; usdc: number; rlusd: number }> {
+    const adminClient = supabaseAdmin || supabase;
+    const { data: wallet } = await adminClient
+      .from('wallets')
+      .select('balance_xrp, balance_usdt, balance_usdc, balance_rlusd')
+      .eq('user_id', userId)
+      .eq('suite_context', suiteContext)
+      .maybeSingle();
+    return {
+      xrp: Number(wallet?.balance_xrp) || 0,
+      usdt: Number(wallet?.balance_usdt) || 0,
+      usdc: Number(wallet?.balance_usdc) || 0,
+      rlusd: Number(wallet?.balance_rlusd) || 0,
+    };
+  }
+
+  /** RLUSD-first portfolio total (excludes legacy XRP from user-facing value). */
+  private computeUsdEquivalent(usdt: number, usdc: number, rlusd: number): number {
+    const u = Number(usdt) || 0;
+    const c = Number(usdc) || 0;
+    const r = Number(rlusd) || 0;
+    return Math.round((r + u + c) * 100) / 100;
+  }
+
+  private buildUserFacingBalance(usdt: number, usdc: number, rlusd: number) {
+    return {
+      rlusd: Number(rlusd) || 0,
+      usdt: Number(usdt) || 0,
+      usdc: Number(usdc) || 0,
+      usd: this.computeUsdEquivalent(usdt, usdc, rlusd),
+    };
+  }
+
+  private async getXrpUsdRateOrThrow(): Promise<number> {
+    const rate = await exchangeService.getXrpUsdRate();
+    if (rate == null || rate <= 0) {
+      throw new Error('XRP/USD exchange rate not available');
+    }
+    return rate;
+  }
+
   /**
    * Get wallet balance for a user. Use suiteContext 'business' for business suite (separate wallet).
+   * Returns RLUSD-first balances; legacy XRP is not included in user-facing portfolio value.
    */
   async getBalance(userId: string, suiteContext: WalletSuiteContext = 'personal'): Promise<{
     success: boolean;
     message: string;
     data?: {
       balance: {
-        xrp: number;
+        rlusd: number;
         usdt: number;
         usdc: number;
-        rlusd: number;
         usd: number;
+      };
+      addresses: {
+        rlusd: string;
       };
     };
     xrpl_address?: string | null;
@@ -162,23 +210,17 @@ export class WalletService {
             .single();
           
           if (updatedWallet) {
-            const xrp = updatedWallet.balance_xrp ?? 0;
             const usdt = updatedWallet.balance_usdt ?? 0;
             const usdc = updatedWallet.balance_usdc ?? 0;
             const rlusd = updatedWallet.balance_rlusd ?? 0;
-            const usd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
             const stablecoin_addresses = await loadStablecoinAddresses(wallet.id);
+            const rlusdAddress = resolvedRlusdAddress ?? '';
             return {
               success: true,
               message: 'Balance retrieved successfully',
               data: {
-                balance: {
-                  xrp,
-                  usdt,
-                  usdc,
-                  rlusd,
-                  usd,
-                },
+                balance: this.buildUserFacingBalance(usdt, usdc, rlusd),
+                addresses: { rlusd: rlusdAddress },
               },
               xrpl_address: wallet.xrpl_address,
               rlusd_xrpl_address: resolvedRlusdAddress,
@@ -197,23 +239,17 @@ export class WalletService {
       }
 
       // Fallback: return database balance if sync fails or no xrpl_address
-      const xrp = wallet.balance_xrp ?? 0;
       const usdt = wallet.balance_usdt ?? 0;
       const usdc = wallet.balance_usdc ?? 0;
       const rlusd = wallet.balance_rlusd ?? 0;
-      const usd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
       const stablecoin_addresses = await loadStablecoinAddresses(wallet.id);
+      const rlusdAddress = resolvedRlusdAddress ?? '';
       return {
         success: true,
         message: 'Balance retrieved successfully',
         data: {
-          balance: {
-            xrp,
-            usdt,
-            usdc,
-            rlusd,
-            usd,
-          },
+          balance: this.buildUserFacingBalance(usdt, usdc, rlusd),
+          addresses: { rlusd: rlusdAddress },
         },
         xrpl_address: wallet.xrpl_address ?? null,
         rlusd_xrpl_address: resolvedRlusdAddress,
@@ -232,32 +268,6 @@ export class WalletService {
         error: error instanceof Error ? error.message : 'Failed to get wallet balance',
       };
     }
-  }
-
-  /**
-   * Compute total USD equivalent from XRP (via live rate), USDT, USDC, and RLUSD (1:1 USD).
-   * Balances may be strings from DB; we coerce to number. Returns 0 only when rate is unavailable.
-   */
-  private async computeUsdEquivalent(xrp: number, usdt: number, usdc: number, rlusd: number): Promise<number> {
-    const x = Number(xrp) || 0;
-    const u = Number(usdt) || 0;
-    const c = Number(usdc) || 0;
-    const r = Number(rlusd) || 0;
-    const rates = await exchangeService.getLiveExchangeRates();
-    if (!rates.success || !rates.data) {
-      console.warn('[Wallet] computeUsdEquivalent: exchange rates unavailable (success or data missing)');
-      return 0;
-    }
-    const usdRate = rates.data.rates.find((r) => r.currency === 'USD')?.rate;
-    if (usdRate == null || usdRate <= 0) {
-      console.warn('[Wallet] computeUsdEquivalent: USD rate missing or invalid', {
-        hasRates: rates.data.rates.length,
-        currencies: rates.data.rates.map((r) => r.currency),
-      });
-      return 0;
-    }
-    const total = x * usdRate + u + c + r;
-    return Math.round(total * 100) / 100;
   }
 
   /**
@@ -797,23 +807,12 @@ export class WalletService {
       let amountUsd = request.amount;
       let amountXrp = request.amount;
       if (currency === 'RLUSD') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          throw new Error(`Failed to fetch exchange rates for ${currency} conversion`);
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
-          throw new Error('XRP/USD exchange rate not available');
-        }
-        amountXrp = request.amount / usdRate;
         amountUsd = request.amount;
+        amountXrp = 0;
       } else if (currency === 'XRP') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (exchangeRates.success && exchangeRates.data) {
-          const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-          if (usdRate && usdRate > 0) {
-            amountUsd = request.amount * usdRate;
-          }
+        const xrpUsdRate = await exchangeService.getXrpUsdRate();
+        if (xrpUsdRate != null && xrpUsdRate > 0) {
+          amountUsd = request.amount * xrpUsdRate;
         }
       }
 
@@ -1314,17 +1313,8 @@ export class WalletService {
         };
       }
 
-      // Get current wallet balances
-      const balanceResult = await this.getBalance(userId);
-      if (!balanceResult.success || !balanceResult.data) {
-        return {
-          success: false,
-          message: 'Failed to retrieve wallet balance',
-          error: 'Balance fetch failed',
-        };
-      }
-
-      const { balance } = balanceResult.data;
+      // Get current wallet balances (includes legacy XRP for swap settlement)
+      const balance = await this.getCustodialBalances(userId);
 
       // Determine available "from" balance, respecting XRP reserve rules
       let availableFromBalance: number;
@@ -1367,8 +1357,7 @@ export class WalletService {
         const { toAmount: dexToAmount, rate: dexRate, estimatedFee } = dexQuote.data;
 
         // Get USD value for fee calculation
-        const ratesResult = await exchangeService.getLiveExchangeRates();
-        const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate || 0.5;
+        const xrpUsdRate = (await exchangeService.getXrpUsdRate()) ?? 0.5;
         
         let usdValue = 0;
         if (fromCurrency === 'XRP') {
@@ -1397,16 +1386,16 @@ export class WalletService {
 
       // Default: Use external exchange rates (internal swap)
       // Get XRP/USD rate from exchange service
-      const ratesResult = await exchangeService.getLiveExchangeRates();
-      const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
-
-      if (!ratesResult.success || !ratesResult.data || !xrpUsdRate || xrpUsdRate <= 0) {
+      try {
+        await this.getXrpUsdRateOrThrow();
+      } catch {
         return {
           success: false,
           message: 'XRP/USD exchange rate not available',
           error: 'Exchange rate not available',
         };
       }
+      const xrpUsdRate = (await exchangeService.getXrpUsdRate())!;
 
       // Convert "from" amount to USD-equivalent
       let usdValue = 0;
@@ -1594,9 +1583,8 @@ export class WalletService {
     } else if (toCurrency === 'XRP') {
       amountXrp = toAmount;
     } else {
-      const ratesResult = await exchangeService.getLiveExchangeRates();
-      const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate;
-      if (xrpUsdRate && xrpUsdRate > 0) {
+      const xrpUsdRate = await exchangeService.getXrpUsdRate();
+      if (xrpUsdRate != null && xrpUsdRate > 0) {
         amountXrp = usdValue / xrpUsdRate;
       }
     }
@@ -1726,8 +1714,7 @@ export class WalletService {
     const adjustedMinAmount = minAmount * slippageMultiplier;
 
     // Calculate USD value
-    const ratesResult = await exchangeService.getLiveExchangeRates();
-    const xrpUsdRate = ratesResult.data?.rates.find((r) => r.currency === 'USD')?.rate || 0.5;
+    const xrpUsdRate = (await exchangeService.getXrpUsdRate()) ?? 0.5;
     let usdValue = 0;
     if (fromCurrency === 'XRP') {
       usdValue = amount * xrpUsdRate;
@@ -2065,38 +2052,15 @@ export class WalletService {
       let amountToken: number = request.amount; // For USD-pegged tokens (USDT/USDC/RLUSD)
 
       if (request.currency === 'USD') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          throw new Error('Failed to fetch exchange rates for currency conversion');
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
-          throw new Error('XRP/USD exchange rate not available');
-        }
+        const usdRate = await this.getXrpUsdRateOrThrow();
         amountXrp = request.amount / usdRate;
       } else if (request.currency === 'XRP') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          throw new Error('Failed to fetch exchange rates for currency conversion');
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
-          throw new Error('XRP/USD exchange rate not available');
-        }
+        const usdRate = await this.getXrpUsdRateOrThrow();
         amountUsd = request.amount * usdRate;
       } else if (request.currency === 'RLUSD') {
-        // For USD-pegged tokens, amount is already in USD value
         amountUsd = request.amount;
         amountToken = request.amount;
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          throw new Error('Failed to fetch exchange rates for currency conversion');
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
-          throw new Error('XRP/USD exchange rate not available');
-        }
-        amountXrp = request.amount / usdRate; // For display purposes
+        amountXrp = 0;
       }
 
       // Create transaction record
@@ -2627,16 +2591,8 @@ export class WalletService {
       let amountUsd = request.amount;
 
       if (request.currency === 'USD') {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
+        const usdRate = await exchangeService.getXrpUsdRate();
+        if (usdRate == null || usdRate <= 0) {
           return {
             success: false,
             message: 'XRP/USD exchange rate not available',
@@ -2644,20 +2600,10 @@ export class WalletService {
           };
         }
         amountXrp = request.amount / usdRate;
-  // The withdrawWallet method and all other methods are now properly closed and inside the WalletService class.
-        // Round to 6 decimal places (XRPL maximum precision)
         amountXrp = Math.round(amountXrp * 1000000) / 1000000;
       } else {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
+        const usdRate = await exchangeService.getXrpUsdRate();
+        if (usdRate == null || usdRate <= 0) {
           return {
             success: false,
             message: 'XRP/USD exchange rate not available',
@@ -2665,7 +2611,6 @@ export class WalletService {
           };
         }
         amountUsd = request.amount * usdRate;
-        // Round XRP amount to 6 decimal places (XRPL maximum precision)
         amountXrp = Math.round(amountXrp * 1000000) / 1000000;
       }
 
@@ -2724,40 +2669,18 @@ export class WalletService {
         });
       }
 
-      // Check balance
-      const balance = await this.getBalance(userId);
-      // #region agent log
-      // ...existing code...
-      // #endregion
-      if (!balance.success || !balance.data) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
-        return {
-          success: false,
-          message: 'Failed to check balance',
-          error: 'Failed to check balance',
-        };
-      }
+      // Check balance (legacy XRP reserve for XRPL withdrawals)
+      const custodial = await this.getCustodialBalances(userId);
 
-      // XRPL reserve requirements (as of Dec 2024: base reserve = 1 XRP)
-      // Account must maintain minimum reserve + transaction fee
-      const BASE_RESERVE = 1.0; // XRPL base reserve (reduced from 10 to 1 XRP in Dec 2024)
-      const ESTIMATED_FEE = 0.000015; // Estimated transaction fee (slightly higher than typical 0.000012 for safety)
+      const BASE_RESERVE = 1.0;
+      const ESTIMATED_FEE = 0.000015;
       const minimumRequired = BASE_RESERVE + ESTIMATED_FEE;
-      const availableBalance = Math.max(0, balance.data.balance.xrp - minimumRequired);
-      
-      // #region agent log
-      // ...existing code...
-      // #endregion
+      const availableBalance = Math.max(0, custodial.xrp - minimumRequired);
       
       if (availableBalance < amountXrp) {
-        // #region agent log
-        // ...existing code...
-        // #endregion
         return {
           success: false,
-          message: `Insufficient available balance. You have ${balance.data.balance.xrp.toFixed(6)} XRP total, but must maintain ${BASE_RESERVE} XRP reserve. Available: ${availableBalance.toFixed(6)} XRP. Requested: ${amountXrp.toFixed(6)} XRP.`,
+          message: `Insufficient available balance. You have ${custodial.xrp.toFixed(6)} XRP total, but must maintain ${BASE_RESERVE} XRP reserve. Available: ${availableBalance.toFixed(6)} XRP. Requested: ${amountXrp.toFixed(6)} XRP.`,
           error: 'Insufficient available balance (reserve requirement)',
         };
       }
@@ -3187,10 +3110,7 @@ export class WalletService {
         );
 
         // Get exchange rate for USD conversion
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        const usdRate = exchangeRates.success && exchangeRates.data
-          ? exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate || 0
-          : 0;
+        const usdRate = (await exchangeService.getXrpUsdRate()) ?? 0;
 
         let newDepositsCount = 0;
 
@@ -3344,13 +3264,9 @@ export class WalletService {
               // Calculate USD amount (use the same rate as withdrawal if available, or fetch current)
               let amountUsd = withdrawal.amount_usd;
               if (amountXrp !== withdrawal.amount_xrp) {
-                // Amounts don't match, recalculate USD
-                const exchangeRates = await exchangeService.getLiveExchangeRates();
-                if (exchangeRates.success && exchangeRates.data) {
-                  const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-                  if (usdRate && usdRate > 0) {
-                    amountUsd = amountXrp * usdRate;
-                  }
+                const usdRate = await exchangeService.getXrpUsdRate();
+                if (usdRate != null && usdRate > 0) {
+                  amountUsd = amountXrp * usdRate;
                 }
               }
 
@@ -3470,10 +3386,7 @@ export class WalletService {
       const formattedTransactions: WalletTransaction[] = (transactions || []).map((tx: any) => ({
         id: tx.id,
         type: tx.type,
-        amount: {
-          usd: parseFloat(tx.amount_usd),
-          xrp: parseFloat(tx.amount_xrp),
-        },
+        amount: toUserFacingAmount(parseFloat(tx.amount_usd), parseFloat(tx.amount_xrp)),
         status: tx.status,
         xrplTxHash: tx.xrpl_tx_hash || undefined,
         description: tx.description || undefined,

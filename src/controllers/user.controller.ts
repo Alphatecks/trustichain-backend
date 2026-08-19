@@ -17,6 +17,7 @@ interface UserProfileResponse {
     /** Unique handle for P2P sends (same as login / ensure-profile) */
     trustitag?: string;
     avatarUrl?: string | null;
+    displayCurrency?: string;
   };
   error?: string;
 }
@@ -103,7 +104,29 @@ export class UserController {
   }
 
   /**
-   * Get linked accounts
+   * Update user preferences (display currency)
+   * PATCH /api/user/preferences
+   */
+  async updateUserPreferences(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const result = await userService.updateUserPreferences(userId, req.body ?? {});
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * GET /api/user/linked-accounts
    */
   async getLinkedAccounts(req: Request, res: Response): Promise<void> {

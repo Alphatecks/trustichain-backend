@@ -286,12 +286,8 @@ export class BusinessSuitePayrollsService {
       return { success: false, message: 'Business wallet must be connected with signing capability to release XRP to team members.', error: 'Wallet signing required' };
     }
 
-    const rates = await exchangeService.getLiveExchangeRates();
-    if (!rates.success || !rates.data) {
-      return { success: false, message: 'Failed to fetch exchange rates for USD to XRP conversion.', error: 'Exchange rate fetch failed' };
-    }
-    const usdRate = rates.data.rates.find((r) => r.currency === 'USD')?.rate;
-    if (!usdRate || usdRate <= 0) {
+    const usdRate = await exchangeService.getXrpUsdRate();
+    if (usdRate == null || usdRate <= 0) {
       return { success: false, message: 'XRP/USD exchange rate not available.', error: 'Exchange rate not available' };
     }
 

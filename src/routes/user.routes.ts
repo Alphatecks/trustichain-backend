@@ -74,6 +74,10 @@ router.post(
   })
 );
 
+router.patch('/preferences', authenticate, asyncHandler(async (req, res) => {
+  await userController.updateUserPreferences(req, res);
+}));
+
 /**
  * @route   GET /api/user/linked-accounts
  * @desc    Get user linked accounts

@@ -1,24 +1,30 @@
 import type { TransactionType } from './transaction.types';
-/**
- * Wallet API Types
- */
+import type { UserFacingAmount } from '../../utils/userFacingAmount';
 
 export interface WalletBalanceResponse {
   success: boolean;
   message: string;
   data?: {
     balance: {
-      xrp: number;
+      rlusd: number;
       usdt: number;
       usdc: number;
-      rlusd: number;
-      usd: number; // Total USD equivalent (XRP converted + USDT + USDC + RLUSD)
+      usd: number;
     };
-    xrplAddress: string;
-    rlusdAddress?: string;
-    depositAddresses?: WalletXrplDepositAddresses;
+    addresses: {
+      rlusd: string;
+    };
     stablecoinAddresses?: StablecoinDepositAddressMap;
+    multichainNetwork?: Record<string, unknown>;
   };
+  /** @deprecated Use data.addresses.rlusd */
+  xrplAddress?: string;
+  /** @deprecated Use data.addresses.rlusd */
+  rlusdAddress?: string;
+  /** @deprecated Use data.addresses */
+  depositAddresses?: WalletXrplDepositAddresses;
+  stablecoinAddresses?: StablecoinDepositAddressMap;
+  multichainNetwork?: Record<string, unknown>;
   error?: string;
 }
 
@@ -149,10 +155,7 @@ export interface WithdrawWalletResponse {
 export interface WalletTransaction {
   id: string;
   type: TransactionType;
-  amount: {
-    usd: number;
-    xrp: number;
-  };
+  amount: UserFacingAmount;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   xrplTxHash?: string;
   description?: string;

@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { CreateEscrowRequest, CreateEscrowResponse, Escrow, EscrowCounterpartyParty, EscrowPayerParty, GetEscrowListRequest, Milestone, ReleaseType } from '../../types/api/escrow.types';
+import type { UserFacingAmount } from '../../utils/userFacingAmount';
 import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
@@ -18,6 +19,7 @@ import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
 import { getEscrowCreationFeeSettings, resolveEscrowCreationFeePercentageByType } from './escrowCreationFee.service';
 import { generateSupplierDisplayId } from '../businessSuite/supplierDisplayId.util';
+import { toUserFacingAmount } from '../../utils/userFacingAmount';
 
 async function resolveAvatarUrl(stored: string | null | undefined): Promise<string | null> {
   if (stored == null || !String(stored).trim()) return null;
@@ -27,6 +29,15 @@ async function resolveAvatarUrl(stored: string | null | undefined): Promise<stri
 }
 
 export class EscrowService {
+  private async getXrpUsdRateOrNull(): Promise<number | null> {
+    return exchangeService.getXrpUsdRate();
+  }
+
+  private normalizeSettlementCurrency(currency: string): 'USD' | 'XRP' {
+    if (currency === 'RLUSD' || currency === 'USD') return 'USD';
+    return 'XRP';
+  }
+
   private normalizeXrpAmount(value: number): number {
     return parseFloat(value.toFixed(6));
   }
@@ -313,8 +324,7 @@ export class EscrowService {
       });
 
       const creationFeeUsd = parseFloat(String(escrow.creation_fee_usd ?? 0));
-      const exchangeRates = await exchangeService.getLiveExchangeRates();
-      const usdRate = exchangeRates.data?.rates.find((r) => r.currency === 'USD')?.rate;
+      const usdRate = await this.getXrpUsdRateOrNull();
       const creationFeeXrp =
         creationFeeUsd > 0 && usdRate && usdRate > 0
           ? parseFloat((creationFeeUsd / usdRate).toFixed(6))
@@ -1185,26 +1195,20 @@ export class EscrowService {
       // Use totalAmount if provided, otherwise use amount
       const escrowAmount = request.totalAmount !== undefined ? request.totalAmount : request.amount;
 
-      // Convert amount to XRP if needed
+      const settlementCurrency = this.normalizeSettlementCurrency(request.currency);
+
+      // Convert amount to XRP if needed (internal XRPL settlement)
       let amountXrp = escrowAmount;
       let amountUsd = escrowAmount;
-      const exchangeRates = await exchangeService.getLiveExchangeRates();
-      if (!exchangeRates.success || !exchangeRates.data) {
-        return {
-          success: false,
-          message: 'Failed to fetch exchange rates for currency conversion',
-          error: 'Exchange rate fetch failed',
-        };
-      }
-      const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-      if (!usdRate || usdRate <= 0) {
+      const usdRate = await this.getXrpUsdRateOrNull();
+      if (usdRate == null || usdRate <= 0) {
         return {
           success: false,
           message: 'XRP/USD exchange rate not available',
           error: 'Exchange rate not available',
         };
       }
-      if (request.currency === 'USD') {
+      if (settlementCurrency === 'USD') {
         amountXrp = escrowAmount / usdRate;
       } else {
         amountUsd = escrowAmount * usdRate;
@@ -1284,10 +1288,7 @@ export class EscrowService {
           message: 'Escrow created. Complete payment with Google Pay or Apple Pay to fund it.',
           data: {
             escrowId: escrow.id,
-            amount: {
-              usd: parseFloat(amountUsd.toFixed(2)),
-              xrp: parseFloat(amountXrp.toFixed(6)),
-            },
+            amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
             creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
             payableAmountUsd,
             paymentMethod: 'stripe',
@@ -1595,16 +1596,8 @@ export class EscrowService {
 
       // Create milestones if this is a milestone-based escrow
       if (request.releaseType === 'Milestones' && request.milestones && request.milestones.length > 0) {
-        const exchangeRates = await exchangeService.getLiveExchangeRates();
-        if (!exchangeRates.success || !exchangeRates.data) {
-          return {
-            success: false,
-            message: 'Failed to fetch exchange rates for milestone currency conversion',
-            error: 'Exchange rate fetch failed',
-          };
-        }
-        const usdRate = exchangeRates.data.rates.find(r => r.currency === 'USD')?.rate;
-        if (!usdRate || usdRate <= 0) {
+        const usdRate = await this.getXrpUsdRateOrNull();
+        if (usdRate == null || usdRate <= 0) {
           return {
             success: false,
             message: 'XRP/USD exchange rate not available for milestones',
@@ -1616,8 +1609,7 @@ export class EscrowService {
           let milestoneAmountXrp = milestone.milestoneAmount;
           let milestoneAmountUsd = milestone.milestoneAmount;
 
-          // Convert milestone amount to XRP if currency is USD
-          if (request.currency === 'USD') {
+          if (settlementCurrency === 'USD') {
             milestoneAmountXrp = milestone.milestoneAmount / usdRate;
           } else {
             milestoneAmountUsd = milestone.milestoneAmount * usdRate;
@@ -1702,10 +1694,7 @@ export class EscrowService {
           message: 'Escrow created successfully on XRPL',
           data: {
             escrowId: escrow.id,
-            amount: {
-              usd: parseFloat(amountUsd.toFixed(2)),
-              xrp: parseFloat(amountXrp.toFixed(6)),
-            },
+            amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
             transaction: {
               creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
               creationFeeXrp: parseFloat(creationFeeXrp.toFixed(6)),
@@ -1723,10 +1712,7 @@ export class EscrowService {
           message: 'Please sign the escrow creation transaction in your Xaman (XUMM) wallet',
           data: {
             escrowId: escrow.id,
-            amount: {
-              usd: parseFloat(amountUsd.toFixed(2)),
-              xrp: parseFloat(amountXrp.toFixed(6)),
-            },
+            amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
             transaction: {
               creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
               creationFeeXrp: parseFloat(creationFeeXrp.toFixed(6)),
@@ -1926,10 +1912,7 @@ export class EscrowService {
           initiatorAvatarUrl: initiatorProfile?.avatarUrl ?? null,
           counterpartyName: counterpartyProfile?.name,
           counterpartyAvatarUrl: counterpartyProfile?.avatarUrl ?? null,
-          amount: {
-            usd: parseFloat(escrow.amount_usd),
-            xrp: parseFloat(escrow.amount_xrp),
-          },
+          amount: toUserFacingAmount(parseFloat(escrow.amount_usd), parseFloat(escrow.amount_xrp)),
           status: escrow.status,
           transactionType: escrow.transaction_type as TransactionType,
           industry: escrow.industry || null,
@@ -1996,21 +1979,21 @@ export class EscrowService {
     dispute_currency?: string | null;
     amount_xrp: string | number;
     amount_usd: string | number;
-  }): { disputeAmount: number; currency: 'USD' | 'XRP'; amount: { xrp: number; usd: number } } {
-    const amount = {
-      xrp: parseFloat(String(row.amount_xrp)) || 0,
-      usd: parseFloat(String(row.amount_usd)) || 0,
-    };
+  }): { disputeAmount: number; currency: 'RLUSD'; amount: ReturnType<typeof toUserFacingAmount> } {
+    const amount = toUserFacingAmount(
+      parseFloat(String(row.amount_usd)) || 0,
+      parseFloat(String(row.amount_xrp)) || 0
+    );
     const storedCurrency =
       row.dispute_currency === 'XRP' ? 'XRP' : row.dispute_currency === 'USD' ? 'USD' : null;
     if (row.dispute_amount != null && storedCurrency) {
       return {
         disputeAmount: parseFloat(String(row.dispute_amount)) || 0,
-        currency: storedCurrency,
+        currency: 'RLUSD',
         amount,
       };
     }
-    return { disputeAmount: amount.usd, currency: 'USD', amount };
+    return { disputeAmount: amount.rlusd, currency: 'RLUSD', amount };
   }
 
   async getEscrowById(userId: string, escrowId: string): Promise<{
@@ -2055,10 +2038,7 @@ export class EscrowService {
         initiatorAvatarUrl: initiatorProfile?.avatarUrl ?? null,
         counterpartyName: counterpartyProfile?.name,
         counterpartyAvatarUrl: counterpartyProfile?.avatarUrl ?? null,
-        amount: {
-          usd: parseFloat(escrow.amount_usd),
-          xrp: parseFloat(escrow.amount_xrp),
-        },
+        amount: toUserFacingAmount(parseFloat(escrow.amount_usd), parseFloat(escrow.amount_xrp)),
         status: escrow.status,
         transactionType: escrow.transaction_type as TransactionType,
         industry: escrow.industry || null,
@@ -2135,7 +2115,7 @@ export class EscrowService {
     data?: {
       id: string;
       escrowId: string;
-      amount: { usd: number; xrp: number };
+      amount: UserFacingAmount;
       payer: EscrowPayerParty;
       counterparty: EscrowCounterpartyParty;
     };
@@ -2245,10 +2225,10 @@ export class EscrowService {
         data: {
           id: escrow.id,
           escrowId: formattedEscrowId,
-          amount: {
-            usd: parseFloat(String(escrow.amount_usd)) || 0,
-            xrp: parseFloat(String(escrow.amount_xrp)) || 0,
-          },
+          amount: toUserFacingAmount(
+            parseFloat(String(escrow.amount_usd)) || 0,
+            parseFloat(String(escrow.amount_xrp)) || 0
+          ),
           payer,
           counterparty,
         },
@@ -3669,10 +3649,7 @@ export class EscrowService {
           counterpartyId: updatedEscrow.counterparty_id || '',
           initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
           counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
-            amount: {
-            usd: parseFloat(updatedEscrow.amount_usd),
-            xrp: parseFloat(updatedEscrow.amount_xrp),
-            },
+            amount: toUserFacingAmount(parseFloat(updatedEscrow.amount_usd), parseFloat(updatedEscrow.amount_xrp)),
           status: updatedEscrow.status,
           transactionType: updatedEscrow.transaction_type as TransactionType,
           industry: updatedEscrow.industry || null,
@@ -4226,10 +4203,7 @@ export class EscrowService {
           counterpartyId: updatedEscrow.counterparty_id || '',
           initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
           counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
-            amount: {
-            usd: parseFloat(updatedEscrow.amount_usd),
-            xrp: parseFloat(updatedEscrow.amount_xrp),
-            },
+            amount: toUserFacingAmount(parseFloat(updatedEscrow.amount_usd), parseFloat(updatedEscrow.amount_xrp)),
           status: updatedEscrow.status,
           transactionType: updatedEscrow.transaction_type as TransactionType,
           industry: updatedEscrow.industry || null,
@@ -4315,10 +4289,7 @@ export class EscrowService {
             counterpartyId: updatedEscrow.counterparty_id || '',
             initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
             counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
-            amount: {
-              usd: parseFloat(updatedEscrow.amount_usd),
-              xrp: parseFloat(updatedEscrow.amount_xrp),
-            },
+            amount: toUserFacingAmount(parseFloat(updatedEscrow.amount_usd), parseFloat(updatedEscrow.amount_xrp)),
             status: updatedEscrow.status,
             transactionType: updatedEscrow.transaction_type as TransactionType,
             industry: updatedEscrow.industry || null,
@@ -4811,10 +4782,7 @@ export class EscrowService {
         counterpartyId: updatedEscrow.counterparty_id || '',
         initiatorName: partyNames[updatedEscrow.user_id] || 'Unknown',
         counterpartyName: updatedEscrow.counterparty_id ? partyNames[updatedEscrow.counterparty_id] : undefined,
-        amount: {
-          usd: parseFloat(updatedEscrow.amount_usd),
-          xrp: parseFloat(updatedEscrow.amount_xrp),
-        },
+        amount: toUserFacingAmount(parseFloat(updatedEscrow.amount_usd), parseFloat(updatedEscrow.amount_xrp)),
         status: updatedEscrow.status,
         transactionType: updatedEscrow.transaction_type as TransactionType,
         industry: updatedEscrow.industry || null,

@@ -12,6 +12,10 @@ import type {
 } from '../../types/api/beneficiary.types';
 import { storageService } from '../storage/storage.service';
 import { trustitagService } from '../trustitag.service';
+import {
+  SUPPORTED_DISPLAY_CURRENCIES,
+  type DisplayCurrency,
+} from '../../types/api/currency.types';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,6 +28,67 @@ async function resolveAvatarDisplayUrl(stored: string | null | undefined): Promi
 }
 
 export class UserService {
+  private normalizeDisplayCurrency(raw: string | null | undefined): DisplayCurrency {
+    const value = String(raw ?? 'USD').trim().toUpperCase();
+    return (SUPPORTED_DISPLAY_CURRENCIES as readonly string[]).includes(value)
+      ? (value as DisplayCurrency)
+      : 'USD';
+  }
+
+  /**
+   * Update user preferences (display currency for cross-device sync).
+   */
+  async updateUserPreferences(
+    userId: string,
+    body: { displayCurrency?: unknown }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: { displayCurrency: DisplayCurrency };
+    error?: string;
+  }> {
+    try {
+      if (body.displayCurrency == null) {
+        return {
+          success: false,
+          message: 'displayCurrency is required',
+          error: 'Validation failed',
+        };
+      }
+
+      const displayCurrency = this.normalizeDisplayCurrency(String(body.displayCurrency));
+      const adminClient = supabaseAdmin || supabase;
+      const { error } = await adminClient
+        .from('users')
+        .update({
+          display_currency: displayCurrency,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (error) {
+        return {
+          success: false,
+          message: error.message || 'Failed to update preferences',
+          error: error.message || 'Database error',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Preferences updated successfully',
+        data: { displayCurrency },
+      };
+    } catch (error) {
+      console.error('updateUserPreferences error:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to update preferences',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
   /**
    * Get user profile including verification status
    */
@@ -41,6 +106,8 @@ export class UserService {
       mfaEnabled: boolean;
       /** Unique handle for P2P XRP by Trustitag; assigned if missing */
       trustitag?: string;
+      /** User's preferred display currency for frontend fiat conversion (default USD). */
+      displayCurrency: DisplayCurrency;
       /** Time-limited URL for displaying the profile photo (private storage bucket). */
       avatarUrl: string | null;
     };
@@ -52,7 +119,7 @@ export class UserService {
       // Get user from users table
       const { data: userData, error: userError } = await adminClient
         .from('users')
-        .select('id, email, full_name, country, avatar_url, mfa_enabled')
+        .select('id, email, full_name, country, avatar_url, mfa_enabled, display_currency')
         .eq('id', userId)
         .single();
 
@@ -80,6 +147,10 @@ export class UserService {
         console.warn('[UserService] ensureTrustitagForUser failed in getUserProfile:', e);
       }
 
+      const displayCurrency = this.normalizeDisplayCurrency(
+        (userData as { display_currency?: string | null }).display_currency
+      );
+
       if (authError && !authData) {
         // If we can't get auth data, assume not verified
         return {
@@ -92,6 +163,7 @@ export class UserService {
             country: userData.country,
             verified: false,
             mfaEnabled,
+            displayCurrency,
             ...(trustitag && { trustitag }),
             avatarUrl,
           },
@@ -108,6 +180,7 @@ export class UserService {
           country: userData.country,
           verified: authData?.user?.email_confirmed_at !== null,
           mfaEnabled,
+          displayCurrency,
           ...(trustitag && { trustitag }),
           avatarUrl,
         },

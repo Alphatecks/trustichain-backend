@@ -36,6 +36,7 @@ export class DashboardController {
         message: 'Dashboard summary retrieved successfully',
         data: {
           balance: balanceResult.data!.balance,
+          addresses: balanceResult.data!.addresses,
           activeEscrows: {
             count: activeEscrowsResult.data!.count,
             lockedAmount: activeEscrowsResult.data!.lockedAmount,

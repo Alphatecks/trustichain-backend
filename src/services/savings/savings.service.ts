@@ -536,9 +536,8 @@ export class SavingsService {
         };
       }
 
-      const rates = await exchangeService.getLiveExchangeRates();
-      const xrpUsd = rates.data?.rates.find((r) => r.currency === 'USD')?.rate;
-      if (!xrpUsd || xrpUsd <= 0) {
+      const xrpUsd = await exchangeService.getXrpUsdRate();
+      if (xrpUsd == null || xrpUsd <= 0) {
         return {
           success: false,
           message: 'Could not load XRP/USD rate. Try again shortly.',
@@ -717,9 +716,8 @@ export class SavingsService {
         };
       }
 
-      const rates = await exchangeService.getLiveExchangeRates();
-      const xrpUsd = rates.data?.rates.find((r) => r.currency === 'USD')?.rate;
-      if (!xrpUsd || xrpUsd <= 0) {
+      const xrpUsd = await exchangeService.getXrpUsdRate();
+      if (xrpUsd == null || xrpUsd <= 0) {
         return {
           success: false,
           message: 'Could not load XRP/USD rate. Try again shortly.',

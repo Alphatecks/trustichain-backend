@@ -3,6 +3,7 @@
  */
 
 import type { TransactionType } from './transaction.types';
+import type { UserFacingAmount } from '../../utils/userFacingAmount';
 
 export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
 
@@ -29,7 +30,7 @@ export interface CreateEscrowRequest {
   
   // Escrow details
   amount: number;
-  currency: 'USD' | 'XRP';
+  currency: 'USD' | 'XRP' | 'RLUSD';
   description?: string;
   transactionType: TransactionType;
   industry?: string;
@@ -67,10 +68,7 @@ export interface CreateEscrowResponse {
   message: string;
   data?: {
     escrowId: string;
-    amount: {
-      usd: number;
-      xrp: number;
-    };
+    amount: UserFacingAmount;
     xrpHash?: string;
     status: string;
     xrplEscrowId?: string;
@@ -100,10 +98,7 @@ export interface Escrow {
   initiatorAvatarUrl?: string | null;
   counterpartyName?: string;
   counterpartyAvatarUrl?: string | null;
-  amount: {
-    usd: number;
-    xrp: number;
-  };
+  amount: UserFacingAmount;
   status: 'pending' | 'active' | 'completed' | 'cancelled' | 'disputed';
   transactionType: TransactionType;
   industry: string | null;
@@ -136,8 +131,8 @@ export interface Escrow {
     caseId: string;
     disputeAmount: number;
     disputedAmount: number;
-    currency: 'USD' | 'XRP';
-    amount: { xrp: number; usd: number };
+    currency: 'USD' | 'XRP' | 'RLUSD';
+    amount: UserFacingAmount;
     status: string;
     reason: string;
     openedAt: string;
@@ -264,7 +259,7 @@ export interface EscrowPartiesResponse {
     /** Human-readable escrow id, e.g. #ESC-2026-001 */
     escrowId: string;
     /** Escrow held amount — use to prefill dispute amount on create */
-    amount: { usd: number; xrp: number };
+      amount: UserFacingAmount;
     payer: EscrowPayerParty;
     counterparty: EscrowCounterpartyParty;
   };

@@ -4,10 +4,13 @@
 
 export interface BusinessSuiteDashboardSummaryData {
   balance: {
-    xrp: number;
+    rlusd: number;
     usdt: number;
     usdc: number;
     usd: number;
+  };
+  addresses?: {
+    rlusd: string;
   };
   activeEscrows: {
     count: number;

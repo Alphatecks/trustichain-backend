@@ -1,8 +1,15 @@
 /**
  * Exchange Rate Service
- * Fetches live exchange rates for XRP against major currencies
- * XRP/USD: Coinbase spot API only (https://api.coinbase.com/v2/prices/XRP-USD/spot)
+ *
+ * Public API (GET /api/exchange/rates): fiat FX for display conversion from RLUSD/USD.
+ * Internal: XRP/USD spot for legacy XRPL settlement (not exposed to users).
  */
+
+import {
+  EXCHANGE_QUOTE_DIRECTION,
+  FIAT_EXCHANGE_CURRENCIES,
+  type ExchangeQuoteDirection,
+} from '../../types/api/currency.types';
 
 interface CachedRate {
   rate: number;
@@ -10,183 +17,81 @@ interface CachedRate {
   timestamp: number;
 }
 
-interface ExchangeRate {
+export interface FiatDisplayRate {
   currency: string;
   rate: number;
-  change: number;
-  changePercent: number;
+}
+
+export interface DisplayExchangeRatesData {
+  rates: FiatDisplayRate[];
+  lastUpdated: string;
+  /** Each rate is units of `currency` per 1 USD (≈ 1 RLUSD). */
+  quoteDirection: ExchangeQuoteDirection;
+  quoteBase: 'USD';
 }
 
 export class ExchangeService {
-  private cache: Map<string, CachedRate> = new Map();
-  private readonly CACHE_TTL = 60 * 1000; // 1 minute - keep XRP/USD closer to live
-  private readonly MAX_STALE_AGE = 2 * 60 * 1000; // Don't use expired cache older than 2 minutes
+  private fiatCache: Map<string, CachedRate> = new Map();
+  private xrpUsdCache: CachedRate | null = null;
+  private readonly CACHE_TTL = 60 * 1000;
+  private readonly MAX_STALE_AGE = 2 * 60 * 1000;
 
   /**
-   * Get live exchange rates for XRP against USD, EUR, GBP, JPY
-   * Uses cached data if available and fresh
+   * Fiat FX rates for frontend display conversion (RLUSD ≈ USD base).
+   * Does not include XRP pricing.
    */
   async getLiveExchangeRates(): Promise<{
     success: boolean;
     message: string;
-    data?: {
-      rates: ExchangeRate[];
-      lastUpdated: string;
-    };
+    data?: DisplayExchangeRatesData;
     error?: string;
   }> {
     try {
-      console.log('[DEBUG] getLiveExchangeRates: Starting');
       const now = Date.now();
-      const currencies = ['USD', 'EUR', 'GBP', 'JPY'];
-      const rates: ExchangeRate[] = [];
+      const rates: FiatDisplayRate[] = [{ currency: 'RLUSD', rate: 1.0 }];
 
-      // Fetch USD first (required for other currency conversions)
-      const usdCurrency = 'USD';
-      const usdCached = this.cache.get(usdCurrency);
-      
-      let usdRate: number | null = null;
-      if (usdCached && (now - usdCached.timestamp) < this.CACHE_TTL) {
-        usdRate = usdCached.rate;
-        rates.push({
-          currency: usdCurrency,
-          rate: usdCached.rate,
-          change: usdCached.rate - usdCached.previousRate,
-          changePercent: usdCached.previousRate > 0 
-            ? ((usdCached.rate - usdCached.previousRate) / usdCached.previousRate) * 100 
-            : 0,
+      const fiatRates = await this.fetchAllFiatRatesFromUsd();
+      if (!fiatRates) {
+        const cachedAny = FIAT_EXCHANGE_CURRENCIES.some((c) => {
+          const cached = this.fiatCache.get(c);
+          return cached && now - cached.timestamp < this.MAX_STALE_AGE;
         });
+        if (!cachedAny) {
+          return {
+            success: false,
+            message: 'Failed to fetch exchange rates',
+            error: 'Exchange rate fetch failed',
+          };
+        }
+        for (const currency of FIAT_EXCHANGE_CURRENCIES) {
+          const cached = this.fiatCache.get(currency);
+          if (cached && now - cached.timestamp < this.MAX_STALE_AGE) {
+            rates.push({ currency, rate: cached.rate });
+          }
+        }
       } else {
-        usdRate = await this.fetchExchangeRate(usdCurrency);
-        if (usdRate !== null) {
-          const previousRate = usdCached?.rate || usdRate;
-          this.cache.set(usdCurrency, {
-            rate: usdRate,
-            previousRate,
-            timestamp: now,
-          });
-          rates.push({
-            currency: usdCurrency,
-            rate: usdRate,
-            change: usdRate - previousRate,
-            changePercent: previousRate > 0 ? ((usdRate - previousRate) / previousRate) * 100 : 0,
-          });
-        } else if (usdCached && (now - usdCached.timestamp) < this.MAX_STALE_AGE) {
-          // Use expired cache only if not too old (avoid showing very stale rate)
-          usdRate = usdCached.rate;
-          rates.push({
-            currency: usdCurrency,
-            rate: usdCached.rate,
-            change: 0,
-            changePercent: 0,
-          });
-        } else if (usdCurrency === 'USD') {
-          // When Coinbase is unavailable, optional env fallback so balance USD still displays (e.g. on Render).
-          const fallback = process.env.FALLBACK_XRP_USD_RATE;
-          const fallbackRate = fallback != null ? parseFloat(fallback) : NaN;
-          if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
-            usdRate = fallbackRate;
-            rates.push({
-              currency: usdCurrency,
-              rate: fallbackRate,
-              change: 0,
-              changePercent: 0,
-            });
-            console.warn('[Exchange] Using FALLBACK_XRP_USD_RATE (Coinbase unavailable)', {
-              rate: fallbackRate,
-              hint: 'Set FALLBACK_XRP_USD_RATE in Render env to a rough XRP/USD value; update periodically.',
-            });
-          }
+        for (const currency of FIAT_EXCHANGE_CURRENCIES) {
+          const rate = fiatRates[currency];
+          if (rate == null || rate <= 0) continue;
+          const cached = this.fiatCache.get(currency);
+          const previousRate = cached?.rate ?? rate;
+          this.fiatCache.set(currency, { rate, previousRate, timestamp: now });
+          rates.push({ currency, rate });
         }
       }
 
-      // Process other currencies (EUR, GBP, JPY) which depend on USD
-      for (const currency of currencies.filter(c => c !== 'USD')) {
-        const cached = this.cache.get(currency);
-        
-        // Use cache if it's still valid
-        if (cached && (now - cached.timestamp) < this.CACHE_TTL) {
-          const change = cached.rate - cached.previousRate;
-          const changePercent = cached.previousRate > 0 
-            ? (change / cached.previousRate) * 100 
-            : 0;
-
-          rates.push({
-            currency,
-            rate: cached.rate,
-            change,
-            changePercent: parseFloat(changePercent.toFixed(2)),
-          });
-        } else {
-          // Convert from USD using fiat exchange rates
-          if (!usdRate) {
-            // If USD rate is not available, can't convert other currencies
-            if (cached) {
-              console.log('[DEBUG] getLiveExchangeRates: USD rate not available, using expired cached rate', { currency, cachedRate: cached.rate });
-              rates.push({
-                currency,
-                rate: cached.rate,
-                change: 0,
-                changePercent: 0,
-              });
-            } else {
-              console.warn(`[WARNING] getLiveExchangeRates: USD rate not available, cannot convert ${currency}, skipping`);
-            }
-          } else {
-            // Fetch fiat exchange rate (USD to target currency)
-            const fiatRate = await this.fetchFiatExchangeRate(currency);
-            if (fiatRate !== null && fiatRate > 0) {
-              const rate = usdRate * fiatRate;
-              const previousRate = cached?.rate || rate;
-              const change = rate - previousRate;
-              const changePercent = previousRate > 0 
-                ? (change / previousRate) * 100 
-                : 0;
-
-              // Update cache
-              this.cache.set(currency, {
-                rate,
-                previousRate,
-                timestamp: now,
-              });
-
-              rates.push({
-                currency,
-                rate,
-                change,
-                changePercent: parseFloat(changePercent.toFixed(2)),
-              });
-              console.log('[DEBUG] getLiveExchangeRates: Converted rate from USD', { currency, usdRate, fiatRate, rate });
-            } else if (cached) {
-              // Use expired cache if fiat rate fetch fails
-              console.log('[DEBUG] getLiveExchangeRates: Fiat rate fetch failed, using expired cached rate', { currency, cachedRate: cached.rate });
-              rates.push({
-                currency,
-                rate: cached.rate,
-                change: 0,
-                changePercent: 0,
-              });
-            } else {
-              console.warn(`[WARNING] getLiveExchangeRates: Failed to fetch fiat rate for ${currency} and no cached rate available, skipping`);
-            }
-          }
-        }
-      }
-
-      console.log('[DEBUG] getLiveExchangeRates: Success', { ratesCount: rates.length, rates });
       return {
         success: true,
         message: 'Exchange rates retrieved successfully',
         data: {
           rates,
           lastUpdated: new Date().toISOString(),
+          quoteDirection: EXCHANGE_QUOTE_DIRECTION,
+          quoteBase: 'USD',
         },
       };
     } catch (error) {
-      console.error('[DEBUG] getLiveExchangeRates: Error in outer catch', {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-      });
+      console.error('[Exchange] getLiveExchangeRates error:', error);
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fetch exchange rates',
@@ -196,112 +101,77 @@ export class ExchangeService {
   }
 
   /**
-   * Fetch XRP spot price vs USD from Coinbase (sole live source for XRP/USD).
+   * XRP/USD spot for internal XRPL settlement only — not for user portfolio value.
    */
-  private async fetchExchangeRate(currency: string): Promise<number | null> {
-    if (currency !== 'USD') {
+  async getXrpUsdRate(): Promise<number | null> {
+    const now = Date.now();
+    if (this.xrpUsdCache && now - this.xrpUsdCache.timestamp < this.CACHE_TTL) {
+      return this.xrpUsdCache.rate;
+    }
+
+    const rate = await this.fetchFromCoinbase();
+    if (rate != null && rate > 0) {
+      const previousRate = this.xrpUsdCache?.rate ?? rate;
+      this.xrpUsdCache = { rate, previousRate, timestamp: now };
+      return rate;
+    }
+
+    if (this.xrpUsdCache && now - this.xrpUsdCache.timestamp < this.MAX_STALE_AGE) {
+      return this.xrpUsdCache.rate;
+    }
+
+    const fallback = process.env.FALLBACK_XRP_USD_RATE;
+    const fallbackRate = fallback != null ? parseFloat(fallback) : NaN;
+    if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
+      console.warn('[Exchange] Using FALLBACK_XRP_USD_RATE for internal XRP settlement', {
+        rate: fallbackRate,
+      });
+      return fallbackRate;
+    }
+
+    return null;
+  }
+
+  private async fetchAllFiatRatesFromUsd(): Promise<Record<string, number> | null> {
+    try {
+      const url = 'https://api.exchangerate-api.com/v4/latest/USD';
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const data = (await response.json()) as { rates?: Record<string, number> };
+      return data.rates ?? null;
+    } catch (error) {
+      console.warn('[Exchange] fetchAllFiatRatesFromUsd failed:', error);
       return null;
     }
-    return this.fetchFromCoinbase();
   }
 
   /**
-   * Coinbase public API: XRP-USD spot price (1 XRP in USD).
-   * @see https://docs.cloud.coinbase.com/sign-in-with-coinbase/docs/api-prices#get-spot-price
+   * Coinbase public API: XRP-USD spot (internal settlement only).
    */
   private async fetchFromCoinbase(): Promise<number | null> {
     try {
       const url = 'https://api.coinbase.com/v2/prices/XRP-USD/spot';
-      console.log('[DEBUG] fetchFromCoinbase: Fetching XRP/USD spot from Coinbase', { url });
-
       const response = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
+      if (!response.ok) return null;
 
-      if (!response.ok) {
-        let errorBody = '';
-        try {
-          errorBody = await response.text();
-          console.log('[DEBUG] fetchFromCoinbase: Response not OK', {
-            status: response.status,
-            statusText: response.statusText,
-            errorBody,
-          });
-        } catch {
-          console.log('[DEBUG] fetchFromCoinbase: Response not OK (could not read body)', {
-            status: response.status,
-            statusText: response.statusText,
-          });
-        }
-        return null;
-      }
-
-      const data = await response.json() as { data?: { amount?: string } };
+      const data = (await response.json()) as { data?: { amount?: string } };
       const amountStr = data.data?.amount;
       const rate = amountStr != null ? parseFloat(amountStr) : NaN;
-
-      if (isNaN(rate) || rate <= 0) {
-        console.warn('[WARNING] fetchFromCoinbase: Invalid rate', { data, rate });
-        return null;
-      }
-
-      console.log('[DEBUG] fetchFromCoinbase: Success', { rate });
+      if (Number.isNaN(rate) || rate <= 0) return null;
       return rate;
     } catch (error) {
-      console.log('[DEBUG] fetchFromCoinbase: Error', {
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
+      console.warn('[Exchange] fetchFromCoinbase failed:', error);
       return null;
     }
   }
 
-  /**
-   * Fetch fiat currency exchange rate (EUR, GBP, JPY) relative to USD
-   * Used to convert XRP/USD to XRP/EUR, XRP/GBP, XRP/JPY
-   */
-  private async fetchFiatExchangeRate(currency: string): Promise<number | null> {
-    try {
-      // Using exchangerate-api.com free tier (no API key needed for basic usage)
-      // Alternatively, you could use fixer.io, exchangeratesapi.io, or similar
-      const url = `https://api.exchangerate-api.com/v4/latest/USD`;
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        return null;
-      }
-
-      const data = await response.json() as { rates: Record<string, number> };
-      const rate = data.rates[currency];
-      
-      if (!rate || rate <= 0) {
-        return null;
-      }
-
-      return rate;
-    } catch (error) {
-      console.log('[DEBUG] fetchFiatExchangeRate: Error', {
-        currency,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }
-
-
-  /**
-   * Clear cache (useful for testing or forced refresh)
-   */
   clearCache(): void {
-    this.cache.clear();
+    this.fiatCache.clear();
+    this.xrpUsdCache = null;
   }
 }
 
 export const exchangeService = new ExchangeService();
-
-
-
-
-
-

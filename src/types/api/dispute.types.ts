@@ -2,6 +2,8 @@
  * Dispute API Types
  */
 
+import type { UserFacingAmount } from '../../utils/userFacingAmount';
+
 export type DisputeStatus = 'pending' | 'active' | 'resolved' | 'cancelled';
 export type DisputeCategory = 'freelancing' | 'real_estate' | 'product_purchase' | 'custom';
 export type DisputeReasonType = 'quality_issue' | 'delivery_delay' | 'payment_dispute';
@@ -36,11 +38,8 @@ export interface DisputeListItem {
   disputeAmount: number;
   /** Alias for disputeAmount (UI label: "Disputed amount") */
   disputedAmount: number;
-  currency: 'USD' | 'XRP';
-  amount: {
-    xrp: number;
-    usd: number;
-  };
+  currency: 'USD' | 'XRP' | 'RLUSD';
+  amount: UserFacingAmount;
   status: DisputeStatus;
   reason: string;
   openedAt: string;
@@ -92,7 +91,7 @@ export interface CreateDisputeRequest {
   respondentPhone?: string;
   disputeReason: string;
   amount: number; // Amount in dispute
-  currency: 'USD' | 'XRP';
+  currency: 'USD' | 'XRP' | 'RLUSD';
   resolutionPeriod?: string; // e.g., "7 days"
   expectedResolutionDate?: string; // ISO date string
   description: string;

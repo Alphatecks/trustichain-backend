@@ -37,17 +37,21 @@ export class WalletController {
       const userId = (req as Request & { userId?: string }).userId!;
       const result = await walletService.getBalance(userId);
       if (result.success && result.data) {
+        const rlusdAddress = result.data.addresses?.rlusd ?? result.rlusd_xrpl_address ?? '';
         res.json({
           success: true,
           message: result.message,
           data: {
             balance: result.data.balance,
+            addresses: result.data.addresses,
+            stablecoinAddresses: result.stablecoin_addresses ?? { USDT: {}, USDC: {} },
+            multichainNetwork: result.multichain_network,
           },
           xrplAddress: result.xrpl_address ?? '',
-          rlusdAddress: result.rlusd_xrpl_address ?? '',
+          rlusdAddress,
           depositAddresses: result.deposit_addresses ?? {
             xrp: result.xrpl_address ?? '',
-            rlusd: result.rlusd_xrpl_address ?? result.xrpl_address ?? '',
+            rlusd: (rlusdAddress || result.xrpl_address) ?? '',
           },
           stablecoinAddresses: result.stablecoin_addresses ?? { USDT: {}, USDC: {} },
           multichainNetwork: result.multichain_network,

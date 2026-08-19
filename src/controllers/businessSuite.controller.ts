@@ -1292,15 +1292,19 @@ export class BusinessSuiteController {
     }
     const result = await walletService.getBalance(userId, 'business');
     if (result.success && result.data) {
+      const rlusdAddress = result.data.addresses?.rlusd ?? result.rlusd_xrpl_address ?? '';
       res.status(200).json({
         success: true,
         message: result.message,
-        data: { balance: result.data.balance },
+        data: {
+          balance: result.data.balance,
+          addresses: result.data.addresses,
+        },
         xrplAddress: result.xrpl_address ?? '',
-        rlusdAddress: result.rlusd_xrpl_address ?? '',
+        rlusdAddress,
         depositAddresses: result.deposit_addresses ?? {
           xrp: result.xrpl_address ?? '',
-          rlusd: result.rlusd_xrpl_address ?? result.xrpl_address ?? '',
+          rlusd: (rlusdAddress || result.xrpl_address) ?? '',
         },
         stablecoinAddresses: result.stablecoin_addresses ?? { USDT: {}, USDC: {} },
       });
