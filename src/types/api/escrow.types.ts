@@ -4,6 +4,7 @@
 
 import type { TransactionType } from './transaction.types';
 import type { UserFacingAmount } from '../../utils/userFacingAmount';
+import type { DisplayCurrency } from './currency.types';
 
 export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
 
@@ -30,7 +31,8 @@ export interface CreateEscrowRequest {
   
   // Escrow details
   amount: number;
-  currency: 'USD' | 'XRP' | 'RLUSD';
+  /** Denomination currency entered by the user (fiat, USD, RLUSD, or XRP). */
+  currency: DisplayCurrency | 'XRP';
   description?: string;
   transactionType: TransactionType;
   industry?: string;
@@ -57,8 +59,8 @@ export interface CreateEscrowRequest {
   // Suite context: set to 'business' when creating from Business Suite so business dashboard shows only these escrows
   suiteContext?: 'personal' | 'business';
 
-  /** xrp_wallet: fund from custodial XRP (default). stripe: Google Pay / Apple Pay gates XRPL creation. */
-  paymentMethod?: 'xrp_wallet' | 'stripe';
+  /** trustichain / xrp_wallet: fund from custodial XRP. stripe / googlepay / applepay: card payment before XRPL creation. */
+  paymentMethod?: 'xrp_wallet' | 'stripe' | 'trustichain' | 'googlepay' | 'applepay';
 }
 
 export type EscrowPaymentMethod = 'xrp_wallet' | 'stripe';

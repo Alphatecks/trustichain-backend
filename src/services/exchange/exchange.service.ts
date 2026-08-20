@@ -30,6 +30,21 @@ export interface DisplayExchangeRatesData {
   quoteBase: 'USD';
 }
 
+export type EscrowSettlementCurrency = 'XRP';
+
+export interface EscrowSettlementAmounts {
+  denominationAmount: number;
+  denominationCurrency: string;
+  amountUsd: number;
+  amountXrp: number;
+  settlementCurrency: EscrowSettlementCurrency;
+  xrpUsdRate: number;
+}
+
+export type EscrowSettlementResult =
+  | { success: true; data: EscrowSettlementAmounts }
+  | { success: false; message: string; error: string };
+
 export class ExchangeService {
   private fiatCache: Map<string, CachedRate> = new Map();
   private xrpUsdCache: CachedRate | null = null;
@@ -98,6 +113,82 @@ export class ExchangeService {
         error: error instanceof Error ? error.message : 'Failed to fetch exchange rates',
       };
     }
+  }
+
+  /**
+   * Convert a user-entered escrow amount (fiat, USD, RLUSD, or XRP) into USD reference
+   * and XRP settlement amounts for XRPL escrow creation.
+   */
+  async resolveEscrowSettlementAmounts(
+    amount: number,
+    currency: string
+  ): Promise<EscrowSettlementResult> {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        success: false,
+        message: 'Amount must be greater than 0',
+        error: 'Invalid amount',
+      };
+    }
+
+    const denominationCurrency = (currency || 'USD').trim().toUpperCase();
+    const xrpUsdRate = await this.getXrpUsdRate();
+    if (xrpUsdRate == null || xrpUsdRate <= 0) {
+      return {
+        success: false,
+        message: 'XRP/USD exchange rate not available',
+        error: 'Exchange rate not available',
+      };
+    }
+
+    let amountUsd: number;
+
+    if (denominationCurrency === 'XRP') {
+      amountUsd = amount * xrpUsdRate;
+    } else if (denominationCurrency === 'USD' || denominationCurrency === 'RLUSD') {
+      amountUsd = amount;
+    } else {
+      const ratesResult = await this.getLiveExchangeRates();
+      if (!ratesResult.success || !ratesResult.data) {
+        return {
+          success: false,
+          message: 'Failed to fetch exchange rates for currency conversion',
+          error: 'Exchange rate fetch failed',
+        };
+      }
+
+      const fiatRate = ratesResult.data.rates.find(
+        (entry) => entry.currency === denominationCurrency
+      )?.rate;
+
+      if (fiatRate == null || fiatRate <= 0) {
+        return {
+          success: false,
+          message: `Exchange rate not available for ${denominationCurrency}`,
+          error: 'Exchange rate not available',
+        };
+      }
+
+      if (ratesResult.data.quoteDirection === 'unitsPerUsd') {
+        amountUsd = amount / fiatRate;
+      } else {
+        amountUsd = amount * fiatRate;
+      }
+    }
+
+    const amountXrp = parseFloat((amountUsd / xrpUsdRate).toFixed(6));
+
+    return {
+      success: true,
+      data: {
+        denominationAmount: amount,
+        denominationCurrency,
+        amountUsd: parseFloat(amountUsd.toFixed(2)),
+        amountXrp,
+        settlementCurrency: 'XRP',
+        xrpUsdRate,
+      },
+    };
   }
 
   /**

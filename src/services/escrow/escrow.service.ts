@@ -33,11 +33,6 @@ export class EscrowService {
     return exchangeService.getXrpUsdRate();
   }
 
-  private normalizeSettlementCurrency(currency: string): 'USD' | 'XRP' {
-    if (currency === 'RLUSD' || currency === 'USD') return 'USD';
-    return 'XRP';
-  }
-
   private normalizeXrpAmount(value: number): number {
     return parseFloat(value.toFixed(6));
   }
@@ -115,8 +110,17 @@ export class EscrowService {
       .toString()
       .trim()
       .toLowerCase();
-    if (raw === 'stripe' || raw === 'google_pay' || raw === 'apple_pay' || raw === 'googlepay' || raw === 'applepay') {
+    if (
+      raw === 'stripe' ||
+      raw === 'google_pay' ||
+      raw === 'apple_pay' ||
+      raw === 'googlepay' ||
+      raw === 'applepay'
+    ) {
       return 'stripe';
+    }
+    if (raw === 'trustichain' || raw === 'xrp_wallet' || raw === 'xrp') {
+      return 'xrp_wallet';
     }
     return 'xrp_wallet';
   }
@@ -150,35 +154,41 @@ export class EscrowService {
   private async insertEscrowMilestones(
     adminClient: SupabaseClient,
     escrowId: string,
-    request: CreateEscrowRequest,
-    usdRate: number
-  ): Promise<void> {
+    request: CreateEscrowRequest
+  ): Promise<{ success: true } | { success: false; message: string; error: string }> {
     if (request.releaseType !== 'Milestones' || !request.milestones?.length) {
-      return;
+      return { success: true };
     }
 
-    const milestonesToInsert = request.milestones.map((milestone, index) => {
-      let milestoneAmountXrp = milestone.milestoneAmount;
-      let milestoneAmountUsd = milestone.milestoneAmount;
-      if (request.currency === 'USD') {
-        milestoneAmountXrp = milestone.milestoneAmount / usdRate;
-      } else {
-        milestoneAmountUsd = milestone.milestoneAmount * usdRate;
+    const currency = request.currency || 'USD';
+    const milestonesToInsert = [];
+
+    for (let index = 0; index < request.milestones.length; index++) {
+      const milestone = request.milestones[index]!;
+      const settlement = await exchangeService.resolveEscrowSettlementAmounts(
+        milestone.milestoneAmount,
+        currency
+      );
+      if (!settlement.success) {
+        return settlement;
       }
-      return {
+
+      milestonesToInsert.push({
         escrow_id: escrowId,
         milestone_order: milestone.milestoneOrder || index + 1,
         milestone_details: milestone.milestoneDetails,
-        milestone_amount: milestoneAmountXrp,
-        milestone_amount_usd: milestoneAmountUsd,
+        milestone_amount: settlement.data.amountXrp,
+        milestone_amount_usd: settlement.data.amountUsd,
         status: 'pending',
-      };
-    });
+      });
+    }
 
     const { error: milestonesError } = await adminClient.from('escrow_milestones').insert(milestonesToInsert);
     if (milestonesError) {
       console.error('[Escrow] Error creating milestones:', milestonesError);
     }
+
+    return { success: true };
   }
 
   private async sendEscrowCreationEmails(
@@ -1194,32 +1204,26 @@ export class EscrowService {
 
       // Use totalAmount if provided, otherwise use amount
       const escrowAmount = request.totalAmount !== undefined ? request.totalAmount : request.amount;
+      const denominationCurrency = request.currency || 'USD';
 
-      const settlementCurrency = this.normalizeSettlementCurrency(request.currency);
-
-      // Convert amount to XRP if needed (internal XRPL settlement)
-      let amountXrp = escrowAmount;
-      let amountUsd = escrowAmount;
-      const usdRate = await this.getXrpUsdRateOrNull();
-      if (usdRate == null || usdRate <= 0) {
+      const settlementResult = await exchangeService.resolveEscrowSettlementAmounts(
+        escrowAmount,
+        denominationCurrency
+      );
+      if (!settlementResult.success) {
         return {
           success: false,
-          message: 'XRP/USD exchange rate not available',
-          error: 'Exchange rate not available',
+          message: settlementResult.message,
+          error: settlementResult.error,
         };
       }
-      if (settlementCurrency === 'USD') {
-        amountXrp = escrowAmount / usdRate;
-      } else {
-        amountUsd = escrowAmount * usdRate;
-      }
-      amountXrp = this.normalizeXrpAmount(amountXrp);
-      amountUsd = parseFloat(amountUsd.toFixed(2));
+
+      const { amountUsd, amountXrp, xrpUsdRate } = settlementResult.data;
 
       const feeSettings = await getEscrowCreationFeeSettings();
       const creationFeePercentage = resolveEscrowCreationFeePercentageByType(escrowTransactionType, feeSettings);
       const creationFeeUsd = amountUsd * (Math.max(0, creationFeePercentage) / 100);
-      const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / usdRate).toFixed(6)) : 0;
+      const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / xrpUsdRate).toFixed(6)) : 0;
       const payableXrp = this.normalizeXrpAmount(amountXrp + creationFeeXrp);
       const payableAmountUsd = parseFloat((amountUsd + creationFeeUsd).toFixed(2));
 
@@ -1281,7 +1285,7 @@ export class EscrowService {
           };
         }
 
-        await this.insertEscrowMilestones(adminClient, escrow.id, request, usdRate);
+        await this.insertEscrowMilestones(adminClient, escrow.id, request);
 
         return {
           success: true,
@@ -1595,45 +1599,13 @@ export class EscrowService {
       }
 
       // Create milestones if this is a milestone-based escrow
-      if (request.releaseType === 'Milestones' && request.milestones && request.milestones.length > 0) {
-        const usdRate = await this.getXrpUsdRateOrNull();
-        if (usdRate == null || usdRate <= 0) {
-          return {
-            success: false,
-            message: 'XRP/USD exchange rate not available for milestones',
-            error: 'Exchange rate not available',
-          };
-        }
-
-        const milestonesToInsert = request.milestones.map((milestone, index) => {
-          let milestoneAmountXrp = milestone.milestoneAmount;
-          let milestoneAmountUsd = milestone.milestoneAmount;
-
-          if (settlementCurrency === 'USD') {
-            milestoneAmountXrp = milestone.milestoneAmount / usdRate;
-          } else {
-            milestoneAmountUsd = milestone.milestoneAmount * usdRate;
-          }
-
-          return {
-            escrow_id: escrow.id,
-            milestone_order: milestone.milestoneOrder || (index + 1),
-            milestone_details: milestone.milestoneDetails,
-            milestone_amount: milestoneAmountXrp,
-            milestone_amount_usd: milestoneAmountUsd,
-            status: 'pending',
-          };
-        });
-
-        const { error: milestonesError } = await adminClient
-          .from('escrow_milestones')
-          .insert(milestonesToInsert);
-
-        if (milestonesError) {
-          console.error('Error creating milestones:', milestonesError);
-          // Don't fail the escrow creation if milestones fail - log and continue
-          // Optionally, you could rollback the escrow creation here
-        }
+      const milestoneResult = await this.insertEscrowMilestones(adminClient, escrow.id, request);
+      if (!milestoneResult.success) {
+        return {
+          success: false,
+          message: milestoneResult.message,
+          error: milestoneResult.error,
+        };
       }
 
       // Create transaction record for escrow creation

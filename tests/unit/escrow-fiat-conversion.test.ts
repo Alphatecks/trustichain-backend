@@ -13,7 +13,7 @@ jest.mock('../../src/services/storage/storage.service', () => ({
 
 jest.mock('../../src/xrpl/wallet/xrpl-wallet.service', () => ({
   xrplWalletService: {
-    getBalance: jest.fn(),
+    getBalance: jest.fn().mockResolvedValue(500),
   },
 }));
 
@@ -28,9 +28,31 @@ jest.mock('../../src/services/trustitag.service', () => ({
 jest.mock('../../src/services/exchange/exchange.service', () => ({
   exchangeService: {
     getXrpUsdRate: jest.fn().mockResolvedValue(2),
+    getLiveExchangeRates: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        rates: [{ currency: 'NGN', rate: 1600 }],
+        quoteDirection: 'unitsPerUsd',
+        quoteBase: 'USD',
+        lastUpdated: new Date().toISOString(),
+      },
+    }),
     resolveEscrowSettlementAmounts: jest.fn(async (amount: number, currency: string) => {
       const normalized = (currency || 'USD').trim().toUpperCase();
       const xrpUsdRate = 2;
+      if (normalized === 'XRP') {
+        return {
+          success: true,
+          data: {
+            denominationAmount: amount,
+            denominationCurrency: normalized,
+            amountUsd: parseFloat((amount * xrpUsdRate).toFixed(2)),
+            amountXrp: parseFloat(amount.toFixed(6)),
+            settlementCurrency: 'XRP',
+            xrpUsdRate,
+          },
+        };
+      }
       if (normalized === 'USD' || normalized === 'RLUSD') {
         return {
           success: true,
@@ -44,10 +66,17 @@ jest.mock('../../src/services/exchange/exchange.service', () => ({
           },
         };
       }
+      const amountUsd = parseFloat((amount / 1600).toFixed(2));
       return {
-        success: false,
-        message: 'unsupported',
-        error: 'unsupported',
+        success: true,
+        data: {
+          denominationAmount: amount,
+          denominationCurrency: normalized,
+          amountUsd,
+          amountXrp: parseFloat((amountUsd / xrpUsdRate).toFixed(6)),
+          settlementCurrency: 'XRP',
+          xrpUsdRate,
+        },
       };
     }),
   },
@@ -55,16 +84,22 @@ jest.mock('../../src/services/exchange/exchange.service', () => ({
 
 jest.mock('../../src/services/escrow/escrowCreationFee.service', () => ({
   getEscrowCreationFeeSettings: jest.fn().mockResolvedValue({
-    personalFreelancerFeePercentage: 2,
-    supplierFeePercentage: 2,
-    payrollFeePercentage: 2,
+    personalFreelancerFeePercentage: 5,
+    supplierFeePercentage: 5,
+    payrollFeePercentage: 5,
   }),
-  resolveEscrowCreationFeePercentageByType: jest.fn().mockReturnValue(2),
+  resolveEscrowCreationFeePercentageByType: jest.fn().mockReturnValue(5),
 }));
 
 jest.mock('../../src/xrpl/escrow/xrpl-escrow.service', () => ({
   xrplEscrowService: {
-    createEscrow: jest.fn(),
+    createEscrow: jest.fn().mockResolvedValue('mock-tx-hash'),
+  },
+}));
+
+jest.mock('../../src/services/encryption/encryption.service', () => ({
+  encryptionService: {
+    decrypt: jest.fn().mockReturnValue('sMockSecret123456789012345678901234567890'),
   },
 }));
 
@@ -82,43 +117,16 @@ jest.mock('../../src/services/notification/notification.service', () => ({
 }));
 
 import { supabaseAdmin } from '../../src/config/supabase';
+import { xrplWalletService } from '../../src/xrpl/wallet/xrpl-wallet.service';
 import { xrplEscrowService } from '../../src/xrpl/escrow/xrpl-escrow.service';
-import { emailService } from '../../src/services/email.service';
 const { escrowService } = require('../../src/services/escrow/escrow.service.ts');
 
-describe('Stripe escrow flow', () => {
+describe('Escrow fiat denomination conversion', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('finalizeStripeFundedEscrow is idempotent when xrpl_escrow_id already set', async () => {
-    const escrowRow = {
-      id: 'escrow-1',
-      payment_method: 'stripe',
-      xrpl_escrow_id: 'existing-tx-hash',
-      user_id: 'user-1',
-      counterparty_id: 'user-2',
-      amount_xrp: 10,
-      amount_usd: 20,
-    };
-
-    const admin = supabaseAdmin as unknown as { from: jest.Mock };
-    admin.from.mockImplementation(() => ({
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      single: jest.fn().mockResolvedValue({ data: escrowRow, error: null }),
-    }));
-
-    const result = await escrowService.finalizeStripeFundedEscrow('escrow-1');
-
-    expect(result.success).toBe(true);
-    expect(result.message).toContain('already finalized');
-    expect(result.data?.xrplTxHash).toBe('existing-tx-hash');
-    expect(xrplEscrowService.createEscrow).not.toHaveBeenCalled();
-    expect(emailService.sendEscrowCreationConfirmationToPayer).not.toHaveBeenCalled();
-  });
-
-  it('createEscrow with paymentMethod stripe persists pending escrow without XRPL or emails', async () => {
+  it('createEscrow converts NGN to small XRP amount and checks balance in XRP', async () => {
     let insertedEscrow: Record<string, unknown> | null = null;
 
     const admin = supabaseAdmin as unknown as { from: jest.Mock };
@@ -127,9 +135,22 @@ describe('Stripe escrow flow', () => {
         return {
           select: jest.fn().mockReturnThis(),
           eq: jest.fn().mockImplementation((_column: string, value: string) => {
+            if (value === 'user-1') {
+              return {
+                eq: jest.fn().mockReturnValue({
+                  maybeSingle: jest.fn().mockResolvedValue({
+                    data: {
+                      xrpl_address: 'rPayer123456789012345678901234',
+                      encrypted_wallet_secret: 'encrypted-secret',
+                    },
+                    error: null,
+                  }),
+                }),
+              };
+            }
             if (value === 'user-2') {
               return Promise.resolve({
-                data: [{ xrpl_address: 'rCounterparty123', user_id: 'user-2' }],
+                data: [{ xrpl_address: 'rCounterparty123456789012345678901', user_id: 'user-2' }],
                 error: null,
               });
             }
@@ -148,15 +169,16 @@ describe('Stripe escrow flow', () => {
           gte: jest.fn().mockReturnThis(),
           order: jest.fn().mockReturnThis(),
           limit: jest.fn().mockReturnThis(),
-          maybeSingle: jest.fn().mockResolvedValue({ data: { escrow_sequence: 5 }, error: null }),
+          maybeSingle: jest.fn().mockResolvedValue({ data: { escrow_sequence: 1 }, error: null }),
           insert: jest.fn().mockImplementation((payload: Record<string, unknown>) => {
             insertedEscrow = payload;
             return {
               select: jest.fn().mockReturnValue({
                 single: jest.fn().mockResolvedValue({
                   data: {
-                    id: 'new-stripe-escrow-id',
-                    status: 'pending',
+                    id: 'escrow-ngn-id',
+                    status: 'active',
+                    created_at: new Date().toISOString(),
                     ...payload,
                   },
                   error: null,
@@ -167,29 +189,38 @@ describe('Stripe escrow flow', () => {
         };
       }
 
-      throw new Error(`Unexpected table: ${table}`);
+      if (table === 'transactions') {
+        return {
+          insert: jest.fn().mockResolvedValue({ error: null }),
+        };
+      }
+
+      return {
+        rpc: jest.fn().mockResolvedValue({ error: null }),
+      };
     });
 
     const result = await escrowService.createEscrow('user-1', {
-      paymentMethod: 'stripe',
-      amount: 20,
-      currency: 'USD',
+      paymentMethod: 'trustichain',
+      amount: 20000,
+      currency: 'NGN',
+      totalAmount: 20000,
       counterpartyId: 'user-2',
+      transactionType: 'freelance',
     });
 
     expect(result.success).toBe(true);
-    expect(result.data?.paymentMethod).toBe('stripe');
-    expect(result.data?.paymentStatus).toBe('unpaid');
-    expect(result.data?.payableAmountUsd).toBe(20.4);
     expect(insertedEscrow).toMatchObject({
-      payment_method: 'stripe',
-      payment_status: 'unpaid',
-      status: 'pending',
-      xrpl_escrow_id: null,
-      payable_amount_usd: 20.4,
+      amount_usd: 12.5,
+      amount_xrp: 6.25,
+      creation_fee_usd: 0.625,
+      payable_amount_usd: 13.13,
     });
-    expect(xrplEscrowService.createEscrow).not.toHaveBeenCalled();
-    expect(emailService.sendEscrowCreationConfirmationToPayer).not.toHaveBeenCalled();
-    expect(emailService.sendEscrowCreationNotificationToCounterparty).not.toHaveBeenCalled();
+    expect(xrplEscrowService.createEscrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountXrp: 6.25,
+      })
+    );
+    expect(xrplWalletService.getBalance).toHaveBeenCalled();
   });
 });
