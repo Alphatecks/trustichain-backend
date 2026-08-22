@@ -42,10 +42,25 @@ export class EmailService {
 
   private renderLogoHeader(): string {
     const url = this.getLogoPublicUrl();
+    const brandText =
+      '<span style="font-family: \'Satoshi\', Arial, sans-serif; font-size: 22px; font-weight: 600; color: #1a1a1a; letter-spacing: -0.02em; line-height: 1; white-space: nowrap;">TrustiChain</span>';
+
     if (!url) {
-      return '<h1 style="color: #333; margin: 0;">TrustiChain</h1>';
+      return `<h1 style="font-family: 'Satoshi', Arial, sans-serif; color: #333; margin: 0; font-size: 22px; font-weight: 600;">TrustiChain</h1>`;
     }
-    return `<img src="${url}" alt="TrustiChain" width="120" height="40" style="height: 40px; width: auto; display: block; border: 0; outline: none; text-decoration: none;" />`;
+
+    return `
+      <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse: collapse;">
+        <tr>
+          <td style="vertical-align: middle; padding-right: 10px;">
+            <img src="${url}" alt="" width="36" height="36" style="height: 36px; width: auto; display: block; border: 0; outline: none; text-decoration: none;" />
+          </td>
+          <td style="vertical-align: middle;">
+            ${brandText}
+          </td>
+        </tr>
+      </table>
+    `.trim();
   }
 
   private renderLogoFooter(extraStyle = 'margin-top: 15px;'): string {
@@ -58,18 +73,41 @@ export class EmailService {
     return (resend as any).emails.send(payload);
   }
 
-  /**
-   * Get Satoshi font as base64 data URI
-   */
-  private getSatoshiFontBase64(): string {
-    try {
-      const fontPath = path.join(process.cwd(), 'assets', 'fonts', 'satoshi', 'Satoshi-Regular.otf');
-      const fontBuffer = fs.readFileSync(fontPath);
-      return `data:font/otf;base64,${fontBuffer.toString('base64')}`;
-    } catch (error) {
-      console.error('Error reading Satoshi font file:', error);
-      return '';
+  private getSatoshiFontBase64(variant: 'Regular' | 'Medium' = 'Regular'): string {
+    const fileName = `Satoshi-${variant}.otf`;
+    const candidates = [
+      path.join(__dirname, '..', 'assets', 'fonts', 'satoshi', fileName),
+      path.join(__dirname, '..', '..', 'assets', 'fonts', 'satoshi', fileName),
+      path.join(process.cwd(), 'dist', 'assets', 'fonts', 'satoshi', fileName),
+      path.join(process.cwd(), 'assets', 'fonts', 'satoshi', fileName),
+    ];
+    for (const fontPath of candidates) {
+      try {
+        if (fs.existsSync(fontPath)) {
+          const fontBuffer = fs.readFileSync(fontPath);
+          return `data:font/otf;base64,${fontBuffer.toString('base64')}`;
+        }
+      } catch {
+        // try next candidate
+      }
     }
+    console.error(`[Email] Satoshi font not found (${fileName}). Checked:`, candidates.join(', '));
+    return '';
+  }
+
+  /** @font-face block for Satoshi Regular + Medium (brand wordmark). */
+  private renderSatoshiFontStyles(): string {
+    const regular = this.getSatoshiFontBase64('Regular');
+    const medium = this.getSatoshiFontBase64('Medium');
+    if (!regular && !medium) return '';
+
+    return `
+      <style>
+        ${regular ? `@font-face { font-family: 'Satoshi'; src: url('${regular}') format('opentype'); font-weight: 400; font-style: normal; }` : ''}
+        ${medium ? `@font-face { font-family: 'Satoshi'; src: url('${medium}') format('opentype'); font-weight: 500; font-style: normal; }` : ''}
+        ${medium ? `@font-face { font-family: 'Satoshi'; src: url('${medium}') format('opentype'); font-weight: 600; font-style: normal; }` : ''}
+      </style>
+    `.trim();
   }
 
   /**
@@ -305,7 +343,7 @@ export class EmailService {
 
       console.log(`Attempting to send escrow creation confirmation email to payer: ${email}`);
 
-      const fontBase64 = this.getSatoshiFontBase64();
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
@@ -339,18 +377,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Escrow Created Successfully</title>
-            ${fontBase64 ? `
-            <style>
-              @font-face {
-                font-family: 'Satoshi';
-                src: url('${fontBase64}') format('opentype');
-                font-weight: normal;
-                font-style: normal;
-              }
-            </style>
-            ` : ''}
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <!-- Header with Logo -->
             <div style="padding: 20px 0;">
               ${this.renderLogoHeader()}
@@ -466,7 +495,7 @@ export class EmailService {
 
       console.log(`Attempting to send customer eligible for card email to: ${email}`);
 
-      const fontBase64 = this.getSatoshiFontBase64();
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
@@ -482,18 +511,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Eligible to Create a Card</title>
-            ${fontBase64 ? `
-            <style>
-              @font-face {
-                font-family: 'Satoshi';
-                src: url('${fontBase64}') format('opentype');
-                font-weight: normal;
-                font-style: normal;
-              }
-            </style>
-            ` : ''}
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <!-- Header with Logo -->
             <div style="padding: 20px 0;">
               ${this.renderLogoHeader()}
@@ -622,7 +642,7 @@ export class EmailService {
 
       console.log(`Attempting to send escrow creation notification email to counterparty: ${email}`);
 
-      const fontBase64 = this.getSatoshiFontBase64();
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
@@ -656,18 +676,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Escrow Created Successfully</title>
-            ${fontBase64 ? `
-            <style>
-              @font-face {
-                font-family: 'Satoshi';
-                src: url('${fontBase64}') format('opentype');
-                font-weight: normal;
-                font-style: normal;
-              }
-            </style>
-            ` : ''}
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <!-- Header with Logo -->
             <div style="padding: 20px 0;">
               ${this.renderLogoHeader()}
@@ -792,7 +803,7 @@ export class EmailService {
 
       console.log(`Attempting to send escrow release notification to payer: ${email}`);
 
-      const fontBase64 = this.getSatoshiFontBase64();
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
@@ -809,9 +820,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Escrow Released</title>
-            ${fontBase64 ? `<style>@font-face { font-family: 'Satoshi'; src: url('${fontBase64}') format('opentype'); font-weight: normal; font-style: normal; }</style>` : ''}
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Released – ${escrowId}</h1>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${payerName},</p>
@@ -871,7 +882,7 @@ export class EmailService {
 
       console.log(`Attempting to send escrow release notification to counterparty: ${email}`);
 
-      const fontBase64 = this.getSatoshiFontBase64();
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
@@ -888,9 +899,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Escrow Released</title>
-            ${fontBase64 ? `<style>@font-face { font-family: 'Satoshi'; src: url('${fontBase64}') format('opentype'); font-weight: normal; font-style: normal; }</style>` : ''}
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Released – You Received Funds – ${escrowId}</h1>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${counterpartyName},</p>
@@ -1077,6 +1088,7 @@ export class EmailService {
       console.log(`Attempting to send supply contract buyer confirmation request to: ${buyerEmail}`);
 
       const titleDisplay = contractTitle && contractTitle.trim() ? contractTitle.trim() : `Contract ${contractId}`;
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
 
       const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
@@ -1089,8 +1101,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Confirm Delivery</title>
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Confirm Delivery – ${titleDisplay}</h1>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${buyerName},</p>
@@ -1151,6 +1164,8 @@ export class EmailService {
 
       console.log(`Attempting to send savings plan created email to: ${email}`);
 
+      const satoshiFontStyles = this.renderSatoshiFontStyles();
+
       const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
@@ -1162,8 +1177,9 @@ export class EmailService {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Savings plan created</title>
+            ${satoshiFontStyles}
           </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <body style="font-family: ${satoshiFontStyles ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; text-align: center; border-radius: 10px 10px 0 0;">
               <h1 style="color: white; margin: 0; font-size: 22px;">Savings plan created</h1>
