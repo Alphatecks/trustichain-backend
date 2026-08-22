@@ -11,29 +11,59 @@ const resend = process.env.RESEND_API_KEY
   : null;
 
 export class EmailService {
-  /**
-   * Get logo as base64 data URI. Resolves path from project root (works when run from dist/ or any cwd).
-   */
-  private getLogoBase64(): string {
-    try {
-      // From dist/services/ or src/services/ go up to project root, then assets/logo.png
-      const projectRoot = path.join(__dirname, '..', '..');
-      const logoPath = path.join(projectRoot, 'assets', 'logo.png');
-      if (!fs.existsSync(logoPath)) {
-        const cwdPath = path.join(process.cwd(), 'assets', 'logo.png');
-        if (fs.existsSync(cwdPath)) {
-          const logoBuffer = fs.readFileSync(cwdPath);
-          return `data:image/png;base64,${logoBuffer.toString('base64')}`;
-        }
-        console.error('Logo file not found at', logoPath, 'or', cwdPath);
-        return '';
-      }
-      const logoBuffer = fs.readFileSync(logoPath);
-      return `data:image/png;base64,${logoBuffer.toString('base64')}`;
-    } catch (error) {
-      console.error('Error reading logo file:', error);
-      return '';
+  private static readonly LOGO_CID = 'trustichain-logo';
+
+  private resolveLogoPath(): string | null {
+    const candidates = [
+      path.join(__dirname, '..', 'assets', 'logo.png'),
+      path.join(__dirname, '..', '..', 'assets', 'logo.png'),
+      path.join(process.cwd(), 'dist', 'assets', 'logo.png'),
+      path.join(process.cwd(), 'assets', 'logo.png'),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
     }
+    console.error('[Email] Logo file not found. Checked:', candidates.join(', '));
+    return null;
+  }
+
+  /** Resend inline attachment (CID). Works in Gmail/Outlook; data: URIs are blocked. */
+  private getLogoInlineAttachment(): Record<string, string> | null {
+    const logoPath = this.resolveLogoPath();
+    if (!logoPath) return null;
+    try {
+      return {
+        filename: 'logo.png',
+        content: fs.readFileSync(logoPath).toString('base64'),
+        contentId: EmailService.LOGO_CID,
+        contentType: 'image/png',
+      };
+    } catch (error) {
+      console.error('[Email] Error reading logo file:', error);
+      return null;
+    }
+  }
+
+  private renderLogoHeader(): string {
+    if (!this.resolveLogoPath()) {
+      return '<h1 style="color: #333; margin: 0;">TrustiChain</h1>';
+    }
+    return `<img src="cid:${EmailService.LOGO_CID}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />`;
+  }
+
+  private renderLogoFooter(extraStyle = 'margin-top: 15px;'): string {
+    if (!this.resolveLogoPath()) return '';
+    return `<img src="cid:${EmailService.LOGO_CID}" alt="TrustiChain Logo" style="height: 30px; width: auto; ${extraStyle}" />`;
+  }
+
+  private async sendEmail(payload: Record<string, unknown>) {
+    const logoAttachment = this.getLogoInlineAttachment();
+    const existing = Array.isArray(payload.attachments) ? payload.attachments : [];
+    const attachments = logoAttachment ? [...existing, logoAttachment] : existing;
+    return (resend as any).emails.send({
+      ...payload,
+      ...(attachments.length ? { attachments } : {}),
+    });
   }
 
   /**
@@ -82,7 +112,7 @@ export class EmailService {
       console.log(`Using Resend from: ${process.env.RESEND_FROM_EMAIL}`);
       console.log(`Backend URL: ${backendUrl}`);
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: 'Verify Your TrustiChain Account',
@@ -184,7 +214,7 @@ export class EmailService {
 
       console.log(`Attempting to send password reset OTP email to: ${email}`);
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: 'Password Reset OTP - TrustiChain',
@@ -283,7 +313,6 @@ export class EmailService {
 
       console.log(`Attempting to send escrow creation confirmation email to payer: ${email}`);
 
-      const logoBase64 = this.getLogoBase64();
       const fontBase64 = this.getSatoshiFontBase64();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
@@ -307,7 +336,7 @@ export class EmailService {
       // Format amount with currency symbol
       const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: `Escrow Created Successfully – ${escrowId}`,
@@ -332,7 +361,7 @@ export class EmailService {
           <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <!-- Header with Logo -->
             <div style="padding: 20px 0;">
-              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}
+              ${this.renderLogoHeader()}
             </div>
             
             <!-- Subject Line -->
@@ -382,7 +411,7 @@ export class EmailService {
                 <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">f</a>
                 <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">in</a>
               </div>
-              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto; margin-top: 15px;" />` : ''}
+              ${this.renderLogoFooter()}
             </div>
           </body>
           </html>
@@ -445,13 +474,12 @@ export class EmailService {
 
       console.log(`Attempting to send customer eligible for card email to: ${email}`);
 
-      const logoBase64 = this.getLogoBase64();
       const fontBase64 = this.getSatoshiFontBase64();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: 'You\'re Eligible to Create a Card – TrustiChain',
@@ -476,7 +504,7 @@ export class EmailService {
           <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <!-- Header with Logo -->
             <div style="padding: 20px 0;">
-              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}
+              ${this.renderLogoHeader()}
             </div>
             
             <!-- Subject Line -->
@@ -523,7 +551,7 @@ export class EmailService {
                 <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">f</a>
                 <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">in</a>
               </div>
-              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto; margin-top: 15px;" />` : ''}
+              ${this.renderLogoFooter()}
             </div>
           </body>
           </html>
@@ -602,7 +630,6 @@ export class EmailService {
 
       console.log(`Attempting to send escrow creation notification email to counterparty: ${email}`);
 
-      const logoBase64 = this.getLogoBase64();
       const fontBase64 = this.getSatoshiFontBase64();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
@@ -626,7 +653,7 @@ export class EmailService {
       // Format amount with currency symbol
       const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: `Escrow Created Successfully – ${escrowId}`,
@@ -651,7 +678,7 @@ export class EmailService {
           <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
             <!-- Header with Logo -->
             <div style="padding: 20px 0;">
-              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}
+              ${this.renderLogoHeader()}
             </div>
             
             <!-- Subject Line -->
@@ -701,7 +728,7 @@ export class EmailService {
                 <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">f</a>
                 <a href="#" style="text-decoration: none; margin: 0 10px; color: #666; font-size: 20px;">in</a>
               </div>
-              ${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto; margin-top: 15px;" />` : ''}
+              ${this.renderLogoFooter()}
             </div>
           </body>
           </html>
@@ -773,14 +800,13 @@ export class EmailService {
 
       console.log(`Attempting to send escrow release notification to payer: ${email}`);
 
-      const logoBase64 = this.getLogoBase64();
       const fontBase64 = this.getSatoshiFontBase64();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
       const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: `Escrow Released – ${escrowId}`,
@@ -794,7 +820,7 @@ export class EmailService {
             ${fontBase64 ? `<style>@font-face { font-family: 'Satoshi'; src: url('${fontBase64}') format('opentype'); font-weight: normal; font-style: normal; }</style>` : ''}
           </head>
           <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
-            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Released – ${escrowId}</h1>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${payerName},</p>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Your escrow has been successfully released. Funds have been sent according to the agreed terms.</p>
@@ -811,7 +837,7 @@ export class EmailService {
             <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,<br/>Team TrustiChain</p>
             <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
             <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
-            <div style="text-align: center; margin: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto;" />` : ''}</div>
+            <div style="text-align: center; margin: 20px 0;">${this.renderLogoFooter('')}</div>
           </body>
           </html>
         `,
@@ -853,14 +879,13 @@ export class EmailService {
 
       console.log(`Attempting to send escrow release notification to counterparty: ${email}`);
 
-      const logoBase64 = this.getLogoBase64();
       const fontBase64 = this.getSatoshiFontBase64();
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const dashboardLink = `${frontendUrl}/dashboard`;
       const supportEmail = process.env.SUPPORT_EMAIL || 'support@trustichain.com';
       const amountDisplay = `${amountXrp.toFixed(6)} XRP / $${amountUsd.toFixed(2)} USD`;
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: `Escrow Released – You Received Funds – ${escrowId}`,
@@ -874,7 +899,7 @@ export class EmailService {
             ${fontBase64 ? `<style>@font-face { font-family: 'Satoshi'; src: url('${fontBase64}') format('opentype'); font-weight: normal; font-style: normal; }</style>` : ''}
           </head>
           <body style="font-family: ${fontBase64 ? "'Satoshi', " : ''}Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
-            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Escrow Released – You Received Funds – ${escrowId}</h1>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${counterpartyName},</p>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">An escrow has been released and the funds have been sent to you.</p>
@@ -891,7 +916,7 @@ export class EmailService {
             <p style="font-size: 14px; color: #333; margin: 30px 0 10px 0;">Best Regards,<br/>Team TrustiChain</p>
             <p style="font-size: 12px; color: #999; margin: 30px 0 10px 0; font-style: italic;">This is a system generated message. Do not reply.</p>
             <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;" />
-            <div style="text-align: center; margin: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 30px; width: auto;" />` : ''}</div>
+            <div style="text-align: center; margin: 20px 0;">${this.renderLogoFooter('')}</div>
           </body>
           </html>
         `,
@@ -946,7 +971,7 @@ export class EmailService {
 
       console.log(`Attempting to send dispute notification email to respondent: ${email}`);
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: `Dispute Filed Against You - ${disputeCaseId} - TrustiChain`,
@@ -1059,10 +1084,9 @@ export class EmailService {
 
       console.log(`Attempting to send supply contract buyer confirmation request to: ${buyerEmail}`);
 
-      const logoBase64 = this.getLogoBase64();
       const titleDisplay = contractTitle && contractTitle.trim() ? contractTitle.trim() : `Contract ${contractId}`;
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: buyerEmail,
         subject: `Confirm Delivery – ${titleDisplay} – ${contractId}`,
@@ -1075,7 +1099,7 @@ export class EmailService {
             <title>Confirm Delivery</title>
           </head>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
-            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 20px 0;">Confirm Delivery – ${titleDisplay}</h1>
             <p style="font-size: 16px; color: #333; margin: 20px 0;">Dear ${buyerName},</p>
             <p style="font-size: 16px; color: #333; margin: 20px 0;"><strong>${supplierName}</strong> has marked the supply contract as delivered and is requesting your confirmation.</p>
@@ -1133,11 +1157,9 @@ export class EmailService {
           ? `<p style="margin: 12px 0;"><strong>Target amount:</strong> $${targetAmountUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</p>`
           : '<p style="margin: 12px 0;">You can set or adjust a target amount anytime in the app.</p>';
 
-      const logoBase64 = this.getLogoBase64();
-
       console.log(`Attempting to send savings plan created email to: ${email}`);
 
-      const { data, error } = await (resend as any).emails.send({
+      const { data, error } = await this.sendEmail({
         from: process.env.RESEND_FROM_EMAIL,
         to: email,
         subject: `Savings plan created — ${planName}`,
@@ -1150,7 +1172,7 @@ export class EmailService {
             <title>Savings plan created</title>
           </head>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
-            <div style="padding: 20px 0;">${logoBase64 ? `<img src="${logoBase64}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />` : '<h1 style="color: #333; margin: 0;">TrustiChain</h1>'}</div>
+            <div style="padding: 20px 0;">${this.renderLogoHeader()}</div>
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; text-align: center; border-radius: 10px 10px 0 0;">
               <h1 style="color: white; margin: 0; font-size: 22px;">Savings plan created</h1>
             </div>
