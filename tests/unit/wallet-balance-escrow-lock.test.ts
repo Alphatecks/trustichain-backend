@@ -68,7 +68,7 @@ describe('getInitiatorLockedEscrowAmountUsd', () => {
     ]);
 
     const locked = await escrowService.getInitiatorLockedEscrowAmountUsd('user-1', 'personal');
-    expect(locked).toBe(75);
+    expect(locked).toBe(70);
   });
 
   it('excludes unpaid stripe escrows', async () => {

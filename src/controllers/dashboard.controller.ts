@@ -31,11 +31,25 @@ export class DashboardController {
         return;
       }
 
+      const balance = balanceResult.data!.balance;
+      const lockedAmount = activeEscrowsResult.data!.lockedAmount;
+      const grossUsd =
+        balance.grossUsd ??
+        parseFloat((balance.usd + balance.lockedUsd).toFixed(2));
+      const netUsd = Math.max(0, parseFloat((grossUsd - lockedAmount).toFixed(2)));
+
       res.status(200).json({
         success: true,
         message: 'Dashboard summary retrieved successfully',
         data: {
-          balance: balanceResult.data!.balance,
+          balance: {
+            ...balance,
+            grossUsd,
+            lockedUsd: lockedAmount,
+            totalUsd: netUsd,
+            availableUsd: netUsd,
+            usd: netUsd,
+          },
           addresses: balanceResult.data!.addresses,
           activeEscrows: {
             count: activeEscrowsResult.data!.count,

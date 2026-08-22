@@ -89,38 +89,33 @@ export class WalletService {
     usdt: number,
     usdc: number,
     rlusd: number,
-    lockedUsd = 0,
-    lockedForAvailableUsd = lockedUsd
+    lockedUsd = 0
   ) {
     const grossUsd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
     const locked = Math.max(0, Number(lockedUsd) || 0);
-    const lockedForAvailable = Math.max(0, Number(lockedForAvailableUsd) || 0);
-    const availableUsd = Math.max(0, parseFloat((grossUsd - lockedForAvailable).toFixed(2)));
+    const netUsd = Math.max(0, parseFloat((grossUsd - locked).toFixed(2)));
     return {
       rlusd: Number(rlusd) || 0,
       usdt: Number(usdt) || 0,
       usdc: Number(usdc) || 0,
       xrp: Number(xrp) || 0,
-      totalUsd: grossUsd,
+      grossUsd,
       lockedUsd: parseFloat(locked.toFixed(2)),
-      availableUsd,
-      usd: grossUsd,
+      totalUsd: netUsd,
+      availableUsd: netUsd,
+      usd: netUsd,
     };
   }
 
   private async getLockedEscrowUsdForBalance(
     userId: string,
     suiteContext: WalletSuiteContext
-  ): Promise<{ lockedUsd: number; lockedForAvailableUsd: number }> {
+  ): Promise<number> {
     try {
-      const [lockedUsd, lockedForAvailableUsd] = await Promise.all([
-        escrowService.getInitiatorLockedEscrowAmountUsd(userId, suiteContext),
-        escrowService.getInitiatorLockedEscrowAmountUsd(userId, suiteContext, { excludeOnChain: true }),
-      ]);
-      return { lockedUsd, lockedForAvailableUsd };
+      return await escrowService.getInitiatorLockedEscrowAmountUsd(userId, suiteContext);
     } catch (error) {
       console.warn('[Wallet] Failed to fetch locked escrow amount for balance:', error);
-      return { lockedUsd: 0, lockedForAvailableUsd: 0 };
+      return 0;
     }
   }
 
@@ -145,13 +140,14 @@ export class WalletService {
         usdt: number;
         usdc: number;
         xrp: number;
-        /** Gross portfolio USD (unchanged from pre-escrow-lock behavior). */
-        totalUsd: number;
-        /** Initiator escrow USD in pending/active escrows. */
+        /** Wallet portfolio before escrow locks. */
+        grossUsd: number;
+        /** Escrow USD reserved in pending/active escrows. */
         lockedUsd: number;
-        /** Spendable USD after deducting lockedUsd (use for available balance display). */
+        /** Spendable USD (grossUsd minus lockedUsd). */
+        totalUsd: number;
         availableUsd: number;
-        /** Same as totalUsd — gross portfolio USD. */
+        /** Same as totalUsd — net spendable balance. */
         usd: number;
       };
       addresses: {
@@ -210,7 +206,7 @@ export class WalletService {
         };
       }
 
-      const { lockedUsd, lockedForAvailableUsd } = await this.getLockedEscrowUsdForBalance(userId, suiteContext);
+      const lockedUsd = await this.getLockedEscrowUsdForBalance(userId, suiteContext);
 
       let resolvedRlusdAddress = wallet.rlusd_xrpl_address ?? null;
       if (!resolvedRlusdAddress) {
@@ -266,7 +262,7 @@ export class WalletService {
               success: true,
               message: 'Balance retrieved successfully',
               data: {
-                balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd, lockedForAvailableUsd),
+                balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd),
                 addresses: {
                   rlusd: rlusdAddress,
                   xrp: wallet.xrpl_address ?? '',
@@ -299,7 +295,7 @@ export class WalletService {
         success: true,
         message: 'Balance retrieved successfully',
         data: {
-          balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd, lockedForAvailableUsd),
+          balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd),
           addresses: {
             rlusd: rlusdAddress,
             xrp: wallet.xrpl_address ?? '',

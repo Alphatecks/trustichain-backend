@@ -11,6 +11,7 @@ export interface DashboardSummaryResponse {
           usdt: number;
           usdc: number;
           xrp: number;
+          grossUsd: number;
           totalUsd: number;
           lockedUsd: number;
           availableUsd: number;

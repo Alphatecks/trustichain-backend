@@ -851,7 +851,7 @@ export class EscrowService {
       if (excludeOnChain && escrow.xrpl_escrow_id) {
         return sum;
       }
-      const raw = escrow.payable_amount_usd ?? escrow.amount_usd;
+      const raw = escrow.amount_usd;
       return sum + parseFloat(String(raw));
     }, 0);
 
