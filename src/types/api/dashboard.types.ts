@@ -13,6 +13,7 @@ export interface DashboardSummaryResponse {
           xrp: number;
           totalUsd: number;
           lockedUsd: number;
+          availableUsd: number;
           usd: number;
         };
         addresses?: {

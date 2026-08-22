@@ -73,12 +73,17 @@ describe('getInitiatorLockedEscrowAmountUsd', () => {
 
   it('excludes unpaid stripe escrows', async () => {
     mockEscrowQuery([
-      { amount_usd: 100, payable_amount_usd: 100, payment_method: 'xrp_wallet', payment_status: 'succeeded' },
-      { amount_usd: 30, payable_amount_usd: 30, payment_method: 'stripe', payment_status: 'unpaid' },
-      { amount_usd: 15, payable_amount_usd: 15, payment_method: 'xrp_wallet', payment_status: 'unpaid' },
+      { amount_usd: 100, payable_amount_usd: 100, xrpl_escrow_id: 'abc123', payment_method: 'xrp_wallet', payment_status: 'succeeded' },
+      { amount_usd: 30, payable_amount_usd: 30, xrpl_escrow_id: null, payment_method: 'stripe', payment_status: 'unpaid' },
+      { amount_usd: 15, payable_amount_usd: 15, xrpl_escrow_id: null, payment_method: 'xrp_wallet', payment_status: 'unpaid' },
     ]);
 
     const locked = await escrowService.getInitiatorLockedEscrowAmountUsd('user-1', 'personal');
     expect(locked).toBe(115);
+
+    const forAvailable = await escrowService.getInitiatorLockedEscrowAmountUsd('user-1', 'personal', {
+      excludeOnChain: true,
+    });
+    expect(forAvailable).toBe(15);
   });
 });
