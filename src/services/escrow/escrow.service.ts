@@ -816,20 +816,17 @@ export class EscrowService {
 
   /**
    * Sum USD locked by escrows the user created (initiator), scoped to wallet suite.
-   * Excludes unpaid Stripe escrows. By default skips on-chain escrows (wallet sync already
-   * reflects XRPL-locked XRP) unless includeOnChain is true.
+   * Excludes unpaid Stripe escrows only.
    */
   async getInitiatorLockedEscrowAmountUsd(
     userId: string,
-    suiteContext: 'personal' | 'business' = 'personal',
-    options?: { includeOnChain?: boolean }
+    suiteContext: 'personal' | 'business' = 'personal'
   ): Promise<number> {
     const adminClient = supabaseAdmin || supabase;
-    const includeOnChain = options?.includeOnChain === true;
 
     let query = adminClient
       .from('escrows')
-      .select('amount_usd, payable_amount_usd, xrpl_escrow_id, payment_method, payment_status')
+      .select('amount_usd, payable_amount_usd, payment_method, payment_status')
       .eq('user_id', userId)
       .in('status', ['pending', 'active']);
 
@@ -846,9 +843,6 @@ export class EscrowService {
 
     const locked = escrows.reduce((sum: number, escrow) => {
       if (escrow.payment_method === 'stripe' && escrow.payment_status === 'unpaid') {
-        return sum;
-      }
-      if (!includeOnChain && escrow.xrpl_escrow_id) {
         return sum;
       }
       const raw = escrow.payable_amount_usd ?? escrow.amount_usd;

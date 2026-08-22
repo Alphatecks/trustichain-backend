@@ -30,6 +30,7 @@ import {
 } from './multichain-wallet.service';
 import { multichainDepositMonitorService } from './multichain-deposit-monitor.service';
 import { toUserFacingAmount } from '../../utils/userFacingAmount';
+import { escrowService } from '../escrow/escrow.service';
 
 export type WalletSuiteContext = 'personal' | 'business';
 
@@ -98,7 +99,7 @@ export class WalletService {
       usdt: Number(usdt) || 0,
       usdc: Number(usdc) || 0,
       xrp: Number(xrp) || 0,
-      totalUsd,
+      totalUsd: availableUsd,
       lockedUsd: parseFloat(locked.toFixed(2)),
       usd: availableUsd,
     };
@@ -109,7 +110,6 @@ export class WalletService {
     suiteContext: WalletSuiteContext
   ): Promise<number> {
     try {
-      const { escrowService } = await import('../escrow/escrow.service');
       return await escrowService.getInitiatorLockedEscrowAmountUsd(userId, suiteContext);
     } catch (error) {
       console.warn('[Wallet] Failed to fetch locked escrow amount for balance:', error);
@@ -138,11 +138,11 @@ export class WalletService {
         usdt: number;
         usdc: number;
         xrp: number;
-        /** Gross portfolio USD before escrow locks. */
+        /** Available USD after deducting initiator escrow locks. */
         totalUsd: number;
-        /** Initiator escrow USD reserved (pending / not yet on-chain). */
+        /** Initiator escrow USD reserved in pending/active escrows. */
         lockedUsd: number;
-        /** Spendable USD equivalent (totalUsd minus lockedUsd). */
+        /** Spendable USD equivalent (totalUsd minus lockedUsd). Same value exposed as totalUsd for display. */
         usd: number;
       };
       addresses: {

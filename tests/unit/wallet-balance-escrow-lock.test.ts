@@ -63,33 +63,22 @@ describe('getInitiatorLockedEscrowAmountUsd', () => {
 
   it('sums pending initiator escrows not yet on-chain', async () => {
     mockEscrowQuery([
-      { amount_usd: 50, payable_amount_usd: 55, xrpl_escrow_id: null, payment_method: 'xrp_wallet', payment_status: 'unpaid' },
-      { amount_usd: 20, payable_amount_usd: null, xrpl_escrow_id: null, payment_method: 'stripe', payment_status: 'succeeded' },
+      { amount_usd: 50, payable_amount_usd: 55, payment_method: 'xrp_wallet', payment_status: 'unpaid' },
+      { amount_usd: 20, payable_amount_usd: null, payment_method: 'stripe', payment_status: 'succeeded' },
     ]);
 
     const locked = await escrowService.getInitiatorLockedEscrowAmountUsd('user-1', 'personal');
     expect(locked).toBe(75);
   });
 
-  it('excludes unpaid stripe and on-chain escrows by default', async () => {
+  it('excludes unpaid stripe escrows', async () => {
     mockEscrowQuery([
-      { amount_usd: 100, payable_amount_usd: 100, xrpl_escrow_id: 'abc123', payment_method: 'xrp_wallet', payment_status: 'succeeded' },
-      { amount_usd: 30, payable_amount_usd: 30, xrpl_escrow_id: null, payment_method: 'stripe', payment_status: 'unpaid' },
-      { amount_usd: 15, payable_amount_usd: 15, xrpl_escrow_id: null, payment_method: 'xrp_wallet', payment_status: 'unpaid' },
+      { amount_usd: 100, payable_amount_usd: 100, payment_method: 'xrp_wallet', payment_status: 'succeeded' },
+      { amount_usd: 30, payable_amount_usd: 30, payment_method: 'stripe', payment_status: 'unpaid' },
+      { amount_usd: 15, payable_amount_usd: 15, payment_method: 'xrp_wallet', payment_status: 'unpaid' },
     ]);
 
     const locked = await escrowService.getInitiatorLockedEscrowAmountUsd('user-1', 'personal');
-    expect(locked).toBe(15);
-  });
-
-  it('includes on-chain escrows when includeOnChain is true', async () => {
-    mockEscrowQuery([
-      { amount_usd: 100, payable_amount_usd: 100, xrpl_escrow_id: 'abc123', payment_method: 'xrp_wallet', payment_status: 'succeeded' },
-    ]);
-
-    const locked = await escrowService.getInitiatorLockedEscrowAmountUsd('user-1', 'personal', {
-      includeOnChain: true,
-    });
-    expect(locked).toBe(100);
+    expect(locked).toBe(115);
   });
 });
