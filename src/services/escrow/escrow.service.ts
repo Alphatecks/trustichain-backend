@@ -815,6 +815,50 @@ export class EscrowService {
   }
 
   /**
+   * Sum USD locked by escrows the user created (initiator), scoped to wallet suite.
+   * Excludes unpaid Stripe escrows. By default skips on-chain escrows (wallet sync already
+   * reflects XRPL-locked XRP) unless includeOnChain is true.
+   */
+  async getInitiatorLockedEscrowAmountUsd(
+    userId: string,
+    suiteContext: 'personal' | 'business' = 'personal',
+    options?: { includeOnChain?: boolean }
+  ): Promise<number> {
+    const adminClient = supabaseAdmin || supabase;
+    const includeOnChain = options?.includeOnChain === true;
+
+    let query = adminClient
+      .from('escrows')
+      .select('amount_usd, payable_amount_usd, xrpl_escrow_id, payment_method, payment_status')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'active']);
+
+    if (suiteContext === 'business') {
+      query = query.eq('suite_context', 'business');
+    } else {
+      query = query.or('suite_context.is.null,suite_context.eq.personal');
+    }
+
+    const { data: escrows, error } = await query;
+    if (error || !escrows?.length) {
+      return 0;
+    }
+
+    const locked = escrows.reduce((sum: number, escrow) => {
+      if (escrow.payment_method === 'stripe' && escrow.payment_status === 'unpaid') {
+        return sum;
+      }
+      if (!includeOnChain && escrow.xrpl_escrow_id) {
+        return sum;
+      }
+      const raw = escrow.payable_amount_usd ?? escrow.amount_usd;
+      return sum + parseFloat(String(raw));
+    }, 0);
+
+    return parseFloat(locked.toFixed(2));
+  }
+
+  /**
    * Get active escrows count and locked amount for a user
    */
   async getActiveEscrows(userId: string): Promise<{

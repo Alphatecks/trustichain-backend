@@ -8,6 +8,8 @@ export interface BusinessSuiteDashboardSummaryData {
     usdt: number;
     usdc: number;
     xrp: number;
+    totalUsd: number;
+    lockedUsd: number;
     usd: number;
   };
   addresses?: {

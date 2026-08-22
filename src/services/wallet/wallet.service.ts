@@ -83,14 +83,38 @@ export class WalletService {
     return Math.round((r + u + c + xrpValue) * 100) / 100;
   }
 
-  private async buildUserFacingBalance(xrp: number, usdt: number, usdc: number, rlusd: number) {
+  private async buildUserFacingBalance(
+    xrp: number,
+    usdt: number,
+    usdc: number,
+    rlusd: number,
+    lockedUsd = 0
+  ) {
+    const totalUsd = await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd);
+    const locked = Math.max(0, Number(lockedUsd) || 0);
+    const availableUsd = Math.max(0, parseFloat((totalUsd - locked).toFixed(2)));
     return {
       rlusd: Number(rlusd) || 0,
       usdt: Number(usdt) || 0,
       usdc: Number(usdc) || 0,
       xrp: Number(xrp) || 0,
-      usd: await this.computeUsdEquivalent(xrp, usdt, usdc, rlusd),
+      totalUsd,
+      lockedUsd: parseFloat(locked.toFixed(2)),
+      usd: availableUsd,
     };
+  }
+
+  private async getLockedEscrowUsdForBalance(
+    userId: string,
+    suiteContext: WalletSuiteContext
+  ): Promise<number> {
+    try {
+      const { escrowService } = await import('../escrow/escrow.service');
+      return await escrowService.getInitiatorLockedEscrowAmountUsd(userId, suiteContext);
+    } catch (error) {
+      console.warn('[Wallet] Failed to fetch locked escrow amount for balance:', error);
+      return 0;
+    }
   }
 
   private async getXrpUsdRateOrThrow(): Promise<number> {
@@ -114,6 +138,11 @@ export class WalletService {
         usdt: number;
         usdc: number;
         xrp: number;
+        /** Gross portfolio USD before escrow locks. */
+        totalUsd: number;
+        /** Initiator escrow USD reserved (pending / not yet on-chain). */
+        lockedUsd: number;
+        /** Spendable USD equivalent (totalUsd minus lockedUsd). */
         usd: number;
       };
       addresses: {
@@ -172,6 +201,8 @@ export class WalletService {
         };
       }
 
+      const lockedUsd = await this.getLockedEscrowUsdForBalance(userId, suiteContext);
+
       let resolvedRlusdAddress = wallet.rlusd_xrpl_address ?? null;
       if (!resolvedRlusdAddress) {
         try {
@@ -226,7 +257,7 @@ export class WalletService {
               success: true,
               message: 'Balance retrieved successfully',
               data: {
-                balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd),
+                balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd),
                 addresses: {
                   rlusd: rlusdAddress,
                   xrp: wallet.xrpl_address ?? '',
@@ -259,7 +290,7 @@ export class WalletService {
         success: true,
         message: 'Balance retrieved successfully',
         data: {
-          balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd),
+          balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd),
           addresses: {
             rlusd: rlusdAddress,
             xrp: wallet.xrpl_address ?? '',
