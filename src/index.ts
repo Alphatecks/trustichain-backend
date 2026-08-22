@@ -1,6 +1,8 @@
 
 // import express from 'express';
 import express, { Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
 
 
 import cors from 'cors';
@@ -40,6 +42,36 @@ app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), asy
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+function resolveLogoFilePath(): string | null {
+  const candidates = [
+    path.join(__dirname, 'assets', 'logo.png'),
+    path.join(__dirname, '..', 'assets', 'logo.png'),
+    path.join(process.cwd(), 'dist', 'assets', 'logo.png'),
+    path.join(process.cwd(), 'assets', 'logo.png'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+// Public logo for email HTML (<img src="https://your-api/assets/logo.png">)
+app.get('/assets/logo.png', (_req: Request, res: Response) => {
+  const logoPath = resolveLogoFilePath();
+  if (!logoPath) {
+    res.status(404).json({
+      success: false,
+      message: 'Logo not found',
+      cwd: process.cwd(),
+      dirname: __dirname,
+    });
+    return;
+  }
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'public, max-age=604800');
+  res.sendFile(logoPath);
+});
 
 // Health check
 app.get('/health', (_req: Request, res: Response) => {

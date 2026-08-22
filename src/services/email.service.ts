@@ -11,8 +11,6 @@ const resend = process.env.RESEND_API_KEY
   : null;
 
 export class EmailService {
-  private static readonly LOGO_CID = 'trustichain-logo';
-
   private resolveLogoPath(): string | null {
     const candidates = [
       path.join(__dirname, '..', 'assets', 'logo.png'),
@@ -27,43 +25,37 @@ export class EmailService {
     return null;
   }
 
-  /** Resend inline attachment (CID). Works in Gmail/Outlook; data: URIs are blocked. */
-  private getLogoInlineAttachment(): Record<string, string> | null {
-    const logoPath = this.resolveLogoPath();
-    if (!logoPath) return null;
-    try {
-      return {
-        filename: 'logo.png',
-        content: fs.readFileSync(logoPath).toString('base64'),
-        contentId: EmailService.LOGO_CID,
-        contentType: 'image/png',
-      };
-    } catch (error) {
-      console.error('[Email] Error reading logo file:', error);
-      return null;
-    }
+  /** Public HTTPS URL for <img src="..."> — required for Gmail/Outlook (blocks data: URIs). */
+  private getLogoPublicUrl(): string | null {
+    const configured = process.env.EMAIL_LOGO_URL?.trim();
+    if (configured) return configured;
+
+    const base = (
+      process.env.RENDER_URL ||
+      process.env.BACKEND_URL ||
+      (process.env.NODE_ENV === 'production' ? 'https://trustichain-backend.onrender.com' : '')
+    ).replace(/\/$/, '');
+    if (!base || !this.resolveLogoPath()) return null;
+
+    return `${base}/assets/logo.png`;
   }
 
   private renderLogoHeader(): string {
-    if (!this.resolveLogoPath()) {
+    const url = this.getLogoPublicUrl();
+    if (!url) {
       return '<h1 style="color: #333; margin: 0;">TrustiChain</h1>';
     }
-    return `<img src="cid:${EmailService.LOGO_CID}" alt="TrustiChain Logo" style="height: 40px; width: auto;" />`;
+    return `<img src="${url}" alt="TrustiChain" width="120" height="40" style="height: 40px; width: auto; display: block; border: 0; outline: none; text-decoration: none;" />`;
   }
 
   private renderLogoFooter(extraStyle = 'margin-top: 15px;'): string {
-    if (!this.resolveLogoPath()) return '';
-    return `<img src="cid:${EmailService.LOGO_CID}" alt="TrustiChain Logo" style="height: 30px; width: auto; ${extraStyle}" />`;
+    const url = this.getLogoPublicUrl();
+    if (!url) return '';
+    return `<img src="${url}" alt="TrustiChain" width="90" height="30" style="height: 30px; width: auto; display: block; border: 0; outline: none; text-decoration: none; ${extraStyle}" />`;
   }
 
   private async sendEmail(payload: Record<string, unknown>) {
-    const logoAttachment = this.getLogoInlineAttachment();
-    const existing = Array.isArray(payload.attachments) ? payload.attachments : [];
-    const attachments = logoAttachment ? [...existing, logoAttachment] : existing;
-    return (resend as any).emails.send({
-      ...payload,
-      ...(attachments.length ? { attachments } : {}),
-    });
+    return (resend as any).emails.send(payload);
   }
 
   /**
