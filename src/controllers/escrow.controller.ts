@@ -97,6 +97,67 @@ export class EscrowController {
   }
 
   /**
+   * Get admin-configured escrow creation fee percentages
+   * GET /api/escrow/creation-fee/settings
+   */
+  async getEscrowCreationFeeSettings(_req: Request, res: Response): Promise<void> {
+    try {
+      const result = await escrowService.getEscrowCreationFeeSettingsForUser();
+      res.status(result.success ? 200 : 400).json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Quote escrow creation fee before submit
+   * GET /api/escrow/creation-fee/quote?amount=100&currency=USD&transactionType=freelance
+   */
+  async getEscrowCreationFeeQuote(req: Request, res: Response): Promise<void> {
+    try {
+      const amount = parseFloat(String(req.query.amount ?? ''));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        res.status(400).json({
+          success: false,
+          message: 'amount query param must be a positive number',
+          error: 'Validation failed',
+        });
+        return;
+      }
+
+      const totalAmountRaw = req.query.totalAmount ?? req.query.total_amount;
+      const totalAmount =
+        totalAmountRaw != null && String(totalAmountRaw).trim() !== ''
+          ? parseFloat(String(totalAmountRaw))
+          : undefined;
+
+      const result = await escrowService.getEscrowCreationFeeQuote({
+        amount,
+        currency: (req.query.currency as string) || 'USD',
+        transactionType: (req.query.transactionType as string) || (req.query.transaction_type as string),
+        suiteContext: req.query.suiteContext === 'business' || req.query.suite_context === 'business'
+          ? 'business'
+          : 'personal',
+        totalAmount: Number.isFinite(totalAmount) ? totalAmount : undefined,
+      });
+
+      res.status(result.success ? 200 : 400).json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
    * Create a new escrow
    * POST /api/escrow/create
    */

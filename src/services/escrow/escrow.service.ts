@@ -17,7 +17,7 @@ import { encryptionService } from '../encryption/encryption.service';
 import { trustitagService } from '../trustitag.service';
 import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
-import { getEscrowCreationFeeSettings, resolveEscrowCreationFeePercentageByType } from './escrowCreationFee.service';
+import { getEscrowCreationFeeSettings, calculateEscrowCreationFeeBreakdown } from './escrowCreationFee.service';
 import { generateSupplierDisplayId } from '../businessSuite/supplierDisplayId.util';
 import { toUserFacingAmount } from '../../utils/userFacingAmount';
 
@@ -815,6 +815,119 @@ export class EscrowService {
   }
 
   /**
+   * Admin-configured fee percentages for escrow creation UI.
+   */
+  async getEscrowCreationFeeSettingsForUser(): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      personalFreelancerEscrowFeePercentage: number;
+      supplierEscrowFeePercentage: number;
+      payrollEscrowFeePercentage: number;
+    };
+    error?: string;
+  }> {
+    try {
+      const settings = await getEscrowCreationFeeSettings();
+      return {
+        success: true,
+        message: 'Escrow fee settings retrieved',
+        data: {
+          personalFreelancerEscrowFeePercentage: settings.personalFreelancerFeePercentage,
+          supplierEscrowFeePercentage: settings.supplierFeePercentage,
+          payrollEscrowFeePercentage: settings.payrollFeePercentage,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch escrow fee settings',
+        error: error instanceof Error ? error.message : 'Failed to fetch escrow fee settings',
+      };
+    }
+  }
+
+  /**
+   * Quote escrow creation fee from admin settings before creating an escrow.
+   */
+  async getEscrowCreationFeeQuote(input: {
+    amount: number;
+    currency?: string;
+    transactionType?: string;
+    suiteContext?: 'personal' | 'business';
+    totalAmount?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      amount: UserFacingAmount;
+      creationFeeUsd: number;
+      creationFeePercentage: number;
+      payableAmountUsd: number;
+      feeCategory: string;
+      settings: {
+        personalFreelancerEscrowFeePercentage: number;
+        supplierEscrowFeePercentage: number;
+        payrollEscrowFeePercentage: number;
+      };
+    };
+    error?: string;
+  }> {
+    try {
+      const escrowAmount =
+        input.totalAmount !== undefined && input.totalAmount !== null
+          ? input.totalAmount
+          : input.amount;
+      const denominationCurrency = input.currency || 'USD';
+
+      const settlementResult = await exchangeService.resolveEscrowSettlementAmounts(
+        escrowAmount,
+        denominationCurrency
+      );
+      if (!settlementResult.success) {
+        return {
+          success: false,
+          message: settlementResult.message,
+          error: settlementResult.error,
+        };
+      }
+
+      const { amountUsd, amountXrp } = settlementResult.data;
+      const suiteContext = input.suiteContext === 'business' ? 'business' : 'personal';
+      const feeBreakdown = await calculateEscrowCreationFeeBreakdown(
+        amountUsd,
+        input.transactionType || 'custom',
+        { suiteContext }
+      );
+      const settings = await getEscrowCreationFeeSettings();
+
+      return {
+        success: true,
+        message: 'Escrow creation fee quote retrieved',
+        data: {
+          amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
+          creationFeeUsd: feeBreakdown.creationFeeUsd,
+          creationFeePercentage: feeBreakdown.creationFeePercentage,
+          payableAmountUsd: feeBreakdown.payableAmountUsd,
+          feeCategory: feeBreakdown.feeCategory,
+          settings: {
+            personalFreelancerEscrowFeePercentage: settings.personalFreelancerFeePercentage,
+            supplierEscrowFeePercentage: settings.supplierFeePercentage,
+            payrollEscrowFeePercentage: settings.payrollFeePercentage,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('Error quoting escrow creation fee:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to quote escrow creation fee',
+        error: error instanceof Error ? error.message : 'Failed to quote escrow creation fee',
+      };
+    }
+  }
+
+  /**
    * Sum USD locked by escrows the user created (initiator), scoped to wallet suite.
    * Excludes unpaid Stripe escrows. When excludeOnChain is true, skips escrows already
    * funded on XRPL (wallet sync already reflects that XRP leaving the account).
@@ -1264,12 +1377,16 @@ export class EscrowService {
 
       const { amountUsd, amountXrp, xrpUsdRate } = settlementResult.data;
 
-      const feeSettings = await getEscrowCreationFeeSettings();
-      const creationFeePercentage = resolveEscrowCreationFeePercentageByType(escrowTransactionType, feeSettings);
-      const creationFeeUsd = amountUsd * (Math.max(0, creationFeePercentage) / 100);
-      const creationFeeXrp = creationFeeUsd > 0 ? parseFloat((creationFeeUsd / xrpUsdRate).toFixed(6)) : 0;
+      const suiteContextForFee = allowedSuiteContext === 'business' ? 'business' : 'personal';
+      const feeBreakdown = await calculateEscrowCreationFeeBreakdown(
+        amountUsd,
+        escrowTransactionType,
+        { suiteContext: suiteContextForFee }
+      );
+      const { creationFeeUsd, payableAmountUsd } = feeBreakdown;
+      const creationFeeXrp =
+        creationFeeUsd > 0 ? parseFloat((creationFeeUsd / xrpUsdRate).toFixed(6)) : 0;
       const payableXrp = this.normalizeXrpAmount(amountXrp + creationFeeXrp);
-      const payableAmountUsd = parseFloat((amountUsd + creationFeeUsd).toFixed(2));
 
       // Stripe path: persist pending escrow and return payable breakdown (XRPL created after payment)
       if (paymentMethod === 'stripe') {
@@ -1337,8 +1454,10 @@ export class EscrowService {
           data: {
             escrowId: escrow.id,
             amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
-            creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
-            payableAmountUsd,
+            creationFeeUsd: feeBreakdown.creationFeeUsd,
+            creationFeePercentage: feeBreakdown.creationFeePercentage,
+            payableAmountUsd: feeBreakdown.payableAmountUsd,
+            feeCategory: feeBreakdown.feeCategory,
             paymentMethod: 'stripe',
             paymentStatus: 'unpaid',
             status: escrow.status,
@@ -1711,8 +1830,12 @@ export class EscrowService {
           data: {
             escrowId: escrow.id,
             amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
+            creationFeeUsd: feeBreakdown.creationFeeUsd,
+            creationFeePercentage: feeBreakdown.creationFeePercentage,
+            payableAmountUsd: feeBreakdown.payableAmountUsd,
+            feeCategory: feeBreakdown.feeCategory,
             transaction: {
-              creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
+              creationFeeUsd: feeBreakdown.creationFeeUsd,
               creationFeeXrp: parseFloat(creationFeeXrp.toFixed(6)),
               totalPayableXrp: parseFloat(payableXrp.toFixed(6)),
             },
@@ -1729,8 +1852,12 @@ export class EscrowService {
           data: {
             escrowId: escrow.id,
             amount: toUserFacingAmount(parseFloat(amountUsd.toFixed(2)), parseFloat(amountXrp.toFixed(6))),
+            creationFeeUsd: feeBreakdown.creationFeeUsd,
+            creationFeePercentage: feeBreakdown.creationFeePercentage,
+            payableAmountUsd: feeBreakdown.payableAmountUsd,
+            feeCategory: feeBreakdown.feeCategory,
             transaction: {
-              creationFeeUsd: parseFloat(creationFeeUsd.toFixed(2)),
+              creationFeeUsd: feeBreakdown.creationFeeUsd,
               creationFeeXrp: parseFloat(creationFeeXrp.toFixed(6)),
               totalPayableXrp: parseFloat(payableXrp.toFixed(6)),
             },

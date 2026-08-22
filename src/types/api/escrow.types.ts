@@ -85,8 +85,39 @@ export interface CreateEscrowResponse {
     transactionBlob?: string;
     paymentMethod?: EscrowPaymentMethod;
     creationFeeUsd?: number;
+    creationFeePercentage?: number;
     payableAmountUsd?: number;
+    feeCategory?: string;
     paymentStatus?: string;
+  };
+  error?: string;
+}
+
+export interface EscrowCreationFeeSettingsResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    personalFreelancerEscrowFeePercentage: number;
+    supplierEscrowFeePercentage: number;
+    payrollEscrowFeePercentage: number;
+  };
+  error?: string;
+}
+
+export interface EscrowCreationFeeQuoteResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    amount: UserFacingAmount;
+    creationFeeUsd: number;
+    creationFeePercentage: number;
+    payableAmountUsd: number;
+    feeCategory: string;
+    settings: {
+      personalFreelancerEscrowFeePercentage: number;
+      supplierEscrowFeePercentage: number;
+      payrollEscrowFeePercentage: number;
+    };
   };
   error?: string;
 }

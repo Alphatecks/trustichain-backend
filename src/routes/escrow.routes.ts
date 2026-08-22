@@ -34,6 +34,25 @@ router.get('/total', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route   GET /api/escrow/creation-fee/settings
+ * @desc    Admin-configured escrow creation fee percentages (for create-escrow UI)
+ * @access  Private
+ */
+router.get('/creation-fee/settings', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowCreationFeeSettings(req, res);
+}));
+
+/**
+ * @route   GET /api/escrow/creation-fee/quote
+ * @desc    Quote escrow amount + platform fee before creation
+ * @access  Private
+ * @query   amount, currency?, transactionType?, suiteContext?, totalAmount?
+ */
+router.get('/creation-fee/quote', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowCreationFeeQuote(req, res);
+}));
+
+/**
  * @route   POST /api/escrow/create
  * @desc    Create a new escrow
  * @access  Private
