@@ -2,6 +2,8 @@
  * Dashboard API Types
  */
 
+import type { DisplayCurrency } from './currency.types';
+
 export interface DashboardSummaryResponse {
   success: boolean;
   message: string;
@@ -30,7 +32,18 @@ export interface DashboardSummaryResponse {
           level: string;
         };
         totalEscrowed: number;
+        /** User's saved display currency for portfolio graph and fiat conversion. */
+        displayCurrency: DisplayCurrency;
       };
+  error?: string;
+}
+
+export interface DashboardDisplayCurrencyResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    displayCurrency: DisplayCurrency;
+  };
   error?: string;
 }
 
@@ -83,6 +96,9 @@ export interface PortfolioResponse {
   message: string;
   data?: {
     timeframe: string;
+    year?: number;
+    /** Saved display currency; chart `value` amounts are in USD — convert client-side via exchange rates. */
+    displayCurrency: DisplayCurrency;
     data: Array<{
       period: string;
       value: number;

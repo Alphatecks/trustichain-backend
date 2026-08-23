@@ -1,8 +1,13 @@
 import { Request, Response } from 'express';
-import { DashboardSummaryResponse } from '../types/api/dashboard.types';
+import {
+  DashboardDisplayCurrencyResponse,
+  DashboardSummaryResponse,
+} from '../types/api/dashboard.types';
 import { walletService } from '../services/wallet/wallet.service';
 import { escrowService } from '../services/escrow/escrow.service';
 import { trustiscoreService } from '../services/trustiscore/trustiscore.service';
+import { userService } from '../services/user/user.service';
+import { SUPPORTED_DISPLAY_CURRENCIES } from '../types/api/currency.types';
 
 export class DashboardController {
   /**
@@ -14,11 +19,13 @@ export class DashboardController {
       const userId = req.userId!; // Set by auth middleware
 
       // Fetch all dashboard data in parallel
-      const [balanceResult, activeEscrowsResult, totalEscrowedResult, trustiscoreResult] = await Promise.all([
+      const [balanceResult, activeEscrowsResult, totalEscrowedResult, trustiscoreResult, displayCurrency] =
+        await Promise.all([
         walletService.getBalance(userId),
         escrowService.getActiveEscrows(userId),
         escrowService.getTotalEscrowed(userId),
         trustiscoreService.getTrustiscore(userId),
+        userService.getDisplayCurrency(userId),
       ]);
 
       // Check for errors
@@ -60,10 +67,94 @@ export class DashboardController {
             level: trustiscoreResult.data!.level,
           },
           totalEscrowed: totalEscrowedResult.data!.totalEscrowed,
+          displayCurrency,
         },
       });
     } catch (error) {
       console.error('Error in getDashboardSummary:', error);
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get saved display currency for portfolio graph / dashboard fiat display.
+   * GET /api/dashboard/display-currency
+   */
+  async getDisplayCurrency(
+    req: Request,
+    res: Response<DashboardDisplayCurrencyResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const displayCurrency = await userService.getDisplayCurrency(userId);
+      res.status(200).json({
+        success: true,
+        message: 'Display currency retrieved successfully',
+        data: { displayCurrency },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Persist dashboard currency selection (portfolio graph + fiat display).
+   * PATCH /api/dashboard/display-currency
+   */
+  async updateDisplayCurrency(
+    req: Request,
+    res: Response<DashboardDisplayCurrencyResponse>
+  ): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const body = req.body ?? {};
+      const result = await userService.updateUserPreferences(userId, body);
+
+      if (result.success) {
+        res.status(200).json({
+          success: true,
+          message: 'Display currency saved successfully',
+          data: { displayCurrency: result.data!.displayCurrency },
+        });
+        return;
+      }
+
+      res.status(400).json(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * List supported display currency codes for the dashboard selector.
+   * GET /api/dashboard/display-currencies
+   */
+  async listDisplayCurrencies(_req: Request, res: Response): Promise<void> {
+    try {
+      res.status(200).json({
+        success: true,
+        message: 'Supported display currencies retrieved successfully',
+        data: {
+          currencies: [...SUPPORTED_DISPLAY_CURRENCIES],
+          defaultCurrency: 'USD',
+        },
+      });
+    } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       res.status(500).json({
         success: false,

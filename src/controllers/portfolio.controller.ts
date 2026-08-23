@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PortfolioResponse } from '../types/api/dashboard.types';
 import { portfolioService } from '../services/portfolio/portfolio.service';
+import { userService } from '../services/user/user.service';
 
 export class PortfolioController {
   /**
@@ -37,12 +38,27 @@ export class PortfolioController {
         year = y;
       }
 
-      const result = await portfolioService.getPortfolioPerformance(userId, timeframe, year);
+      const [result, displayCurrency] = await Promise.all([
+        portfolioService.getPortfolioPerformance(userId, timeframe, year),
+        userService.getDisplayCurrency(userId),
+      ]);
 
       if (result.success) {
-        res.status(200).json(result);
+        res.status(200).json({
+          ...result,
+          data: result.data
+            ? {
+                ...result.data,
+                displayCurrency,
+              }
+            : undefined,
+        });
       } else {
-        res.status(400).json(result);
+        res.status(400).json({
+          success: false,
+          message: result.message,
+          error: result.error,
+        });
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';

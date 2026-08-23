@@ -74,6 +74,12 @@ router.post(
   })
 );
 
+/**
+ * @route   PATCH /api/user/preferences
+ * @desc    Update user preferences (display currency for dashboard portfolio graph)
+ * @access  Private
+ * @body    { displayCurrency: "EUR" } or { display_currency: "EUR" }
+ */
 router.patch('/preferences', authenticate, asyncHandler(async (req, res) => {
   await userController.updateUserPreferences(req, res);
 }));

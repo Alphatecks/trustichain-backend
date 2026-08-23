@@ -35,12 +35,30 @@ export class UserService {
       : 'USD';
   }
 
+  /** Saved fiat code for dashboard portfolio graph and balance display (default USD). */
+  async getDisplayCurrency(userId: string): Promise<DisplayCurrency> {
+    const adminClient = supabaseAdmin || supabase;
+    const { data, error } = await adminClient
+      .from('users')
+      .select('display_currency')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return 'USD';
+    }
+
+    return this.normalizeDisplayCurrency(
+      (data as { display_currency?: string | null }).display_currency
+    );
+  }
+
   /**
    * Update user preferences (display currency for cross-device sync).
    */
   async updateUserPreferences(
     userId: string,
-    body: { displayCurrency?: unknown }
+    body: { displayCurrency?: unknown; display_currency?: unknown }
   ): Promise<{
     success: boolean;
     message: string;
@@ -48,7 +66,9 @@ export class UserService {
     error?: string;
   }> {
     try {
-      if (body.displayCurrency == null) {
+      const raw =
+        body.displayCurrency != null ? body.displayCurrency : body.display_currency;
+      if (raw == null) {
         return {
           success: false,
           message: 'displayCurrency is required',
@@ -56,7 +76,7 @@ export class UserService {
         };
       }
 
-      const displayCurrency = this.normalizeDisplayCurrency(String(body.displayCurrency));
+      const displayCurrency = this.normalizeDisplayCurrency(String(raw));
       const adminClient = supabaseAdmin || supabase;
       const { error } = await adminClient
         .from('users')
