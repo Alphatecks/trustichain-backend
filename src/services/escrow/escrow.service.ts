@@ -125,6 +125,163 @@ export class EscrowService {
     return 'xrp_wallet';
   }
 
+  private parseNumericAmount(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value.replace(/,/g, ''));
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeReleaseType(value?: string | null): ReleaseType | undefined {
+    if (!value || !value.trim()) {
+      return undefined;
+    }
+    const lower = value.trim().toLowerCase();
+    if (lower === 'manual release' || lower === 'manual') {
+      return 'Manual Release';
+    }
+    if (lower === 'time based' || lower === 'time-based' || lower === 'timebased') {
+      return 'Time based';
+    }
+    if (
+      lower === 'milestones' ||
+      lower === 'milestone' ||
+      lower === 'milestone payment'
+    ) {
+      return 'Milestones';
+    }
+    return value.trim() as ReleaseType;
+  }
+
+  private parseEscrowDateToIso(value?: string | null): string | null {
+    if (!value || !value.trim()) {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-').map(Number);
+      return new Date(year!, month! - 1, day!, 0, 0, 0, 0).toISOString();
+    }
+    const dmy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) {
+      const day = Number(dmy[1]);
+      const month = Number(dmy[2]);
+      const year = Number(dmy[3]);
+      return new Date(year, month - 1, day, 0, 0, 0, 0).toISOString();
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed.toISOString();
+  }
+
+  private normalizeMilestoneInput(raw: unknown, index: number): Milestone {
+    const row = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const details = String(
+      row.milestoneDetails ?? row.milestone_details ?? row.details ?? row.description ?? ''
+    ).trim();
+    const amount =
+      this.parseNumericAmount(row.milestoneAmount) ??
+      this.parseNumericAmount(row.milestone_amount) ??
+      this.parseNumericAmount(row.amount) ??
+      0;
+    const order =
+      this.parseNumericAmount(row.milestoneOrder) ??
+      this.parseNumericAmount(row.milestone_order) ??
+      this.parseNumericAmount(row.order);
+
+    return {
+      milestoneDetails: details,
+      milestoneAmount: amount,
+      milestoneOrder: order ? Math.trunc(order) : index + 1,
+    };
+  }
+
+  /**
+   * Accepts the Create Escrow Terms step payload: releaseType "Milestones",
+   * totalAmount, disputeResolutionPeriod, expectedCompletionDate (DD/MM/YYYY or ISO),
+   * and a milestones array from "+ Add milestone" (amount + details).
+   */
+  private normalizeCreateEscrowRequest(request: CreateEscrowRequest): CreateEscrowRequest {
+    const body = request as CreateEscrowRequest & {
+      release_type?: string;
+      total_amount?: number | string;
+      expected_completion_date?: string;
+      expected_release_date?: string;
+      dispute_resolution_period?: string;
+      milestoneAmount?: number | string;
+      milestoneDetails?: string;
+      milestone_amount?: number | string;
+      milestone_details?: string;
+      milestone?: unknown;
+    };
+
+    const releaseType = this.normalizeReleaseType(request.releaseType ?? body.release_type);
+    const totalAmount =
+      this.parseNumericAmount(request.totalAmount) ?? this.parseNumericAmount(body.total_amount);
+    const amount = this.parseNumericAmount(request.amount) ?? totalAmount;
+
+    const rawMilestones = Array.isArray(request.milestones)
+      ? request.milestones
+      : Array.isArray(body.milestone)
+        ? body.milestone
+        : [];
+    let milestones = rawMilestones.map((item, index) => this.normalizeMilestoneInput(item, index));
+
+    if (releaseType === 'Milestones' && milestones.length === 0) {
+      const single = this.normalizeMilestoneInput(
+        {
+          milestoneDetails: body.milestoneDetails ?? body.milestone_details,
+          milestoneAmount: body.milestoneAmount ?? body.milestone_amount,
+        },
+        0
+      );
+      if (single.milestoneDetails && single.milestoneAmount > 0) {
+        milestones = [single];
+      }
+    }
+
+    return {
+      ...request,
+      amount: amount as number,
+      releaseType,
+      totalAmount: totalAmount ?? amount,
+      expectedCompletionDate: request.expectedCompletionDate ?? body.expected_completion_date,
+      expectedReleaseDate: request.expectedReleaseDate ?? body.expected_release_date,
+      disputeResolutionPeriod: request.disputeResolutionPeriod ?? body.dispute_resolution_period,
+      milestones: milestones.length > 0 ? milestones : undefined,
+    };
+  }
+
+  private mapMilestoneRow(m: {
+    id: string;
+    milestone_details: string;
+    milestone_amount: string | number;
+    milestone_amount_usd: string | number;
+    milestone_order: number;
+    status: string;
+    created_at: string;
+    completed_at?: string | null;
+  }): Milestone {
+    return {
+      id: m.id,
+      milestoneDetails: m.milestone_details,
+      milestoneAmount: parseFloat(String(m.milestone_amount)),
+      milestoneAmountUsd: parseFloat(String(m.milestone_amount_usd)),
+      milestoneOrder: m.milestone_order,
+      status: m.status,
+      createdAt: m.created_at,
+      completedAt: m.completed_at || undefined,
+    };
+  }
+
   private computeEscrowReleaseTimes(expectedReleaseDate?: string | null): {
     finishAfter?: number;
     cancelAfter?: number;
@@ -186,6 +343,11 @@ export class EscrowService {
     const { error: milestonesError } = await adminClient.from('escrow_milestones').insert(milestonesToInsert);
     if (milestonesError) {
       console.error('[Escrow] Error creating milestones:', milestonesError);
+      return {
+        success: false,
+        message: 'Failed to save escrow milestones',
+        error: milestonesError.message || 'Failed to save escrow milestones',
+      };
     }
 
     return { success: true };
@@ -729,16 +891,34 @@ export class EscrowService {
       return [];
     }
 
-    return milestones.map((m: any) => ({
-      id: m.id,
-      milestoneDetails: m.milestone_details,
-      milestoneAmount: parseFloat(m.milestone_amount),
-      milestoneAmountUsd: parseFloat(m.milestone_amount_usd),
-      milestoneOrder: m.milestone_order,
-      status: m.status,
-      createdAt: m.created_at,
-      completedAt: m.completed_at || undefined,
-    }));
+    return milestones.map((m: any) => this.mapMilestoneRow(m));
+  }
+
+  private async getMilestonesByEscrowIds(escrowIds: string[]): Promise<Record<string, Milestone[]>> {
+    if (escrowIds.length === 0) {
+      return {};
+    }
+
+    const adminClient = supabaseAdmin || supabase;
+    const { data: milestones, error } = await adminClient
+      .from('escrow_milestones')
+      .select('*')
+      .in('escrow_id', escrowIds)
+      .order('milestone_order', { ascending: true });
+
+    if (error || !milestones) {
+      return {};
+    }
+
+    const grouped: Record<string, Milestone[]> = {};
+    for (const row of milestones) {
+      const escrowId = row.escrow_id as string;
+      if (!grouped[escrowId]) {
+        grouped[escrowId] = [];
+      }
+      grouped[escrowId].push(this.mapMilestoneRow(row));
+    }
+    return grouped;
   }
 
   /**
@@ -1072,9 +1252,9 @@ export class EscrowService {
   /**
    * Create a new escrow
    */
-  async createEscrow(userId: string, request: CreateEscrowRequest): Promise<CreateEscrowResponse> {
+  async createEscrow(userId: string, rawRequest: CreateEscrowRequest): Promise<CreateEscrowResponse> {
       // #region agent log
-      const logEntry = {location:'escrow.service.ts:166',message:'createEscrow: Function entry',data:{userId,hasRequest:!!request,amount:request.amount,currency:request.currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ENTRY'};
+      const logEntry = {location:'escrow.service.ts:166',message:'createEscrow: Function entry',data:{userId,hasRequest:!!rawRequest,amount:rawRequest.amount,currency:rawRequest.currency},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ENTRY'};
       console.log('[DEBUG ENTRY]', JSON.stringify(logEntry));
       console.error('[DEBUG ENTRY]', JSON.stringify(logEntry)); // Also log to stderr
       try {
@@ -1088,6 +1268,7 @@ export class EscrowService {
     
     try {
       const adminClient = supabaseAdmin || supabase;
+      const request = this.normalizeCreateEscrowRequest(rawRequest);
       const paymentMethod = this.normalizePaymentMethod(request);
 
       // Payer wallet: use business wallet when creating from business suite, else personal
@@ -1323,6 +1504,13 @@ export class EscrowService {
             error: 'Expected completion date is required for milestone-based escrows',
           };
         }
+        if (!this.parseEscrowDateToIso(request.expectedCompletionDate)) {
+          return {
+            success: false,
+            message: 'Expected completion date is invalid',
+            error: 'Expected completion date is invalid',
+          };
+        }
         if (request.totalAmount === undefined || request.totalAmount === null) {
           return {
             success: false,
@@ -1333,7 +1521,7 @@ export class EscrowService {
         if (!request.milestones || request.milestones.length === 0) {
           return {
             success: false,
-            message: 'At least one milestone is required for milestone-based escrows',
+            message: 'At least one milestone is required for milestone-based escrows. Add a milestone with amount and details.',
             error: 'At least one milestone is required for milestone-based escrows',
           };
         }
@@ -1425,12 +1613,8 @@ export class EscrowService {
             counterparty_name: request.counterpartyName || null,
             counterparty_phone: request.counterpartyPhoneNumber || null,
             release_type: request.releaseType || null,
-            expected_completion_date: request.expectedCompletionDate
-              ? new Date(request.expectedCompletionDate).toISOString()
-              : null,
-            expected_release_date: request.expectedReleaseDate
-              ? new Date(request.expectedReleaseDate).toISOString()
-              : null,
+            expected_completion_date: this.parseEscrowDateToIso(request.expectedCompletionDate),
+            expected_release_date: this.parseEscrowDateToIso(request.expectedReleaseDate),
             dispute_resolution_period: request.disputeResolutionPeriod || null,
             release_conditions: request.releaseConditions || null,
             suite_context: allowedSuiteContext,
@@ -1446,7 +1630,17 @@ export class EscrowService {
           };
         }
 
-        await this.insertEscrowMilestones(adminClient, escrow.id, request);
+        const milestoneResult = await this.insertEscrowMilestones(adminClient, escrow.id, request);
+        if (!milestoneResult.success) {
+          return {
+            success: false,
+            message: milestoneResult.message,
+            error: milestoneResult.error,
+          };
+        }
+        const createdMilestones = request.releaseType === 'Milestones'
+          ? await this.getMilestones(escrow.id)
+          : [];
 
         return {
           success: true,
@@ -1461,6 +1655,7 @@ export class EscrowService {
             paymentMethod: 'stripe',
             paymentStatus: 'unpaid',
             status: escrow.status,
+            milestones: createdMilestones.length > 0 ? createdMilestones : undefined,
           },
         };
       }
@@ -1734,8 +1929,8 @@ export class EscrowService {
           counterparty_phone: request.counterpartyPhoneNumber || null,
           // Step 2: Terms and Release conditions
           release_type: request.releaseType || null,
-          expected_completion_date: request.expectedCompletionDate ? new Date(request.expectedCompletionDate).toISOString() : null,
-          expected_release_date: request.expectedReleaseDate ? new Date(request.expectedReleaseDate).toISOString() : null,
+          expected_completion_date: this.parseEscrowDateToIso(request.expectedCompletionDate),
+          expected_release_date: this.parseEscrowDateToIso(request.expectedReleaseDate),
           dispute_resolution_period: request.disputeResolutionPeriod || null,
           release_conditions: request.releaseConditions || null,
           // Suite context: 'business' only when user has Business Suite and sent suiteContext: 'business'
@@ -1822,6 +2017,10 @@ export class EscrowService {
       }
 
       // Return response with appropriate message and data
+      const createdMilestones = request.releaseType === 'Milestones'
+        ? await this.getMilestones(escrow.id)
+        : [];
+
       if (xrplTxHash) {
         // Auto-signed: Escrow created successfully
         return {
@@ -1842,6 +2041,7 @@ export class EscrowService {
             xrpHash: xrplTxHash,
             status: escrow.status,
             xrplEscrowId: xrplTxHash,
+            milestones: createdMilestones.length > 0 ? createdMilestones : undefined,
           },
         };
       } else {
@@ -1864,6 +2064,7 @@ export class EscrowService {
             status: escrow.status,
             xummUrl: xummUrl,
             xummUuid: xummUuid,
+            milestones: createdMilestones.length > 0 ? createdMilestones : undefined,
           },
         };
       }
@@ -2037,6 +2238,9 @@ export class EscrowService {
 
       // Get party profiles (names + avatars)
       const partyProfiles = await this.getPartyProfiles(Array.from(userIds));
+      const milestoneMap = await this.getMilestonesByEscrowIds(
+        (escrows || []).map((escrow: { id: string }) => escrow.id)
+      );
 
       // Format escrows with all metadata
       const formattedEscrows: Escrow[] = (escrows || []).map((escrow: any) => {
@@ -2078,6 +2282,7 @@ export class EscrowService {
           expectedReleaseDate: escrow.expected_release_date || undefined,
           disputeResolutionPeriod: escrow.dispute_resolution_period || undefined,
           releaseConditions: escrow.release_conditions || undefined,
+          milestones: milestoneMap[escrow.id]?.length ? milestoneMap[escrow.id] : undefined,
         };
       });
 

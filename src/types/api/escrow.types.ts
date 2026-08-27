@@ -11,7 +11,7 @@ export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
 export interface Milestone {
   id?: string; // Milestone ID (included in responses)
   milestoneDetails: string; // Description/details of the milestone
-  milestoneAmount: number; // Amount for this milestone
+  milestoneAmount: number; // Amount for this milestone (create: entered amount; responses include XRP + USD)
   milestoneAmountUsd?: number; // Amount in USD (included in responses)
   milestoneOrder?: number; // Order/sequence number
   status?: string; // Status: pending, completed, released (included in responses)
@@ -49,12 +49,13 @@ export interface CreateEscrowRequest {
   
   // Step 2: Terms and Release conditions (optional)
   releaseType?: ReleaseType;
-  expectedCompletionDate?: string; // ISO date string - Required for "Milestones" release type
+  expectedCompletionDate?: string; // ISO or DD/MM/YYYY - Required for "Milestones" release type
   expectedReleaseDate?: string; // ISO date string - Required for "Time based" release type
-  disputeResolutionPeriod?: string; // e.g., "7 days", "14 days" - Required for "Milestones" release type
-  totalAmount?: number; // If provided, will override amount field - Required for both "Time based" and "Milestones" release types
+  disputeResolutionPeriod?: string; // e.g., "7 days", "14 days"
+  totalAmount?: number; // UI "Total Amount"; falls back to amount when omitted
   releaseConditions?: string; // Detailed release conditions text
-  milestones?: Milestone[]; // Array of milestones - Required for "Milestones" release type
+  /** Required when releaseType is "Milestones". Each item: amount + details from "+ Add milestone". */
+  milestones?: Milestone[];
 
   // Suite context: set to 'business' when creating from Business Suite so business dashboard shows only these escrows
   suiteContext?: 'personal' | 'business';
@@ -89,6 +90,7 @@ export interface CreateEscrowResponse {
     payableAmountUsd?: number;
     feeCategory?: string;
     paymentStatus?: string;
+    milestones?: Milestone[];
   };
   error?: string;
 }

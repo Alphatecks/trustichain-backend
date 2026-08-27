@@ -304,6 +304,13 @@ export interface CreateSupplierContractRequest {
   currency: 'USD' | 'XRP' | 'USDT';
   escrowType: SupplierContractEscrowType;
   releaseCondition: ReleaseCondition;
+  /** Required when releaseCondition is Milestones */
+  milestones?: Array<{
+    milestoneDetails?: string;
+    milestoneAmount?: number;
+    details?: string;
+    amount?: number;
+  }>;
   /** Optional: document URLs from POST /supply-contracts/documents/upload (Invoice, Agreement, Delivery Terms) */
   contractDocumentUrls?: string[];
 }

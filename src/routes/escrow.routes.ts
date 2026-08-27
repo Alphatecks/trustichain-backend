@@ -56,7 +56,7 @@ router.get('/creation-fee/quote', authenticate, asyncHandler(async (req, res) =>
  * @route   POST /api/escrow/create
  * @desc    Create a new escrow
  * @access  Private
- * @body    { counterpartyId: string, amount: number, currency: 'USD' | 'XRP', description?: string }
+ * @body    { counterpartyId?: string, amount?: number, totalAmount?: number, currency, releaseType?, milestones?: [{ milestoneAmount|amount, milestoneDetails|details }], expectedCompletionDate?, disputeResolutionPeriod? }
  */
 router.post('/create', authenticate, asyncHandler(async (req, res) => {
   await escrowController.createEscrow(req, res);

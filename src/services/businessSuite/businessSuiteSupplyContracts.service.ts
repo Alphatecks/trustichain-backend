@@ -239,6 +239,8 @@ export class BusinessSuiteSupplyContractsService {
       expectedReleaseDate: body.deliveryDeadline && (releaseType === 'Time based' || body.releaseCondition === 'Automatic release after delivery') ? parseDeliveryDeadline(body.deliveryDeadline) : undefined,
       disputeResolutionPeriod: body.disputeWindow || undefined,
       releaseConditions: body.releaseCondition || undefined,
+      totalAmount: paymentAmount,
+      milestones: body.milestones as CreateEscrowRequest['milestones'],
     };
 
     const result = await escrowService.createEscrow(userId, request);
