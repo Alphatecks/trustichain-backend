@@ -4,7 +4,7 @@
 
 import type { TransactionType } from './transaction.types';
 import type { UserFacingAmount } from '../../utils/userFacingAmount';
-import type { DisplayCurrency } from './currency.types';
+import type { EscrowDenominationCurrency } from './currency.types';
 
 export type ReleaseType = 'Manual Release' | 'Time based' | 'Milestones';
 
@@ -32,7 +32,7 @@ export interface CreateEscrowRequest {
   // Escrow details
   amount: number;
   /** Denomination currency entered by the user (fiat, USD, RLUSD, or XRP). */
-  currency: DisplayCurrency | 'XRP';
+  currency: EscrowDenominationCurrency;
   description?: string;
   transactionType: TransactionType;
   industry?: string;
@@ -72,6 +72,10 @@ export interface CreateEscrowResponse {
   data?: {
     escrowId: string;
     amount: UserFacingAmount;
+    /** Currency entered at creation. */
+    currency?: EscrowDenominationCurrency;
+    /** Original amount in `currency`. */
+    denominationAmount?: number;
     xrpHash?: string;
     status: string;
     xrplEscrowId?: string;
@@ -111,6 +115,8 @@ export interface EscrowCreationFeeQuoteResponse {
   message: string;
   data?: {
     amount: UserFacingAmount;
+    currency: EscrowDenominationCurrency;
+    denominationAmount: number;
     creationFeeUsd: number;
     creationFeePercentage: number;
     payableAmountUsd: number;
@@ -134,6 +140,10 @@ export interface Escrow {
   counterpartyName?: string;
   counterpartyAvatarUrl?: string | null;
   amount: UserFacingAmount;
+  /** Currency entered at escrow creation (not the USD/RLUSD settlement equivalent). */
+  currency: EscrowDenominationCurrency;
+  /** Original amount in `currency` as entered at creation. */
+  denominationAmount: number;
   status: 'pending' | 'active' | 'completed' | 'cancelled' | 'disputed';
   transactionType: TransactionType;
   industry: string | null;
@@ -295,6 +305,9 @@ export interface EscrowPartiesResponse {
     escrowId: string;
     /** Escrow held amount — use to prefill dispute amount on create */
       amount: UserFacingAmount;
+    /** Currency entered at escrow creation. */
+    currency: EscrowDenominationCurrency;
+    denominationAmount: number;
     payer: EscrowPayerParty;
     counterparty: EscrowCounterpartyParty;
   };

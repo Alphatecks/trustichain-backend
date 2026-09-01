@@ -28,6 +28,11 @@ export const SUPPORTED_DISPLAY_CURRENCIES = [
 
 export type DisplayCurrency = (typeof SUPPORTED_DISPLAY_CURRENCIES)[number];
 
+/** Currencies accepted at escrow creation (display fiats plus XRP). */
+export const ESCROW_DENOMINATION_CURRENCIES = [...SUPPORTED_DISPLAY_CURRENCIES, 'XRP'] as const;
+
+export type EscrowDenominationCurrency = (typeof ESCROW_DENOMINATION_CURRENCIES)[number];
+
 /** Fiat codes returned by GET /api/exchange/rates (excludes RLUSD base). */
 export const FIAT_EXCHANGE_CURRENCIES = SUPPORTED_DISPLAY_CURRENCIES.filter(
   (c) => c !== 'RLUSD' && c !== 'USD'

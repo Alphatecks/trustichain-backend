@@ -421,6 +421,8 @@ export class BusinessSuitePayrollsService {
           counterparty_id: item.counterparty_id,
           amount_xrp: amountXrp,
           amount_usd: amountUsd,
+          denomination_currency: 'USD',
+          denomination_amount: amountUsd,
           status: 'active',
           xrpl_escrow_id: xrplTxHash,
           description: `Payroll: ${payrollName}`,
