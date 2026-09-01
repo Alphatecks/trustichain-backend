@@ -6,7 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../../config/supabase';
 import { CreateEscrowRequest, CreateEscrowResponse, Escrow, EscrowCounterpartyParty, EscrowPayerParty, GetEscrowListRequest, Milestone, ReleaseType } from '../../types/api/escrow.types';
-import type { UserFacingAmount } from '../../utils/userFacingAmount';
+import { toUserFacingAmount, type UserFacingAmount } from '../../utils/userFacingAmount';
 import type { TransactionType } from '../../types/api/transaction.types';
 import { xrplEscrowService } from '../../xrpl/escrow/xrpl-escrow.service';
 import { xrplWalletService } from '../../xrpl/wallet/xrpl-wallet.service';
@@ -19,7 +19,7 @@ import { emailService } from '../email.service';
 import { storageService } from '../storage/storage.service';
 import { getEscrowCreationFeeSettings, calculateEscrowCreationFeeBreakdown } from './escrowCreationFee.service';
 import { generateSupplierDisplayId } from '../businessSuite/supplierDisplayId.util';
-import { toUserFacingAmount } from '../../utils/userFacingAmount';
+import { utcMonthRange } from '../../utils/escrowMonth';
 import {
   ESCROW_DENOMINATION_CURRENCIES,
   type EscrowDenominationCurrency,
@@ -2205,6 +2205,8 @@ export class EscrowService {
     data?: {
       escrows: Escrow[];
       total: number;
+      month?: number;
+      year?: number;
     };
     error?: string;
   }> {
@@ -2247,12 +2249,14 @@ export class EscrowService {
         query = query.ilike('industry', `%${filters.industry}%`);
       }
 
-      // Apply date filter (month/year)
-      if (filters.month && filters.year) {
-        const monthStart = new Date(filters.year, filters.month - 1, 1);
-        const monthEnd = new Date(filters.year, filters.month, 0, 23, 59, 59, 999);
-        query = query.gte('created_at', monthStart.toISOString())
-                     .lte('created_at', monthEnd.toISOString());
+      // Apply date filter (created_at month). Year defaults to current UTC year when omitted.
+      let appliedMonth: number | undefined;
+      let appliedYear: number | undefined;
+      if (filters.month) {
+        appliedMonth = filters.month;
+        appliedYear = filters.year || new Date().getUTCFullYear();
+        const { startIso, endIso } = utcMonthRange(appliedYear, appliedMonth);
+        query = query.gte('created_at', startIso).lte('created_at', endIso);
       }
 
       // Order and paginate
@@ -2288,6 +2292,7 @@ export class EscrowService {
 
         const initiatorProfile = partyProfiles[escrow.user_id];
         const counterpartyProfile = escrow.counterparty_id ? partyProfiles[escrow.counterparty_id] : undefined;
+        const role: 'sent' | 'received' = escrow.user_id === userId ? 'sent' : 'received';
 
         return {
           id: escrow.id,
@@ -2298,6 +2303,7 @@ export class EscrowService {
           initiatorAvatarUrl: initiatorProfile?.avatarUrl ?? null,
           counterpartyName: counterpartyProfile?.name,
           counterpartyAvatarUrl: counterpartyProfile?.avatarUrl ?? null,
+          role,
           amount: toUserFacingAmount(parseFloat(escrow.amount_usd), parseFloat(escrow.amount_xrp)),
           ...this.formatEscrowDenomination(escrow),
           status: escrow.status,
@@ -2332,6 +2338,9 @@ export class EscrowService {
         data: {
           escrows: formattedEscrows,
           total: count || 0,
+          ...(appliedMonth != null && appliedYear != null
+            ? { month: appliedMonth, year: appliedYear }
+            : {}),
         },
       };
     } catch (error) {

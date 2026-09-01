@@ -73,12 +73,22 @@ router.get('/completed/month', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   GET /api/escrow/list
- * @desc    Get escrow list with filters
+ * @desc    Get escrow list with filters. Includes escrows you created and escrows escrowed to you.
  * @access  Private
- * @query   transactionType, industry, month, year, limit, offset
+ * @query   transactionType, industry, status, month (1-12 or September), year, limit, offset
  */
 router.get('/list', authenticate, asyncHandler(async (req, res) => {
   await escrowController.getEscrowList(req, res);
+}));
+
+/**
+ * @route   GET /api/escrow/by-month
+ * @desc    All account escrows for a calendar month (sent and received)
+ * @access  Private
+ * @query   month (required, 1-12 or September), year (optional, defaults to current UTC year), transactionType?, industry?, status?, limit?, offset?
+ */
+router.get('/by-month', authenticate, asyncHandler(async (req, res) => {
+  await escrowController.getEscrowsByMonth(req, res);
 }));
 
 /**

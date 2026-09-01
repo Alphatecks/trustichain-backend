@@ -17,8 +17,33 @@ import {
 import type { TransactionType } from '../types/api/transaction.types';
 import { escrowService } from '../services/escrow/escrow.service';
 import { supabase, supabaseAdmin } from '../config/supabase';
+import { parseEscrowMonth, parseEscrowYear } from '../utils/escrowMonth';
 
 export class EscrowController {
+  private parseListMonthYear(
+    query: Request['query'],
+    required: boolean
+  ): { ok: true; month?: number; year?: number } | { ok: false; message: string } {
+    const monthRaw = query.month;
+    if (monthRaw == null || String(monthRaw).trim() === '') {
+      if (required) {
+        return { ok: false, message: 'month query param is required (1-12 or a name such as September)' };
+      }
+      return { ok: true };
+    }
+
+    const month = parseEscrowMonth(monthRaw);
+    if (month == null) {
+      return { ok: false, message: 'Invalid month. Use 1-12 or a month name such as September.' };
+    }
+
+    const year = parseEscrowYear(query.year, new Date().getUTCFullYear());
+    if (year == null) {
+      return { ok: false, message: 'Invalid year. Use a 4-digit year such as 2026.' };
+    }
+
+    return { ok: true, month, year };
+  }
   /**
    * Get list of active escrows (pending or active status)
    * GET /api/escrow/active/list?limit=50&offset=0
@@ -207,19 +232,72 @@ export class EscrowController {
 
   /**
    * Get escrow list with filters
-   * GET /api/escrow/list?transactionType=freelance&industry=Technology&month=11&year=2024&limit=50&offset=0
+   * GET /api/escrow/list?transactionType=freelance&industry=Technology&month=9&year=2026&limit=50&offset=0
+   * Includes escrows you created and escrows created with you as counterparty.
    */
   async getEscrowList(req: Request, res: Response<EscrowListResponse>): Promise<void> {
     try {
       const userId = req.userId!;
-      
-      // Parse query parameters
+      const monthYear = this.parseListMonthYear(req.query, false);
+      if (!monthYear.ok) {
+        res.status(400).json({
+          success: false,
+          message: monthYear.message,
+          error: 'Validation failed',
+        });
+        return;
+      }
+
       const filters: GetEscrowListRequest = {
         transactionType: req.query.transactionType as TransactionType | 'all' | undefined,
         industry: req.query.industry as string | undefined,
         status: req.query.status as GetEscrowListRequest['status'] | undefined,
-        month: req.query.month ? parseInt(req.query.month as string) : undefined,
-        year: req.query.year ? parseInt(req.query.year as string) : undefined,
+        month: monthYear.month,
+        year: monthYear.year,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+        offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
+      };
+
+      const result = await escrowService.getEscrowListWithFilters(userId, filters);
+
+      if (result.success) {
+        res.status(200).json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * Get all account escrows for a calendar month (sent and received).
+   * GET /api/escrow/by-month?month=9&year=2026
+   */
+  async getEscrowsByMonth(req: Request, res: Response<EscrowListResponse>): Promise<void> {
+    try {
+      const userId = req.userId!;
+      const monthYear = this.parseListMonthYear(req.query, true);
+      if (!monthYear.ok) {
+        res.status(400).json({
+          success: false,
+          message: monthYear.message,
+          error: 'Validation failed',
+        });
+        return;
+      }
+
+      const filters: GetEscrowListRequest = {
+        transactionType: req.query.transactionType as TransactionType | 'all' | undefined,
+        industry: req.query.industry as string | undefined,
+        status: req.query.status as GetEscrowListRequest['status'] | undefined,
+        month: monthYear.month,
+        year: monthYear.year,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
         offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
       };

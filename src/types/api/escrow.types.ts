@@ -139,6 +139,8 @@ export interface Escrow {
   initiatorAvatarUrl?: string | null;
   counterpartyName?: string;
   counterpartyAvatarUrl?: string | null;
+  /** Present on list endpoints: you created this escrow (`sent`) or it was escrowed to you (`received`). */
+  role?: 'sent' | 'received';
   amount: UserFacingAmount;
   /** Currency entered at escrow creation (not the USD/RLUSD settlement equivalent). */
   currency: EscrowDenominationCurrency;
@@ -190,6 +192,10 @@ export interface EscrowListResponse {
   data?: {
     escrows: Escrow[];
     total: number;
+    /** Applied created-at month filter (1-12), when requested. */
+    month?: number;
+    /** Applied created-at year filter, when requested. */
+    year?: number;
   };
   error?: string;
 }
