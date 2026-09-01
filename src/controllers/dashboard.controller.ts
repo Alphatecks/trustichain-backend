@@ -39,10 +39,12 @@ export class DashboardController {
       }
 
       const balance = balanceResult.data!.balance;
-      const lockedAmount = activeEscrowsResult.data!.lockedAmount;
+      // Wallet-scoped lock: initiator escrows on this (personal) wallet only.
+      // Do not use getActiveEscrows here — that mixes business-suite and counterparty deals.
+      const lockedAmount = Math.max(0, Number(balance.lockedUsd) || 0);
       const grossUsd =
         balance.grossUsd ??
-        parseFloat((balance.usd + (balance.lockedUsd ?? 0)).toFixed(2));
+        parseFloat((balance.usd + lockedAmount).toFixed(2));
       const netUsd = Math.max(0, parseFloat((grossUsd - lockedAmount).toFixed(2)));
 
       res.status(200).json({
@@ -60,7 +62,7 @@ export class DashboardController {
           addresses: balanceResult.data!.addresses,
           activeEscrows: {
             count: activeEscrowsResult.data!.count,
-            lockedAmount: activeEscrowsResult.data!.lockedAmount,
+            lockedAmount,
           },
           trustiscore: {
             score: trustiscoreResult.data!.score,
