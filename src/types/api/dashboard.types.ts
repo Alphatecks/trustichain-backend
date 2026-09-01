@@ -13,10 +13,14 @@ export interface DashboardSummaryResponse {
           usdt: number;
           usdc: number;
           xrp: number;
+          /** All wallet money (RLUSD + USDT + USDC + XRP in USD). */
           grossUsd: number;
+          /** Same as grossUsd — total of all money in the wallet. */
           totalUsd: number;
           lockedUsd: number;
+          /** Spendable USD after escrow locks. */
           availableUsd: number;
+          /** Same as totalUsd — total of all money in the wallet. */
           usd: number;
         };
         addresses?: {

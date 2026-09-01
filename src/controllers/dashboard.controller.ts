@@ -42,7 +42,7 @@ export class DashboardController {
       const lockedAmount = activeEscrowsResult.data!.lockedAmount;
       const grossUsd =
         balance.grossUsd ??
-        parseFloat((balance.usd + balance.lockedUsd).toFixed(2));
+        parseFloat((balance.usd + (balance.lockedUsd ?? 0)).toFixed(2));
       const netUsd = Math.max(0, parseFloat((grossUsd - lockedAmount).toFixed(2)));
 
       res.status(200).json({
@@ -53,9 +53,9 @@ export class DashboardController {
             ...balance,
             grossUsd,
             lockedUsd: lockedAmount,
-            totalUsd: netUsd,
+            totalUsd: grossUsd,
             availableUsd: netUsd,
-            usd: netUsd,
+            usd: grossUsd,
           },
           addresses: balanceResult.data!.addresses,
           activeEscrows: {

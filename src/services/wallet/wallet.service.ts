@@ -101,9 +101,9 @@ export class WalletService {
       xrp: Number(xrp) || 0,
       grossUsd,
       lockedUsd: parseFloat(locked.toFixed(2)),
-      totalUsd: netUsd,
+      totalUsd: grossUsd,
       availableUsd: netUsd,
-      usd: netUsd,
+      usd: grossUsd,
     };
   }
 
@@ -140,14 +140,15 @@ export class WalletService {
         usdt: number;
         usdc: number;
         xrp: number;
-        /** Wallet portfolio before escrow locks. */
+        /** All wallet money (RLUSD + USDT + USDC + XRP in USD). */
         grossUsd: number;
         /** Escrow USD reserved in pending/active escrows. */
         lockedUsd: number;
-        /** Spendable USD (grossUsd minus lockedUsd). */
+        /** Same as grossUsd — total of all money in the wallet. */
         totalUsd: number;
+        /** Spendable USD (grossUsd minus lockedUsd). */
         availableUsd: number;
-        /** Same as totalUsd — net spendable balance. */
+        /** Same as totalUsd — total of all money in the wallet. */
         usd: number;
       };
       addresses: {
