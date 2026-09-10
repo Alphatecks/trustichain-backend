@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
-import { getFrontendOrigin } from '../utils/frontendUrl';
+import { getFrontendOrigin, getPublicBackendUrl } from '../utils/frontendUrl';
 import {
   RegisterRequest,
   RegisterResponse,
@@ -696,7 +696,7 @@ export class AuthController {
         console.error('=== Missing Authorization Code ===');
         console.error('Query params received:', JSON.stringify(req.query, null, 2));
         console.error('All query keys:', Object.keys(req.query));
-        const baseUrl = process.env.RENDER_URL || process.env.BACKEND_URL || 'https://trustichain-backend.onrender.com';
+        const baseUrl = getPublicBackendUrl(req);
         const callbackUrl = `${baseUrl}/api/auth/google/callback`;
         const oauthCallbackUrl = baseUrl.replace(/\/$/, '') + '/auth/oauth-callback';
         const configMessage = `

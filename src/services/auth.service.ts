@@ -16,6 +16,7 @@ import {
   OAuthMfaPrepRequest,
 } from '../types/api/auth.types';
 import { emailService } from './email.service';
+import { getPublicBackendUrl } from '../utils/frontendUrl';
 import { trustitagService } from './trustitag.service';
 import * as crypto from 'crypto';
 import { createMfaLoginToken, parseMfaLoginToken, mfaService, type MfaVerifyLoginResult } from './mfa.service';
@@ -1205,7 +1206,7 @@ export class AuthService {
   async getGoogleOAuthUrl(): Promise<GoogleOAuthResponse> {
     try {
       // Backend base URL (where this API runs). Supabase must redirect here so our /auth/oauth-callback page can read the hash.
-      const baseUrl = (process.env.RENDER_URL || process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+      const baseUrl = getPublicBackendUrl();
       const redirectUrl = `${baseUrl}/auth/oauth-callback`;
 
       console.log('=== Generating Google OAuth URL ===');

@@ -3,7 +3,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { getFrontendOrigin } from './utils/frontendUrl';
+import { getFrontendOrigin, getPublicBackendUrl } from './utils/frontendUrl';
 
 
 import cors from 'cors';
@@ -92,7 +92,7 @@ app.get('/health', (_req: Request, res: Response) => {
  */
 function sendOAuthHashForwarder(req: Request, res: Response, options?: { fallbackToApiRoot?: boolean }): void {
   const escapeJs = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const backendUrl = (process.env.RENDER_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const backendUrl = getPublicBackendUrl(req);
   const callbackUrl = escapeJs(`${backendUrl}/api/auth/google/callback`);
   const frontendUrl = getFrontendOrigin('');
   const spaOrigin = frontendUrl && frontendUrl !== backendUrl ? escapeJs(frontendUrl) : '';
