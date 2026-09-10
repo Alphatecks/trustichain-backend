@@ -3,6 +3,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import { getFrontendOrigin } from './utils/frontendUrl';
 
 
 import cors from 'cors';
@@ -82,12 +83,20 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-// Legacy server-mediated OAuth only. Prefer SPA signInWithOAuth (redirect to frontend) + POST /api/auth/ensure-profile.
-// OAuth intermediary: Supabase redirects here with hash (#access_token=...). Server cannot read hash, so this page
-// runs in the browser, reads the hash, and redirects to the backend callback with params in the query string.
-app.get('/auth/oauth-callback', (req: Request, res: Response) => {
-  const backendUrl = process.env.RENDER_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
-  const callbackUrl = `${backendUrl.replace(/\/$/, '')}/api/auth/google/callback`.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+/**
+ * Supabase/Google often land on the API origin with tokens in the URL hash (#access_token=...),
+ * which the server never sees. This page runs in the browser, reads hash or query, and forwards
+ * them to GET /api/auth/google/callback as query params.
+ *
+ * Common landing paths: Site URL `/`, SPA path `/auth/callback`, and `/auth/oauth-callback`.
+ */
+function sendOAuthHashForwarder(req: Request, res: Response, options?: { fallbackToApiRoot?: boolean }): void {
+  const escapeJs = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const backendUrl = (process.env.RENDER_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const callbackUrl = escapeJs(`${backendUrl}/api/auth/google/callback`);
+  const frontendUrl = getFrontendOrigin('');
+  const spaOrigin = frontendUrl && frontendUrl !== backendUrl ? escapeJs(frontendUrl) : '';
+  const fallbackToApiRoot = options?.fallbackToApiRoot === true;
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -100,9 +109,22 @@ app.get('/auth/oauth-callback', (req: Request, res: Response) => {
   <script>
     (function() {
       var hash = window.location.hash;
+      var search = window.location.search || '';
       var url = "${callbackUrl}";
-      if (hash && hash.length > 1) {
+      var spa = "${spaOrigin}";
+      var hasHash = hash && hash.length > 1;
+      var hasQuery = search && search.length > 1;
+      var isSpaReturn = search.indexOf('success=true') !== -1 && search.indexOf('code=') === -1;
+      if (spa && isSpaReturn) {
+        window.location.replace(spa + '/auth/callback' + search + (hash || ''));
+        return;
+      }
+      if (hasHash) {
         window.location.replace(url + "?" + hash.slice(1));
+      } else if (hasQuery) {
+        window.location.replace(url + search);
+      } else if (${fallbackToApiRoot ? 'true' : 'false'}) {
+        document.body.textContent = 'TrustiChain API is running.';
       } else {
         window.location.replace(url);
       }
@@ -112,6 +134,34 @@ app.get('/auth/oauth-callback', (req: Request, res: Response) => {
 </html>`;
   res.setHeader('Content-Type', 'text/html');
   res.send(html);
+}
+
+// Legacy server-mediated OAuth only. Prefer SPA signInWithOAuth (redirect to frontend) + POST /api/auth/ensure-profile.
+app.get('/auth/oauth-callback', (req: Request, res: Response) => {
+  sendOAuthHashForwarder(req, res);
+});
+
+// SPA and Supabase Site URL often use this path on the API host by mistake.
+app.get(['/auth/callback', '/auth/google/callback'], (req: Request, res: Response) => {
+  sendOAuthHashForwarder(req, res);
+});
+
+app.get('/auth/*', (req: Request, res: Response) => {
+  sendOAuthHashForwarder(req, res);
+});
+
+app.get('/', (req: Request, res: Response) => {
+  const acceptsHtml = req.headers.accept?.includes('text/html');
+  const hasOAuthQuery = Boolean(req.query.code || req.query.access_token || req.query.error);
+  if (acceptsHtml || hasOAuthQuery) {
+    sendOAuthHashForwarder(req, res, { fallbackToApiRoot: true });
+    return;
+  }
+  res.status(200).json({
+    success: true,
+    message: 'TrustiChain Backend API is running',
+    health: '/health',
+  });
 });
 
 // Debug endpoint to test log writing (for debugging on Render)
@@ -281,10 +331,12 @@ app.post('/webhooks/trustichain', (req: Request, res: Response) => {
 });
 
 // 404 handler
-app.use((_req: Request, res: Response) => {
+app.use((req: Request, res: Response) => {
   res.status(404).json({
     success: false,
     message: 'Route not found',
+    path: req.originalUrl,
+    method: req.method,
   });
 });
 

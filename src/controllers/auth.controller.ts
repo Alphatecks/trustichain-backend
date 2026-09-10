@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
+import { getFrontendOrigin } from '../utils/frontendUrl';
 import {
   RegisterRequest,
   RegisterResponse,
@@ -728,7 +729,7 @@ export class AuthController {
       }
 
       if (result.success && result.data) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const frontendUrl = getFrontendOrigin();
         if (result.data.requiresMfa && result.data.mfaToken && result.data.user) {
           res.redirect(
             302,

@@ -132,7 +132,7 @@ router.get('/google', async (req, res) => {
  * @access  Public
  * @query   code - OAuth authorization code from Google
  */
-router.get('/google/callback', async (req, res) => {
+router.get(['/google/callback', '/callback'], async (req, res) => {
   try {
     await authController.handleGoogleOAuthCallback(req, res);
   } catch (error) {
