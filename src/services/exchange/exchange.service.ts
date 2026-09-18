@@ -1,8 +1,8 @@
 /**
  * Exchange Rate Service
  *
- * Public API (GET /api/exchange/rates): fiat FX for display conversion from RLUSD/USD.
- * Internal: XRP/USD spot for legacy XRPL settlement (not exposed to users).
+ * Public API (GET /api/exchange/rates): fiat FX (units per 1 USD/RLUSD) plus live XRP/USD
+ * for coin-to-fiat display. Fiat is mid-market indicative, not a payment-processor quote.
  */
 
 import {
@@ -25,9 +25,11 @@ export interface FiatDisplayRate {
 export interface DisplayExchangeRatesData {
   rates: FiatDisplayRate[];
   lastUpdated: string;
-  /** Each rate is units of `currency` per 1 USD (≈ 1 RLUSD). */
+  /** Each fiat rate is units of `currency` per 1 USD (≈ 1 RLUSD). */
   quoteDirection: ExchangeQuoteDirection;
   quoteBase: 'USD';
+  /** Live XRP spot in USD. Fiat value of XRP = xrpAmount * xrpUsdRate * (units per USD). */
+  xrpUsdRate: number | null;
 }
 
 export type EscrowSettlementCurrency = 'XRP';
@@ -45,6 +47,29 @@ export type EscrowSettlementResult =
   | { success: true; data: EscrowSettlementAmounts }
   | { success: false; message: string; error: string };
 
+const FETCH_TIMEOUT_MS = 8_000;
+
+async function fetchJson<T>(url: string, headers?: Record<string, string>): Promise<T | null> {
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...headers },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as T;
+  } catch (error) {
+    console.warn('[Exchange] fetch failed:', { url, error });
+    return null;
+  }
+}
+
+function parsePositiveRate(value: unknown): number | null {
+  const rate = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : NaN;
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  return rate;
+}
+
 export class ExchangeService {
   private fiatCache: Map<string, CachedRate> = new Map();
   private xrpUsdCache: CachedRate | null = null;
@@ -52,8 +77,7 @@ export class ExchangeService {
   private readonly MAX_STALE_AGE = 2 * 60 * 1000;
 
   /**
-   * Fiat FX rates for frontend display conversion (RLUSD ≈ USD base).
-   * Does not include XRP pricing.
+   * Fiat FX rates for frontend display conversion (RLUSD ≈ USD base), plus live XRP/USD.
    */
   async getLiveExchangeRates(): Promise<{
     success: boolean;
@@ -63,7 +87,10 @@ export class ExchangeService {
   }> {
     try {
       const now = Date.now();
-      const rates: FiatDisplayRate[] = [{ currency: 'RLUSD', rate: 1.0 }];
+      const rates: FiatDisplayRate[] = [
+        { currency: 'RLUSD', rate: 1.0 },
+        { currency: 'USD', rate: 1.0 },
+      ];
 
       const fiatRates = await this.fetchAllFiatRatesFromUsd();
       if (!fiatRates) {
@@ -95,6 +122,8 @@ export class ExchangeService {
         }
       }
 
+      const xrpUsdRate = await this.getXrpUsdRate();
+
       return {
         success: true,
         message: 'Exchange rates retrieved successfully',
@@ -103,6 +132,7 @@ export class ExchangeService {
           lastUpdated: new Date().toISOString(),
           quoteDirection: EXCHANGE_QUOTE_DIRECTION,
           quoteBase: 'USD',
+          xrpUsdRate,
         },
       };
     } catch (error) {
@@ -192,7 +222,7 @@ export class ExchangeService {
   }
 
   /**
-   * XRP/USD spot for internal XRPL settlement only — not for user portfolio value.
+   * Live XRP/USD spot (Coinbase → CoinGecko → Binance, then short-lived cache / env fallback).
    */
   async getXrpUsdRate(): Promise<number | null> {
     const now = Date.now();
@@ -200,7 +230,7 @@ export class ExchangeService {
       return this.xrpUsdCache.rate;
     }
 
-    const rate = await this.fetchFromCoinbase();
+    const rate = await this.fetchXrpUsdSpot();
     if (rate != null && rate > 0) {
       const previousRate = this.xrpUsdCache?.rate ?? rate;
       this.xrpUsdCache = { rate, previousRate, timestamp: now };
@@ -224,39 +254,77 @@ export class ExchangeService {
   }
 
   private async fetchAllFiatRatesFromUsd(): Promise<Record<string, number> | null> {
-    try {
-      const url = 'https://api.exchangerate-api.com/v4/latest/USD';
-      const response = await fetch(url);
-      if (!response.ok) return null;
-      const data = (await response.json()) as { rates?: Record<string, number> };
-      return data.rates ?? null;
-    } catch (error) {
-      console.warn('[Exchange] fetchAllFiatRatesFromUsd failed:', error);
-      return null;
+    const apiKey = process.env.EXCHANGE_RATE_API_KEY?.trim();
+    if (apiKey) {
+      const authenticated = await fetchJson<{
+        result?: string;
+        conversion_rates?: Record<string, number>;
+      }>(`https://v6.exchangerate-api.com/v6/${apiKey}/latest/USD`);
+      if (authenticated?.result === 'success' && authenticated.conversion_rates) {
+        return authenticated.conversion_rates;
+      }
     }
+
+    const openAccess = await fetchJson<{
+      result?: string;
+      rates?: Record<string, number>;
+    }>('https://open.er-api.com/v6/latest/USD');
+    if (openAccess?.result === 'success' && openAccess.rates) {
+      return openAccess.rates;
+    }
+
+    const legacyV4 = await fetchJson<{ rates?: Record<string, number> }>(
+      'https://api.exchangerate-api.com/v4/latest/USD'
+    );
+    if (legacyV4?.rates) {
+      return legacyV4.rates;
+    }
+
+    const community = await fetchJson<{ usd?: Record<string, number> }>(
+      'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json'
+    );
+    if (community?.usd) {
+      const rates: Record<string, number> = {};
+      for (const [code, value] of Object.entries(community.usd)) {
+        if (typeof value === 'number' && value > 0) {
+          rates[code.toUpperCase()] = value;
+        }
+      }
+      return Object.keys(rates).length > 0 ? rates : null;
+    }
+
+    return null;
   }
 
-  /**
-   * Coinbase public API: XRP-USD spot (internal settlement only).
-   */
-  private async fetchFromCoinbase(): Promise<number | null> {
-    try {
-      const url = 'https://api.coinbase.com/v2/prices/XRP-USD/spot';
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (!response.ok) return null;
+  private async fetchXrpUsdSpot(): Promise<number | null> {
+    const coinbase = await this.fetchFromCoinbase();
+    if (coinbase != null) return coinbase;
 
-      const data = (await response.json()) as { data?: { amount?: string } };
-      const amountStr = data.data?.amount;
-      const rate = amountStr != null ? parseFloat(amountStr) : NaN;
-      if (Number.isNaN(rate) || rate <= 0) return null;
-      return rate;
-    } catch (error) {
-      console.warn('[Exchange] fetchFromCoinbase failed:', error);
-      return null;
-    }
+    const coinGecko = await this.fetchFromCoinGecko();
+    if (coinGecko != null) return coinGecko;
+
+    return this.fetchFromBinance();
+  }
+
+  private async fetchFromCoinbase(): Promise<number | null> {
+    const data = await fetchJson<{ data?: { amount?: string } }>(
+      'https://api.coinbase.com/v2/prices/XRP-USD/spot'
+    );
+    return parsePositiveRate(data?.data?.amount);
+  }
+
+  private async fetchFromCoinGecko(): Promise<number | null> {
+    const data = await fetchJson<{ ripple?: { usd?: number } }>(
+      'https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=usd'
+    );
+    return parsePositiveRate(data?.ripple?.usd);
+  }
+
+  private async fetchFromBinance(): Promise<number | null> {
+    const data = await fetchJson<{ price?: string }>(
+      'https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT'
+    );
+    return parsePositiveRate(data?.price);
   }
 
   clearCache(): void {

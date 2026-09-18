@@ -1407,8 +1407,14 @@ export class WalletService {
 
         const { toAmount: dexToAmount, rate: dexRate, estimatedFee } = dexQuote.data;
 
-        // Get USD value for fee calculation
-        const xrpUsdRate = (await exchangeService.getXrpUsdRate()) ?? 0.5;
+        const xrpUsdRate = await exchangeService.getXrpUsdRate();
+        if (xrpUsdRate == null || xrpUsdRate <= 0) {
+          return {
+            success: false,
+            message: 'XRP/USD exchange rate not available',
+            error: 'Exchange rate not available',
+          };
+        }
         
         let usdValue = 0;
         if (fromCurrency === 'XRP') {
@@ -1764,8 +1770,14 @@ export class WalletService {
     const slippageMultiplier = (100 - slippageTolerance) / 100;
     const adjustedMinAmount = minAmount * slippageMultiplier;
 
-    // Calculate USD value
-    const xrpUsdRate = (await exchangeService.getXrpUsdRate()) ?? 0.5;
+    const xrpUsdRate = await exchangeService.getXrpUsdRate();
+    if (xrpUsdRate == null || xrpUsdRate <= 0) {
+      return {
+        success: false,
+        message: 'XRP/USD exchange rate not available',
+        error: 'Exchange rate not available',
+      };
+    }
     let usdValue = 0;
     if (fromCurrency === 'XRP') {
       usdValue = amount * xrpUsdRate;

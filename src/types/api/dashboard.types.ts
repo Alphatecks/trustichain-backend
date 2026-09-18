@@ -123,6 +123,8 @@ export interface ExchangeRateResponse {
     /** Each rate is units of `currency` per 1 USD (≈ 1 RLUSD). */
     quoteDirection: 'unitsPerUsd';
     quoteBase: 'USD';
+    /** Live XRP spot in USD. Fiat of 1 XRP = xrpUsdRate × that currency's rate. */
+    xrpUsdRate?: number | null;
   };
   error?: string;
 }

@@ -6,7 +6,7 @@ const router = Router();
 
 /**
  * @route   GET /api/exchange/rates
- * @desc    Fiat FX rates for display conversion from RLUSD/USD (quoteDirection: unitsPerUsd)
+ * @desc    Fiat FX (units per 1 USD/RLUSD) plus xrpUsdRate for coin-to-fiat display
  * @access  Public
  */
 router.get('/rates', asyncHandler(async (req, res) => {
