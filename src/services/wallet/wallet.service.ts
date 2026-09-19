@@ -37,6 +37,11 @@ export type WalletSuiteContext = 'personal' | 'business';
 type WalletDepositCurrency = 'XRP' | 'RLUSD';
 
 export class WalletService {
+  private static readonly XRPL_SYNC_TTL_MS = 20_000;
+  private static readonly XRPL_SYNC_WAIT_MS = 2_500;
+  private readonly xrplSyncInFlight = new Map<string, Promise<void>>();
+  private readonly xrplSyncCompletedAt = new Map<string, number>();
+
   private buildXrplDepositAddresses(wallet: {
     xrpl_address: string | null;
     rlusd_xrpl_address?: string | null;
@@ -183,11 +188,22 @@ export class WalletService {
         .maybeSingle();
 
       const loadStablecoinAddresses = async (walletId: string) => {
-        await multichainWalletService.provisionDepositAddresses(userId, walletId, suiteContext);
+        const existing = await multichainWalletService.getStablecoinDepositAddresses(userId, suiteContext);
+        const hasAll =
+          !!existing.USDT.ERC20 &&
+          !!existing.USDT.TRC20 &&
+          !!existing.USDT.BEP20 &&
+          !!existing.USDC.BEP20 &&
+          !!existing.USDC.SOLANA;
+        if (!hasAll) {
+          await multichainWalletService.provisionDepositAddresses(userId, walletId, suiteContext);
+        }
         multichainDepositMonitorService.syncDepositsForUser(userId, suiteContext).catch((err) => {
           console.warn('[Wallet] multichain deposit sync failed:', err);
         });
-        return multichainWalletService.getStablecoinDepositAddresses(userId, suiteContext);
+        return hasAll
+          ? existing
+          : multichainWalletService.getStablecoinDepositAddresses(userId, suiteContext);
       };
 
       if (error) {
@@ -207,12 +223,10 @@ export class WalletService {
         };
       }
 
-      const lockedUsd = await this.getLockedEscrowUsdForBalance(userId, suiteContext);
-
       let resolvedRlusdAddress = wallet.rlusd_xrpl_address ?? null;
       if (!resolvedRlusdAddress) {
         try {
-          const { address: rlusdAddress, secret: rlusdSecret } = await xrplWalletService.generateWallet();
+          const { address: rlusdAddress, secret: rlusdSecret } = xrplWalletService.generateUnfundedWallet();
           const encryptedRlusdSecret = encryptionService.encrypt(rlusdSecret);
           const { error: rlusdUpdateError } = await adminClient
             .from('wallets')
@@ -230,67 +244,43 @@ export class WalletService {
         }
       }
 
-      // CRITICAL FIX: Sync balance from XRPL before returning
-      // This ensures external deposits are reflected immediately
-      if (wallet.xrpl_address) {
-        try {
-          await this.syncBalancesFromXRPL(
+      const lockedUsdPromise = this.getLockedEscrowUsdForBalance(userId, suiteContext);
+      const addressesPromise = loadStablecoinAddresses(wallet.id);
+      const xrplSyncPromise = wallet.xrpl_address
+        ? this.syncBalancesFromXRPLIfNeeded(
             userId,
             wallet.id,
             wallet.xrpl_address,
             resolvedRlusdAddress ?? undefined
-          );
-          // Also sync incoming payments to track external deposits in transaction history
-          this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch((err) => {
-            console.warn('Failed to sync incoming payments:', err);
-          });
-          
-          // Fetch updated balance after sync
-          const { data: updatedWallet } = await adminClient
+          )
+        : Promise.resolve();
+      const usdRatePromise = exchangeService.getXrpUsdRate();
+
+      if (wallet.xrpl_address) {
+        this.syncIncomingPaymentsFromXRPL(userId, wallet.xrpl_address).catch((err) => {
+          console.warn('Failed to sync incoming payments:', err);
+        });
+      }
+
+      const [lockedUsd, stablecoin_addresses] = await Promise.all([
+        lockedUsdPromise,
+        addressesPromise,
+        xrplSyncPromise,
+        usdRatePromise,
+      ]).then(([locked, addresses]) => [locked, addresses] as const);
+
+      const { data: latestWallet } = wallet.xrpl_address
+        ? await adminClient
             .from('wallets')
             .select('balance_xrp, balance_usdt, balance_usdc, balance_rlusd')
             .eq('id', wallet.id)
-            .single();
-          
-          if (updatedWallet) {
-            const xrp = updatedWallet.balance_xrp ?? 0;
-            const usdt = updatedWallet.balance_usdt ?? 0;
-            const usdc = updatedWallet.balance_usdc ?? 0;
-            const rlusd = updatedWallet.balance_rlusd ?? 0;
-            const stablecoin_addresses = await loadStablecoinAddresses(wallet.id);
-            const rlusdAddress = resolvedRlusdAddress ?? '';
-            return {
-              success: true,
-              message: 'Balance retrieved successfully',
-              data: {
-                balance: await this.buildUserFacingBalance(xrp, usdt, usdc, rlusd, lockedUsd),
-                addresses: {
-                  rlusd: rlusdAddress,
-                  xrp: wallet.xrpl_address ?? '',
-                },
-              },
-              xrpl_address: wallet.xrpl_address,
-              rlusd_xrpl_address: resolvedRlusdAddress,
-              deposit_addresses: this.buildXrplDepositAddresses({
-                xrpl_address: wallet.xrpl_address,
-                rlusd_xrpl_address: resolvedRlusdAddress,
-              }),
-              stablecoin_addresses,
-              multichain_network: multichainWalletService.getNetworkInfo(),
-            };
-          }
-        } catch (syncError) {
-          // If sync fails, log but still return database balance
-          console.warn('Failed to sync balance from XRPL, returning database balance:', syncError);
-        }
-      }
+            .single()
+        : { data: wallet };
 
-      // Fallback: return database balance if sync fails or no xrpl_address
-      const xrp = wallet.balance_xrp ?? 0;
-      const usdt = wallet.balance_usdt ?? 0;
-      const usdc = wallet.balance_usdc ?? 0;
-      const rlusd = wallet.balance_rlusd ?? 0;
-      const stablecoin_addresses = await loadStablecoinAddresses(wallet.id);
+      const xrp = latestWallet?.balance_xrp ?? wallet.balance_xrp ?? 0;
+      const usdt = latestWallet?.balance_usdt ?? wallet.balance_usdt ?? 0;
+      const usdc = latestWallet?.balance_usdc ?? wallet.balance_usdc ?? 0;
+      const rlusd = latestWallet?.balance_rlusd ?? wallet.balance_rlusd ?? 0;
       const rlusdAddress = resolvedRlusdAddress ?? '';
       return {
         success: true,
@@ -319,6 +309,38 @@ export class WalletService {
         error: error instanceof Error ? error.message : 'Failed to get wallet balance',
       };
     }
+  }
+
+  private async syncBalancesFromXRPLIfNeeded(
+    userId: string,
+    walletId: string,
+    xrplAddress: string,
+    rlusdXrplAddress?: string
+  ): Promise<void> {
+    const lastSynced = this.xrplSyncCompletedAt.get(walletId) ?? 0;
+    if (Date.now() - lastSynced < WalletService.XRPL_SYNC_TTL_MS) {
+      return;
+    }
+
+    let inflight = this.xrplSyncInFlight.get(walletId);
+    if (!inflight) {
+      inflight = this.syncBalancesFromXRPL(userId, walletId, xrplAddress, rlusdXrplAddress)
+        .then(() => {
+          this.xrplSyncCompletedAt.set(walletId, Date.now());
+        })
+        .catch((syncError) => {
+          console.warn('Failed to sync balance from XRPL, returning database balance:', syncError);
+        })
+        .finally(() => {
+          this.xrplSyncInFlight.delete(walletId);
+        });
+      this.xrplSyncInFlight.set(walletId, inflight);
+    }
+
+    await Promise.race([
+      inflight,
+      new Promise<void>((resolve) => setTimeout(resolve, WalletService.XRPL_SYNC_WAIT_MS)),
+    ]);
   }
 
   /**

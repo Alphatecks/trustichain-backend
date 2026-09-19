@@ -73,6 +73,7 @@ function parsePositiveRate(value: unknown): number | null {
 export class ExchangeService {
   private fiatCache: Map<string, CachedRate> = new Map();
   private xrpUsdCache: CachedRate | null = null;
+  private xrpUsdInflight: Promise<number | null> | null = null;
   private readonly CACHE_TTL = 60 * 1000;
   private readonly MAX_STALE_AGE = 2 * 60 * 1000;
 
@@ -229,7 +230,17 @@ export class ExchangeService {
     if (this.xrpUsdCache && now - this.xrpUsdCache.timestamp < this.CACHE_TTL) {
       return this.xrpUsdCache.rate;
     }
+    if (this.xrpUsdInflight) {
+      return this.xrpUsdInflight;
+    }
 
+    this.xrpUsdInflight = this.resolveXrpUsdRate(now).finally(() => {
+      this.xrpUsdInflight = null;
+    });
+    return this.xrpUsdInflight;
+  }
+
+  private async resolveXrpUsdRate(now: number): Promise<number | null> {
     const rate = await this.fetchXrpUsdSpot();
     if (rate != null && rate > 0) {
       const previousRate = this.xrpUsdCache?.rate ?? rate;
@@ -297,13 +308,12 @@ export class ExchangeService {
   }
 
   private async fetchXrpUsdSpot(): Promise<number | null> {
-    const coinbase = await this.fetchFromCoinbase();
-    if (coinbase != null) return coinbase;
-
-    const coinGecko = await this.fetchFromCoinGecko();
-    if (coinGecko != null) return coinGecko;
-
-    return this.fetchFromBinance();
+    const [coinbase, coinGecko, binance] = await Promise.all([
+      this.fetchFromCoinbase(),
+      this.fetchFromCoinGecko(),
+      this.fetchFromBinance(),
+    ]);
+    return coinbase ?? coinGecko ?? binance;
   }
 
   private async fetchFromCoinbase(): Promise<number | null> {

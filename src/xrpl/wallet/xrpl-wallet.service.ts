@@ -31,22 +31,90 @@ export class XRPLWalletService {
     ? (process.env.RLUSD_ISSUER_MAINNET || '') // Must be configured in production
     : (process.env.RLUSD_ISSUER_TESTNET || 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'); // Testnet fallback
 
-  /**
-   * Get issuer address for a given network
-   */
-  private getIssuerForNetwork(network: 'testnet' | 'mainnet', token: 'USDT' | 'USDC' | 'RLUSD'): string {
-    if (token === 'USDT') {
-      return network === 'mainnet'
-        ? 'rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B' // Tether (USDT) on mainnet
-        : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet issuer
-    } else if (token === 'USDC') {
-      return network === 'mainnet'
-        ? 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY' // Circle (USDC) on mainnet
-        : 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY'; // Testnet issuer
+  private readonly XRPL_CONNECT_TIMEOUT_MS = 4_000;
+  private readonly XRPL_REQUEST_TIMEOUT_MS = 5_000;
+  private sharedClient: Client | null = null;
+  private sharedClientConnecting: Promise<Client> | null = null;
+
+  private isAccountNotFound(error: unknown): boolean {
+    const errorObj = error as { data?: { error?: string; error_message?: string; error_code?: number }; message?: string };
+    const message = error instanceof Error ? error.message : String(errorObj?.message ?? error ?? '');
+    return (
+      message.includes('actNotFound') ||
+      message.includes('Account not found') ||
+      message.includes('accountNotFound') ||
+      errorObj?.data?.error === 'actNotFound' ||
+      errorObj?.data?.error_message === 'accountNotFound' ||
+      errorObj?.data?.error_message === 'Account not found.' ||
+      errorObj?.data?.error_code === 19
+    );
+  }
+
+  private async getSharedClient(): Promise<Client> {
+    if (this.sharedClient?.isConnected()) {
+      return this.sharedClient;
     }
-    return network === 'mainnet'
-      ? (process.env.RLUSD_ISSUER_MAINNET || '')
-      : (process.env.RLUSD_ISSUER_TESTNET || 'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY');
+    if (this.sharedClientConnecting) {
+      return this.sharedClientConnecting;
+    }
+
+    this.sharedClientConnecting = (async () => {
+      if (this.sharedClient) {
+        try {
+          await this.sharedClient.disconnect();
+        } catch {
+          // Ignore teardown errors; we will open a fresh socket.
+        }
+        this.sharedClient = null;
+      }
+
+      const client = new Client(this.XRPL_SERVER, {
+        connectionTimeout: this.XRPL_CONNECT_TIMEOUT_MS,
+      });
+      await client.connect();
+      this.sharedClient = client;
+      client.on('disconnected', () => {
+        if (this.sharedClient === client) {
+          this.sharedClient = null;
+        }
+      });
+      return client;
+    })();
+
+    try {
+      return await this.sharedClientConnecting;
+    } finally {
+      this.sharedClientConnecting = null;
+    }
+  }
+
+  private async requestWithTimeout<T>(
+    client: Client,
+    request: Record<string, unknown>,
+    timeoutMs = this.XRPL_REQUEST_TIMEOUT_MS
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        client.request(request) as Promise<T>,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('XRPL request timeout')), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Create an unfunded XRPL keypair. Use this on read paths so GET /balance
+   * never waits on the testnet faucet.
+   */
+  generateUnfundedWallet(): { address: string; secret: string } {
+    const seed = keypairs.generateSeed();
+    const keypair = keypairs.deriveKeypair(seed);
+    const address = keypairs.deriveAddress(keypair.publicKey);
+    return { address, secret: seed };
   }
 
   /**
@@ -113,143 +181,20 @@ export class XRPLWalletService {
    */
   async getBalance(xrplAddress: string): Promise<number> {
     try {
-      // #region agent log
-
-      // #endregion
-      // Log network and address for debugging funded account issues
-      console.log('[DEBUG] getBalance: Querying XRPL', {
-        network: this.XRPL_NETWORK,
-        server: this.XRPL_SERVER,
-        address: xrplAddress,
-        note: 'If user funded but account not found, check network mismatch (testnet vs mainnet)',
+      const client = await this.getSharedClient();
+      const accountInfo = await this.requestWithTimeout<any>(client, {
+        command: 'account_info',
+        account: xrplAddress,
+        ledger_index: 'validated',
       });
-      const client = new Client(this.XRPL_SERVER);
-      await client.connect();
 
-      try {
-        const accountInfo = await (client as any).request({
-          command: 'account_info',
-          account: xrplAddress,
-          ledger_index: 'validated',
-        });
-
-        await client.disconnect();
-
-        // Convert drops to XRP (1 XRP = 1,000,000 drops)
-        // Balance is returned as a string in drops format
-        const balanceDrops = accountInfo.result.account_data.Balance;
-        // dropsToXrp expects a string, ensure it's always a string
-        const dropsStr: string = String(balanceDrops);
-        const balance = dropsToXrp(dropsStr);
-        // #region agent log
-        
-        // #endregion
-        return typeof balance === 'string' ? parseFloat(balance) : balance;
-      } catch (error) {
-        await client.disconnect();
-        // #region agent log
-        // errorData variable removed (was unused)
-        const errorObj = error as any;
-        // errorDetails variable removed (was unused)
-       
-        // #endregion
-        // If account doesn't exist, return 0
-        const isAccountNotFound = (error instanceof Error && (error.message.includes('actNotFound') || error.message.includes('Account not found'))) || 
-          (error as any)?.data?.error === 'actNotFound' || 
-          ((error as any)?.data?.error_message === 'accountNotFound' || (error as any)?.data?.error_message === 'Account not found.') ||
-          (error as any)?.data?.error_code === 19;
-        // #region agent log fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:103',message:'getBalance: Checking accountNotFound',data:{xrplAddress,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        if (isAccountNotFound) {
-          // Account doesn't exist yet - check the other network in case of mismatch
-          const otherNetwork = this.XRPL_NETWORK === 'mainnet' ? 'testnet' : 'mainnet';
-          const otherServer = otherNetwork === 'mainnet' 
-            ? 'wss://xrplcluster.com'
-            : 'wss://s.altnet.rippletest.net:51233';
-          
-          console.log('[WARNING] Account not found on configured network, checking other network', {
-            configuredNetwork: this.XRPL_NETWORK,
-            checkingNetwork: otherNetwork,
-            address: xrplAddress,
-          });
-          
-          // Try the other network
-          try {
-            const otherClient = new Client(otherServer);
-            await otherClient.connect();
-            try {
-              const otherAccountInfo = await (otherClient as any).request({
-                command: 'account_info',
-                account: xrplAddress,
-                ledger_index: 'validated',
-              });
-              await otherClient.disconnect();
-              
-              const otherBalanceDrops = otherAccountInfo.result.account_data.Balance;
-              const otherBalance = dropsToXrp(String(otherBalanceDrops));
-              
-              console.log('[CRITICAL] Network mismatch detected!', {
-                address: xrplAddress,
-                configuredNetwork: this.XRPL_NETWORK,
-                actualNetwork: otherNetwork,
-                balance: otherBalance,
-                action: `Set XRPL_NETWORK=${otherNetwork} in environment variables to fix this permanently`,
-                note: 'Returning balance from correct network, but please update environment variable',
-              });
-              
-              // Return the balance from the correct network so user sees their funds
-              // But log the mismatch so it can be fixed
-              return typeof otherBalance === 'string' ? parseFloat(otherBalance) : otherBalance;
-            } catch (otherError) {
-              await otherClient.disconnect();
-              // Account not found on either network
-              console.log('[INFO] Account not found on either network', {
-                address: xrplAddress,
-                testnet: this.XRPL_NETWORK === 'testnet' ? 'not found' : 'not checked',
-                mainnet: this.XRPL_NETWORK === 'mainnet' ? 'not found' : 'not found',
-                note: 'This is expected for new wallets that haven\'t been funded yet',
-              });
-            }
-          } catch (checkError) {
-            console.log('[DEBUG] Could not check other network', {
-              address: xrplAddress,
-              error: checkError instanceof Error ? checkError.message : String(checkError),
-            });
-          }
-          
-          // Account doesn't exist yet - this is expected for new wallets, return 0 silently
-          return 0;
-        }
-        // Log error details for Render debugging only for unexpected errors
-        console.log('[DEBUG] getBalance inner catch (unexpected error):', {
-          xrplAddress,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          errorData: errorObj?.data,
-        });
-        throw error;
-      }
+      const balanceDrops = accountInfo.result.account_data.Balance;
+      const balance = dropsToXrp(String(balanceDrops));
+      return typeof balance === 'string' ? parseFloat(balance) : balance;
     } catch (error) {
-      // #region agent log
-      // errorData variable removed (was unused)
-      const errorObj = error as any;
-      // errorDetails variable removed (was unused)
-      const isAccountNotFound = (error instanceof Error && error.message.includes('actNotFound')) || 
-        errorObj?.data?.error === 'actNotFound' || 
-        errorObj?.data?.error_message === 'accountNotFound' ||
-        errorObj?.data?.error_code === 19;
-     
-      // #endregion
-      // Only log if it's not an expected account not found error
-      if (!isAccountNotFound) {
+      if (!this.isAccountNotFound(error)) {
         console.error('Error getting XRPL balance:', error);
-        console.log('[DEBUG] getBalance outer catch (unexpected error):', {
-          xrplAddress,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          errorData: errorObj?.data,
-        });
       }
-      // Account not found errors are expected for new wallets - suppress logging
-      // Fallback to 0 if there's an error
       return 0;
     }
   }
@@ -590,293 +535,31 @@ export class XRPLWalletService {
     return xrpToDrops(String(xrp));
   }
 
+  private tokenBalanceFromLines(lines: any[], currency: string, issuer: string): number {
+    const trustLine = (lines || []).find((line: any) =>
+      line.currency === currency && line.account === issuer
+    );
+    if (!trustLine) return 0;
+    return Math.max(0, parseFloat(trustLine.balance || '0'));
+  }
+
   /**
    * Get token balance for an XRPL address
-   * @param xrplAddress The XRPL address
-   * @param currency The currency code (e.g., 'USD', 'USDT', 'USDC')
-   * @param issuer The issuer address for the token
-   * @returns The token balance as a number
    */
   async getTokenBalance(xrplAddress: string, currency: string, issuer: string): Promise<number> {
+    if (!issuer) return 0;
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:345',message:'getTokenBalance: Entry',data:{xrplAddress,currency,issuer},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      // Log network and address for debugging funded account issues
-      console.log('[DEBUG] getTokenBalance: Querying XRPL', {
-        network: this.XRPL_NETWORK,
-        server: this.XRPL_SERVER,
-        address: xrplAddress,
-        currency,
-        issuer,
-        note: 'If user funded but account not found, check network mismatch (testnet vs mainnet)',
+      const client = await this.getSharedClient();
+      const accountLines = await this.requestWithTimeout<any>(client, {
+        command: 'account_lines',
+        account: xrplAddress,
+        ledger_index: 'validated',
       });
-      const client = new Client(this.XRPL_SERVER);
-      await client.connect();
-
-      try {
-        const accountLines = await (client as any).request({
-          command: 'account_lines',
-          account: xrplAddress,
-          ledger_index: 'validated',
-        });
-
-        await client.disconnect();
-
-        // Find the trust line for this currency and issuer
-        const lines = accountLines.result.lines || [];
-        const trustLine = lines.find((line: any) => 
-          line.currency === currency && line.account === issuer
-        );
-
-        if (!trustLine) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:365',message:'getTokenBalance: No trust line found on configured network',data:{xrplAddress,currency,issuer,linesCount:lines.length,network:this.XRPL_NETWORK},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
-          
-          // Account exists but no trust line found - might be network mismatch
-          // Check other network if we suspect mismatch (only for USD tokens)
-          if (currency === 'USD' && (issuer === this.USDT_ISSUER || issuer === this.USDC_ISSUER)) {
-            const otherNetwork = this.XRPL_NETWORK === 'mainnet' ? 'testnet' : 'mainnet';
-            const otherServer = otherNetwork === 'mainnet' 
-              ? 'wss://xrplcluster.com'
-              : 'wss://s.altnet.rippletest.net:51233';
-            
-            // Determine the correct issuer for the other network
-            const isUSDT = issuer === this.USDT_ISSUER;
-            const otherIssuer = isUSDT 
-              ? this.getIssuerForNetwork(otherNetwork, 'USDT')
-              : this.getIssuerForNetwork(otherNetwork, 'USDC');
-            
-            console.log('[WARNING] No trust line found on configured network, checking other network for potential mismatch', {
-              configuredNetwork: this.XRPL_NETWORK,
-              checkingNetwork: otherNetwork,
-              address: xrplAddress,
-              currency,
-              configuredIssuer: issuer,
-              otherNetworkIssuer: otherIssuer,
-            });
-            
-            try {
-              const otherClient = new Client(otherServer);
-              await otherClient.connect();
-              try {
-                // Check if account exists on other network
-                await (otherClient as any).request({
-                  command: 'account_info',
-                  account: xrplAddress,
-                  ledger_index: 'validated',
-                });
-                
-                // Account exists on other network - check token balance
-                const otherAccountLines = await (otherClient as any).request({
-                  command: 'account_lines',
-                  account: xrplAddress,
-                  ledger_index: 'validated',
-                });
-                
-                await otherClient.disconnect();
-                
-                const otherLines = otherAccountLines.result.lines || [];
-                const otherTrustLine = otherLines.find((line: any) => 
-                  line.currency === currency && line.account === otherIssuer
-                );
-                
-                if (otherTrustLine) {
-                  const otherBalance = Math.max(0, parseFloat(otherTrustLine.balance || '0'));
-                  
-                  console.log('[CRITICAL] Network mismatch detected (token balance)! Account exists on both networks, using other network balance', {
-                    address: xrplAddress,
-                    currency,
-                    configuredIssuer: issuer,
-                    actualIssuer: otherIssuer,
-                    configuredNetwork: this.XRPL_NETWORK,
-                    actualNetwork: otherNetwork,
-                    balance: otherBalance,
-                    action: `Set XRPL_NETWORK=${otherNetwork} in environment variables to fix this permanently`,
-                    note: 'Account exists on both networks, but token balance found on other network',
-                  });
-                  
-                  return otherBalance;
-                }
-              } catch (otherError) {
-                await otherClient.disconnect();
-                // Continue and return 0 if other network check fails
-              }
-            } catch (checkError) {
-              // Continue and return 0 if check fails
-            }
-          }
-          
-          // No trust line found, return 0
-          return 0;
-        }
-
-        // Balance is returned as a string, convert to number
-        // Negative balance means the account owes tokens (shouldn't happen for user wallets)
-        const balance = parseFloat(trustLine.balance || '0');
-        const finalBalance = Math.max(0, balance); // Return 0 if negative
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:372',message:'getTokenBalance: Success',data:{xrplAddress,currency,issuer,finalBalance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        return finalBalance;
-      } catch (error) {
-        await client.disconnect();
-        // #region agent log
-        const errorData = error instanceof Error ? {message:error.message,stack:error.stack} : {error:String(error)};
-        const errorObj = error as any;
-        const errorDetails = {errorData,hasData:!!errorObj?.data,dataError:errorObj?.data?.error,dataErrorCode:errorObj?.data?.error_code,dataErrorMessage:errorObj?.data?.error_message};
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:376',message:'getTokenBalance: Inner catch',data:{xrplAddress,currency,issuer,errorDetails},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        // If account doesn't exist, return 0
-        const isAccountNotFound = (error instanceof Error && (error.message.includes('actNotFound') || error.message.includes('Account not found') || error.message.includes('accountNotFound'))) || 
-          (error as any)?.data?.error === 'actNotFound' || 
-          ((error as any)?.data?.error_message === 'accountNotFound' || (error as any)?.data?.error_message === 'Account not found.') ||
-          (error as any)?.data?.error_code === 19;
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:382',message:'getTokenBalance: Checking accountNotFound',data:{xrplAddress,currency,issuer,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        if (isAccountNotFound) {
-          // Account doesn't exist yet - check the other network in case of mismatch
-          const otherNetwork = this.XRPL_NETWORK === 'mainnet' ? 'testnet' : 'mainnet';
-          const otherServer = otherNetwork === 'mainnet' 
-            ? 'wss://xrplcluster.com'
-            : 'wss://s.altnet.rippletest.net:51233';
-          
-          // Determine the correct issuer for the other network
-          // If we're checking for USD currency, determine if it's USDT or USDC based on the issuer
-          let otherIssuer = issuer;
-          if (currency === 'USD') {
-            // Determine token type from issuer address
-            const isUSDT = issuer === this.USDT_ISSUER;
-            const isUSDC = issuer === this.USDC_ISSUER;
-            if (isUSDT || isUSDC) {
-              // Get the correct issuer for the other network
-              otherIssuer = isUSDT 
-                ? this.getIssuerForNetwork(otherNetwork, 'USDT')
-                : this.getIssuerForNetwork(otherNetwork, 'USDC');
-            }
-          }
-          
-          console.log('[WARNING] Account not found on configured network (token balance), checking other network', {
-            configuredNetwork: this.XRPL_NETWORK,
-            checkingNetwork: otherNetwork,
-            address: xrplAddress,
-            currency,
-            configuredIssuer: issuer,
-            otherNetworkIssuer: otherIssuer,
-          });
-          
-          // Try the other network
-          try {
-            const otherClient = new Client(otherServer);
-            await otherClient.connect();
-            try {
-              // First check if account exists on other network
-              await (otherClient as any).request({
-                command: 'account_info',
-                account: xrplAddress,
-                ledger_index: 'validated',
-              });
-              
-              // Account exists, now check token balance
-              const otherAccountLines = await (otherClient as any).request({
-                command: 'account_lines',
-                account: xrplAddress,
-                ledger_index: 'validated',
-              });
-              
-              await otherClient.disconnect();
-              
-              // Find the trust line for this currency and issuer (using correct issuer for other network)
-              const lines = otherAccountLines.result.lines || [];
-              const trustLine = lines.find((line: any) => 
-                line.currency === currency && line.account === otherIssuer
-              );
-              
-              const otherBalance = trustLine ? Math.max(0, parseFloat(trustLine.balance || '0')) : 0;
-              
-              console.log('[CRITICAL] Network mismatch detected (token balance)!', {
-                address: xrplAddress,
-                currency,
-                configuredIssuer: issuer,
-                actualIssuer: otherIssuer,
-                configuredNetwork: this.XRPL_NETWORK,
-                actualNetwork: otherNetwork,
-                balance: otherBalance,
-                hasTrustLine: !!trustLine,
-                action: `Set XRPL_NETWORK=${otherNetwork} in environment variables to fix this permanently`,
-                note: 'Returning balance from correct network, but please update environment variable',
-              });
-              
-              // Return the balance from the correct network
-              return otherBalance;
-            } catch (otherError) {
-              await otherClient.disconnect();
-              // Account not found on either network or no token balance
-              const isOtherAccountNotFound = (otherError instanceof Error && (otherError.message.includes('actNotFound') || otherError.message.includes('Account not found'))) || 
-                (otherError as any)?.data?.error === 'actNotFound' || 
-                ((otherError as any)?.data?.error_message === 'accountNotFound' || (otherError as any)?.data?.error_message === 'Account not found.') ||
-                (otherError as any)?.data?.error_code === 19;
-              
-              console.log('[INFO] Account check on other network', {
-                address: xrplAddress,
-                currency,
-                issuer,
-                otherNetwork,
-                accountNotFound: isOtherAccountNotFound,
-                error: otherError instanceof Error ? otherError.message : String(otherError),
-                note: isOtherAccountNotFound 
-                  ? 'Account not found on either network' 
-                  : 'Account found but no trust line or other error',
-              });
-            }
-          } catch (checkError) {
-            console.log('[DEBUG] Could not check other network (token balance)', {
-              address: xrplAddress,
-              currency,
-              issuer,
-              error: checkError instanceof Error ? checkError.message : String(checkError),
-            });
-          }
-          
-          // Account doesn't exist yet - this is expected for new wallets, return 0 silently
-          return 0;
-        }
-        // Log error details for Render debugging only for unexpected errors
-        console.log('[DEBUG] getTokenBalance inner catch (unexpected error):', {
-          xrplAddress,
-          currency,
-          issuer,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          errorData: errorObj?.data,
-        });
-        throw error;
-      }
+      return this.tokenBalanceFromLines(accountLines.result.lines || [], currency, issuer);
     } catch (error) {
-      // #region agent log
-      const errorData = error instanceof Error ? {message:error.message,stack:error.stack} : {error:String(error)};
-      const errorObj = error as any;
-      const errorDetails = {errorData,hasData:!!errorObj?.data,dataError:errorObj?.data?.error,dataErrorCode:errorObj?.data?.error_code,dataErrorMessage:errorObj?.data?.error_message};
-      const isAccountNotFound = (error instanceof Error && error.message.includes('actNotFound')) || 
-        errorObj?.data?.error === 'actNotFound' || 
-        errorObj?.data?.error_message === 'accountNotFound' ||
-        errorObj?.data?.error_code === 19;
-      fetch('http://127.0.0.1:7243/ingest/5849700e-dd46-4089-94c8-9789cbf9aa00',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'xrpl-wallet.service.ts:390',message:'getTokenBalance: Outer catch',data:{xrplAddress,currency,issuer,errorDetails,isAccountNotFound},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      // Only log if it's not an expected account not found error
-      if (!isAccountNotFound) {
+      if (!this.isAccountNotFound(error)) {
         console.error(`Error getting ${currency} balance:`, error);
-        console.log('[DEBUG] getTokenBalance outer catch (unexpected error):', {
-          xrplAddress,
-          currency,
-          issuer,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          errorData: errorObj?.data,
-        });
       }
-      // Account not found errors are expected for new wallets - suppress logging
-      // Fallback to 0 if there's an error
       return 0;
     }
   }
@@ -906,7 +589,7 @@ export class XRPLWalletService {
   }
 
   /**
-   * Get all balances (XRP, USDT, USDC, RLUSD) for an XRPL address
+   * Get all balances (XRP, USDT, USDC, RLUSD) for an XRPL address using one socket.
    */
   async getAllBalances(xrplAddress: string): Promise<{
     xrp: number;
@@ -915,57 +598,43 @@ export class XRPLWalletService {
     rlusd: number;
   }> {
     try {
-      const [xrp, usdt, usdc, rlusd] = await Promise.all([
-        this.getBalance(xrplAddress).catch(err => {
-          console.error('[XRPL] Error getting XRP balance:', err);
-          return 0; // Return 0 for individual failures, but continue
+      const client = await this.getSharedClient();
+      const [accountInfo, accountLines] = await Promise.all([
+        this.requestWithTimeout<any>(client, {
+          command: 'account_info',
+          account: xrplAddress,
+          ledger_index: 'validated',
         }),
-        this.getUSDTBalance(xrplAddress).catch(err => {
-          console.error('[XRPL] Error getting USDT balance:', err);
-          return 0;
-        }),
-        this.getUSDCBalance(xrplAddress).catch(err => {
-          console.error('[XRPL] Error getting USDC balance:', err);
-          return 0;
-        }),
-        this.getRLUSDBalance(xrplAddress).catch(err => {
-          console.error('[XRPL] Error getting RLUSD balance:', err);
-          return 0;
+        this.requestWithTimeout<any>(client, {
+          command: 'account_lines',
+          account: xrplAddress,
+          ledger_index: 'validated',
         }),
       ]);
 
-      console.log('[XRPL] getAllBalances result:', {
-        xrplAddress,
-        xrp,
-        usdt,
-        usdc,
-        rlusd,
-        network: this.XRPL_NETWORK,
-      });
+      const balanceDrops = accountInfo.result.account_data.Balance;
+      const xrpRaw = dropsToXrp(String(balanceDrops));
+      const xrp = typeof xrpRaw === 'string' ? parseFloat(xrpRaw) : xrpRaw;
+      const lines = accountLines.result.lines || [];
 
       return {
         xrp,
-        usdt,
-        usdc,
-        rlusd,
+        usdt: this.tokenBalanceFromLines(lines, 'USD', this.USDT_ISSUER),
+        usdc: this.tokenBalanceFromLines(lines, 'USD', this.USDC_ISSUER),
+        rlusd: this.RLUSD_ISSUER ? this.tokenBalanceFromLines(lines, 'USD', this.RLUSD_ISSUER) : 0,
       };
     } catch (error) {
-      console.error('[XRPL] Critical error getting all balances:', {
+      if (this.isAccountNotFound(error)) {
+        return { xrp: 0, usdt: 0, usdc: 0, rlusd: 0 };
+      }
+      console.error('[XRPL] Error getting all balances:', {
         error: error instanceof Error ? error.message : String(error),
         xrplAddress,
         network: this.XRPL_NETWORK,
       });
-      // Still return zeros but log the error for debugging
-      return {
-        xrp: 0,
-        usdt: 0,
-        usdc: 0,
-        rlusd: 0,
-      };
+      throw error;
     }
   }
 }
 
 export const xrplWalletService = new XRPLWalletService();
-
-
